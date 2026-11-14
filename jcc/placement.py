@@ -155,14 +155,18 @@ def _quiet(settings: Path) -> None:
         pass                                        # the window opens all the same
 
 
-def profile(cfg, address: str = "http://127.0.0.1:8765") -> list[str]:
+def profile(cfg, address: str = "http://127.0.0.1:8765", folder_name: str = "window-profile") -> list[str]:
     """Edge's arguments for JARVIS's own browser profile, where its window may speak and listen the moment it opens.
 
     A window that has just opened in an ordinary profile may not make sound or use the microphone until someone clicks in
     it; "Hey JARVIS" would then need a click before anything is heard or said. In its own profile the window is allowed to
     play sound at once, and the microphone is allowed for JARVIS's own address (and for nothing else) from the start.
-    The profile lives in JARVIS's settings folder, which the assistant itself can never read."""
-    folder = cfg.state_dir / "window-profile"
+    The profile lives in JARVIS's settings folder, which the assistant itself can never read.
+
+    folder_name: the small listening window has a profile of its own (see jcc/mini.py), so that it runs in a browser of
+    its own: a browser takes the size, the place and full screen of every window it opens from the command line it was
+    first started with, and keeps one remembered size per address."""
+    folder = cfg.state_dir / folder_name
     settings = folder / "Default" / "Preferences"
     if not settings.exists():
         try:

@@ -3,7 +3,7 @@
 #
 #   bash install.sh [--install-dir DIR] [--vault DIR] [--bundle-dir DIR] [--no-app]
 #                   [--install-obsidian | --no-obsidian] [--wake-word | --no-wake-word]
-#                   [--quiet] [--source DIR] [--python PATH]
+#                   [--login | --no-login] [--quiet] [--source DIR] [--python PATH]
 #
 # What it does, in order:
 #   1. Finds python3, version 3.11 or newer. If there is none it says how to get one and stops.
@@ -16,12 +16,16 @@
 #      menu-bar icon with its shortcuts): built here when Apple's command line tools are installed, otherwise the
 #      ready-built ones from the download.
 #   6. Runs "python3 -m jcc.firstrun" to set up the notes vault (an Obsidian vault) and remember where it is.
-#   7. Makes ~/Applications/JARVIS.app (or in --bundle-dir), a plain app that starts "python3 -m jcc.desktop".
-#   8. Optionally installs Obsidian (Homebrew, or opens its download page).
-#   9. Writes uninstall.sh into the install folder.
+#   7. Makes ~/Applications/JARVIS.app (or in --bundle-dir), a plain app with JARVIS's icon that starts
+#      "python3 -m jcc.desktop".
+#   8. Optionally starts JARVIS in the background when you log in, as on Windows, so "Hey JARVIS", the menu-bar icon and
+#      the shortcuts work without opening it first (a LaunchAgent in ~/Library/LaunchAgents; the uninstaller removes it).
+#   9. Optionally installs Obsidian (Homebrew, or opens its download page).
+#  10. Writes uninstall.sh into the install folder, and offers to open JARVIS.
 #
-# This script is new. It is run on a real Mac at GitHub for every change (into a temporary folder, with --quiet);
-# nobody has yet run it by double-clicking in Finder. Bash 3.2 (the one macOS ships) is enough.
+# It is run on a real Mac at GitHub for every change: once with --quiet, and once from the downloaded package through
+# "Install JARVIS.command" with its questions answered, then opened and uninstalled. Bash 3.2 (the one macOS ships) is
+# enough.
 set -euo pipefail
 
 INSTALL_DIR="$HOME/Applications/JARVIS"
@@ -30,6 +34,7 @@ VAULT=""
 MAKE_APP=1
 OBSIDIAN="ask"
 WAKE="ask"
+LOGIN="ask"
 QUIET=0
 SOURCE=""
 PYTHON=""
@@ -47,10 +52,12 @@ while [ $# -gt 0 ]; do
     --no-obsidian) OBSIDIAN="no"; shift ;;
     --wake-word) WAKE="yes"; shift ;;
     --no-wake-word) WAKE="no"; shift ;;
+    --login) LOGIN="yes"; shift ;;
+    --no-login) LOGIN="no"; shift ;;
     --quiet) QUIET=1; shift ;;
     --source) SOURCE="${2:?--source needs a folder}"; shift 2 ;;
     --python) PYTHON="${2:?--python needs a path}"; shift 2 ;;
-    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
     *) fail "unknown option: $1 (try --help)" ;;
   esac
 done
@@ -102,6 +109,12 @@ if ! PY="$(find_python)" || [ -z "$PY" ]; then
   exit 1
 fi
 say "Using Python: $PY"
+# The Python from python.org has no list of trusted certificates until its "Install Certificates" step is run, and then
+# every download fails. macOS keeps such a list itself; it is used where Python has none (JARVIS does the same itself).
+if [ -z "${SSL_CERT_FILE:-}" ] && [ -f /etc/ssl/cert.pem ] && \
+   ! "$PY" -c 'import os, ssl, sys; p = ssl.get_default_verify_paths(); sys.exit(0 if p.cafile and os.path.isfile(p.cafile) else 1)' 2>/dev/null; then
+  export SSL_CERT_FILE=/etc/ssl/cert.pem
+fi
 
 # ---------------------------------------------------------------------------------------------------------- files
 mkdir -p "$INSTALL_DIR"
@@ -120,7 +133,8 @@ trap 'rm -rf "$work"' EXIT
     ! -path './website/*' ! -path './dist/*' ! -path '*/__pycache__/*' ! -name '*.pyc' ! -name '.DS_Store' \
     ! -path './LEDGER.md' ! -path './scripts/deploy.py' ! -path './config/local.toml' ! -path './.python' \
     ! -path './.jarvis-files' ! -path './.app-bundle' ! -path './install.sh' ! -path './uninstall.sh' \
-    ! -path './Install JARVIS.command' ! -path './sound_level.swift' ! -path './menu_bar.swift' ! -path './.venv/*' | sed 's|^\./||' | LC_ALL=C sort ) > "$work/files"
+    ! -path './Install JARVIS.command' ! -path './sound_level.swift' ! -path './menu_bar.swift' ! -path './.venv/*' \
+    ! -path './.login-agent' | sed 's|^\./||' | LC_ALL=C sort ) > "$work/files"
 
 if [ "$SOURCE" != "$INSTALL_DIR" ]; then
   # A plain copy loop: newer macOS versions ship a different rsync, and cp behaves the same everywhere.
@@ -251,9 +265,18 @@ if [ "$MAKE_APP" = 1 ]; then
   <key>NSMicrophoneUsageDescription</key><string>JARVIS listens when you talk to it, and for "Hey JARVIS" when you have switched that on.</string>
   <key>NSAppleEventsUsageDescription</key><string>JARVIS opens and works in other apps when you ask it to.</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>LSUIElement</key><true/>
 </dict>
 </plist>
 PLIST
+  # JARVIS's icon, drawn by JARVIS itself and turned into a Mac icon by the Mac's own sips.
+  if ( cd "$INSTALL_DIR" && "$PY" -m jcc.icon "$work/icon.png" 1024 ) && \
+     sips -s format icns "$work/icon.png" --out "$bundle/Contents/Resources/AppIcon.icns" >/dev/null 2>&1; then
+    touch "$bundle"                                   # (so Finder shows the new icon at once)
+  else
+    say "The app's icon could not be made; JARVIS.app has the plain icon."
+  fi
   # The launcher names the install folder; printf %q quotes it so any folder name is safe in the script.
   {
     printf '#!/bin/bash\n'
@@ -266,6 +289,41 @@ PLIST
   chmod 755 "$bundle/Contents/MacOS/JARVIS"
   printf '%s\n' "$bundle" > "$INSTALL_DIR/.app-bundle"
   say "Made $bundle"
+fi
+
+# ----------------------------------------------------------------------------------------------- start at login
+# As on Windows: JARVIS starts in the background when you log in (no window), so "Hey JARVIS", the menu-bar icon and
+# the shortcuts are there at once. It is started through JARVIS.app, so what macOS allows JARVIS (the microphone,
+# Accessibility) is the same either way. It takes effect from the next login.
+agent="$HOME/Library/LaunchAgents/local.jarvis.background.plist"
+want_login=0
+if [ "$LOGIN" = yes ]; then want_login=1
+elif [ "$LOGIN" = ask ] && [ -f "$agent" ]; then want_login=1          # chosen at an earlier install: kept
+elif [ "$LOGIN" = ask ] && [ "$QUIET" = 0 ]; then
+  ask_yes 'Start JARVIS in the background when you log in, so "Hey JARVIS" works without opening it?' y && want_login=1
+elif [ "$LOGIN" = ask ]; then want_login=1                            # --quiet: as on Windows
+fi
+if [ "$want_login" = 1 ]; then
+  mkdir -p "$HOME/Library/LaunchAgents"
+  if [ "$MAKE_APP" = 1 ]; then
+    start_with=(/usr/bin/open -g -j -a "$bundle" --args --background)
+  else
+    start_with=("$(head -n 1 "$INSTALL_DIR/.python")" -m jcc.desktop --background)
+  fi
+  # Written by Python's own plistlib, so any folder name is written correctly.
+  "$PY" - "$agent" "$INSTALL_DIR" "${start_with[@]}" <<'AGENT'
+import plistlib, sys
+path, folder, argv = sys.argv[1], sys.argv[2], sys.argv[3:]
+with open(path, "wb") as out:
+    plistlib.dump({"Label": "local.jarvis.background", "ProgramArguments": argv, "WorkingDirectory": folder,
+                   "RunAtLoad": True, "KeepAlive": False, "ProcessType": "Interactive"}, out)
+AGENT
+  printf '%s\n' "$agent" > "$INSTALL_DIR/.login-agent"
+  say "JARVIS will start in the background when you log in."
+elif [ -f "$agent" ] && [ "$LOGIN" = no ]; then
+  launchctl bootout "gui/$(id -u)" "$agent" >/dev/null 2>&1 || true
+  rm -f "$agent" "$INSTALL_DIR/.login-agent"
+  say "JARVIS will no longer start when you log in."
 fi
 
 # ------------------------------------------------------------------------------------------------------- Obsidian
@@ -293,3 +351,7 @@ say ""
 say "The first time JARVIS presses a button in another app, looks at the screen or listens, macOS asks you to allow it."
 say "You can also switch these on beforehand: System Settings, Privacy & Security, then Accessibility, Screen & System"
 say "Audio Recording, and Microphone. JARVIS's Connections page shows which are allowed."
+if [ "$QUIET" = 0 ] && [ "$MAKE_APP" = 1 ]; then
+  say ""
+  ask_yes "Open JARVIS now?" y && open "$bundle"
+fi

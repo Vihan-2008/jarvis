@@ -56,6 +56,35 @@ class OnAMac(unittest.TestCase):
         return box
 
 
+class TestCertificates(unittest.TestCase):
+    """python.org's Python for macOS has no trusted certificates until its "Install Certificates" step: every secure web
+    address then fails. The Mac's own list is used instead."""
+
+    def run_it(self, cafile_there=False, own=True, platform="darwin", already=None):
+        import collections
+        import jcc
+        import ssl
+        paths = collections.namedtuple("Paths", "cafile capath")("/nowhere/cert.pem" if not cafile_there else __file__, "/nowhere/certs")
+        env = {} if already is None else {"SSL_CERT_FILE": already}
+        real_isfile = os.path.isfile
+        with mock.patch.dict(os.environ, env, clear=False), mock.patch("sys.platform", platform), \
+                mock.patch.object(ssl, "get_default_verify_paths", lambda: paths), \
+                mock.patch("os.path.isfile", lambda path: own if path == "/etc/ssl/cert.pem" else real_isfile(path)):
+            if already is None:
+                os.environ.pop("SSL_CERT_FILE", None)
+            said = jcc.trust_store()
+            return said, os.environ.get("SSL_CERT_FILE")
+
+    def test_the_macs_own_list_is_used_where_python_has_none(self):
+        self.assertEqual(self.run_it(), ("/etc/ssl/cert.pem", "/etc/ssl/cert.pem"))
+
+    def test_nothing_is_changed_where_it_is_not_needed(self):
+        self.assertEqual(self.run_it(cafile_there=True), ("", None), "Python has its own list (Homebrew's Python, or after Install Certificates)")
+        self.assertEqual(self.run_it(platform="win32"), ("", None))
+        self.assertEqual(self.run_it(own=False), ("", None), "a Mac without the file: nothing to point at")
+        self.assertEqual(self.run_it(already="/my/own.pem"), ("", "/my/own.pem"), "the owner's own choice stays")
+
+
 class TestTheToolsOffered(OnAMac):
     def test_the_tools_that_work_in_other_apps_windows_are_offered_on_a_mac_with_its_own_keys(self):
         names = {tool["name"] for tool in voice_tools.offered(full=True)}

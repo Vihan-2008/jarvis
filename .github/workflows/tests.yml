@@ -59,8 +59,10 @@ jobs:
       - name: The Mac installer installs into a temporary folder
         if: ${{ !cancelled() }}
         run: |
-          bash installer/mac/install.sh --quiet --no-obsidian --no-wake-word --install-dir "$RUNNER_TEMP/JARVIS" \
+          bash installer/mac/install.sh --quiet --no-obsidian --no-wake-word --no-login --install-dir "$RUNNER_TEMP/JARVIS" \
             --bundle-dir "$RUNNER_TEMP/Apps" --vault "$RUNNER_TEMP/Vault"
+          test -s "$RUNNER_TEMP/Apps/JARVIS.app/Contents/Resources/AppIcon.icns"
+          test ! -e "$HOME/Library/LaunchAgents/local.jarvis.background.plist"
           test -x "$RUNNER_TEMP/Apps/JARVIS.app/Contents/MacOS/JARVIS"
           test -x "$RUNNER_TEMP/JARVIS/bin/jarvis-sound-level"
           test -x "$RUNNER_TEMP/JARVIS/bin/jarvis-menu"
@@ -70,3 +72,33 @@ jobs:
         run: >
           python scripts/mac_live_check.py --sound-helper "$RUNNER_TEMP/helper/jarvis-sound-level"
           --menu-helper "$RUNNER_TEMP/helper/jarvis-menu" --wake-models "$RUNNER_TEMP/wake-models"
+      - name: From the downloaded package, as a person would (its questions answered), then opened and uninstalled
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p dist && cp "$RUNNER_TEMP/helper/jarvis-menu" "$RUNNER_TEMP/helper/jarvis-sound-level" dist/
+          python installer/mac/build.py --out "$RUNNER_TEMP/package"
+          ditto -x -k "$RUNNER_TEMP/package/JARVIS-mac.zip" "$RUNNER_TEMP/package/unpacked"
+          setup="$RUNNER_TEMP/package/unpacked/JARVIS Installer/Install JARVIS.command"
+          test -x "$setup"
+          # The questions, in order: start at login? yes. Open JARVIS now? no. Then Return closes the window.
+          printf 'y\nn\n\n' | "$setup" --no-wake-word --no-obsidian --install-dir "$RUNNER_TEMP/JARVIS2" \
+            --bundle-dir "$RUNNER_TEMP/Apps2" --vault "$RUNNER_TEMP/Vault2"
+          app="$RUNNER_TEMP/Apps2/JARVIS.app"
+          agent="$HOME/Library/LaunchAgents/local.jarvis.background.plist"
+          plutil -lint "$app/Contents/Info.plist" "$agent"
+          test -s "$app/Contents/Resources/AppIcon.icns"
+          plutil -p "$agent"
+          test -f "$RUNNER_TEMP/Vault2/Start here.md"
+          # Opened the way the login item opens it (through macOS's own "open", in the background).
+          open -g -j -a "$app" --args --background
+          for i in $(seq 1 60); do curl -fsS -o /dev/null http://127.0.0.1:8765/ && break; sleep 1; done
+          curl -fsS -o /dev/null http://127.0.0.1:8765/ && echo "JARVIS answers at 127.0.0.1:8765"
+          for i in $(seq 1 20); do pgrep -f "JARVIS2/bin/jarvis-menu" >/dev/null && break; sleep 1; done
+          pgrep -fl "JARVIS2/bin/jarvis-menu" && echo "the menu-bar icon is running"
+          bash "$RUNNER_TEMP/JARVIS2/uninstall.sh" --quiet
+          sleep 2
+          if curl -fsS -o /dev/null http://127.0.0.1:8765/; then echo "JARVIS is still running after the uninstall"; exit 1; fi
+          if pgrep -f "JARVIS2/bin/jarvis-menu"; then echo "the menu-bar icon is still running"; exit 1; fi
+          test ! -e "$RUNNER_TEMP/JARVIS2" && test ! -e "$app" && test ! -e "$agent"
+          test -f "$RUNNER_TEMP/Vault2/Start here.md"
+          echo "uninstalled: app, app bundle and login item gone; the notes vault kept"

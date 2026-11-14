@@ -3,9 +3,9 @@
 #
 #   bash uninstall.sh [--quiet] [--install-dir DIR]
 #
-# It never removes your notes vault or the app's data folder (settings, chats, sessions); it says where they are so
-# you can keep them, back them up or delete them yourself. Close JARVIS before running this.
-# This script is new and was not run on a real Mac by its authors.
+# It stops JARVIS if it is running, removes the start at login if the installer set one up, and never removes your
+# notes vault or the app's data folder (settings, chats, sessions); it says where they are so you can keep them, back
+# them up or delete them yourself. It is run on a real Mac at GitHub for every change.
 set -euo pipefail
 
 INSTALL_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -36,6 +36,22 @@ if [ "$QUIET" = 0 ]; then
   read -r -p "Remove JARVIS from $INSTALL_DIR and its app? Your notes and data are kept. [y/N] " answer || true
   case "$answer" in [Yy]*) ;; *) echo "Nothing was removed."; exit 0 ;; esac
 fi
+
+# JARVIS's own programs that are running from this folder: stopped, so nothing is left running from removed files.
+for pid in $(pgrep -f 'jcc(\.| )(desktop|gui|tray|local_history|cloud_memory|maintenance)|jarvis-menu|jarvis-sound-level' 2>/dev/null || true); do
+  where="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)"
+  program="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+  case "$where/ $program" in
+    "$INSTALL_DIR"/*|*"$INSTALL_DIR/"*) kill "$pid" 2>/dev/null || true ;;
+  esac
+done
+
+agent="$(head -n 1 "$INSTALL_DIR/.login-agent" 2>/dev/null || true)"
+case "$agent" in
+  "$HOME"/Library/LaunchAgents/local.jarvis.background.plist)
+    launchctl bootout "gui/$(id -u)" "$agent" >/dev/null 2>&1 || true
+    rm -f "$agent"; printf 'JARVIS no longer starts when you log in.\n' ;;
+esac
 
 bundle="$(head -n 1 "$INSTALL_DIR/.app-bundle" 2>/dev/null || true)"
 case "$bundle" in

@@ -6,8 +6,11 @@ stays on top, and goes away again when the conversation is over. It never takes 
 front: it is shown without being activated, and when it is clicked (Edge takes the keyboard then, whatever the window
 says) the keyboard goes straight back to the program that had it.
 
-It is an ordinary JARVIS page (opened with ?mini) in the same private browser profile, kept ready out of sight, so it
-appears at once and the microphone and the voice are already allowed. Edge's own title bar and border are taken off and
+It is an ordinary JARVIS page (opened with ?mini) in a private browser profile of its own, kept ready out of sight, so it
+appears at once and the microphone and the voice are already allowed. It used to share the app window's profile, and so
+the app window's browser: that browser opened it the way the app window had been opened (full screen, or maximised as it
+was last left), over the whole screen. In a browser of its own it opens at its own small size, and a window that comes
+up maximised anyway is put back to its own size before it is shown. Edge's own title bar and border are taken off and
 the window is cut down to the page, so what is seen is just the panel. It can be dragged anywhere with the mouse, and it
 comes back where it was put (measured from the corner of whichever screen is in use).
 
@@ -27,6 +30,7 @@ TITLE = "JARVIS · Listening"
 WIDE, HIGH, GAP = 372, 150, 18          # the size of the panel, and the room left to the screen's edge (screen points)
 FAR = -32000                            # a place far off every screen
 PAGE = "Chrome_RenderWidgetHostHWND"    # Edge's own name for the part of a window that shows the page
+PROFILE = "listening-window-profile"   # its own browser profile, beside the app window's ("window-profile")
 ROOM = 240                              # more than Edge ever keeps around the page (real pixels at the largest scaling)
 
 
@@ -102,6 +106,24 @@ class _Windows:
 
     def visible(self, handle: int) -> bool:
         return bool(self.user32.IsWindowVisible(self.c.c_void_p(handle)))
+
+    def unmaximise(self, handle: int) -> bool:
+        """If the window is maximised, give it back its own size, without showing or activating it. True if it was."""
+        pointer = self.c.c_void_p(handle)
+        if not self.user32.IsZoomed(pointer):
+            return False
+        wintypes = self.wintypes
+
+        class Placement(self.c.Structure):
+            _fields_ = [("length", wintypes.UINT), ("flags", wintypes.UINT), ("show", wintypes.UINT), ("low", wintypes.POINT),
+                        ("high", wintypes.POINT), ("normal", wintypes.RECT)]
+        place = Placement()
+        place.length = self.c.sizeof(Placement)
+        if not self.user32.GetWindowPlacement(pointer, self.c.byref(place)):
+            return False
+        place.show = 4 if self.user32.IsWindowVisible(pointer) else 0       # its own size; shown without being activated, or kept hidden
+        place.flags = 0
+        return bool(self.user32.SetWindowPlacement(pointer, self.c.byref(place)))
 
     def rect(self, handle: int) -> tuple[int, int, int, int]:
         box = self.wintypes.RECT()
@@ -205,6 +227,14 @@ class _Windows:
         self.user32.PostMessageW(self.c.c_void_p(handle), 0x0010, 0, 0)                                    # ask it to close
 
 
+def launch_argv(cfg, edge, url: str) -> list[str]:
+    """How Edge is started for the small window: in its own profile (so in a browser of its own), at its own small size,
+    far off every screen, and never full screen or maximised."""
+    from jcc import placement
+    return [str(edge), "--app=" + url, *placement.profile(cfg, url.split("?")[0], PROFILE), f"--window-size={WIDE},{HIGH}",
+            f"--window-position={FAR},{FAR}"]
+
+
 class Mini:
     def __init__(self, cfg, url: str, launch=None, windows=None, clock=time.time, pause=time.sleep):
         self.cfg, self.url, self.clock, self.pause = cfg, url.rstrip("/") + "/?mini", clock, pause
@@ -246,14 +276,12 @@ class Mini:
 
     # ------------------------------------------------------------------ opening it
     def _launch(self) -> bool:
-        from jcc import placement
         from jcc.desktop import edge_path
         edge = edge_path()
         if not edge:
             return False
         # It opens far off the screen, so nothing flashes before it has been dressed and put in its corner.
-        subprocess.Popen([str(edge), "--app=" + self.url, *placement.profile(self.cfg, self.url.split("?")[0]), f"--window-size={WIDE},{HIGH}",
-                          f"--window-position={FAR},{FAR}"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen(launch_argv(self.cfg, edge, self.url), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
 
     def alive(self) -> bool:
@@ -294,6 +322,9 @@ class Mini:
                     self.pause(0.2)
                     handle = win.find(self.title)
                     if handle:
+                        unmaximise = getattr(win, "unmaximise", None)
+                        if unmaximise:
+                            unmaximise(handle)              # never over the whole screen, whatever the browser remembered
                         self.bare = win.page(handle) is not None
                         win.dress(handle, self.bare)
                         self.handle, self.fitted = handle, None

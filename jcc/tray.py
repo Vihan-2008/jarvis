@@ -51,25 +51,9 @@ TITLE = "JARVIS · Workspace"
 
 
 def icon_bytes(size: int = 32) -> bytes:
-    """A small round icon in JARVIS colours, built in memory (no image files needed)."""
-    pixels = bytearray()
-    centre = (size - 1) / 2
-    for y in range(size - 1, -1, -1):
-        for x in range(size):
-            dx, dy = (x - centre) / centre, (y - centre) / centre
-            distance = (dx * dx + dy * dy) ** 0.5
-            if distance > 1:
-                pixels += b"\x00\x00\x00\x00"
-                continue
-            mix = (dx + 1) / 2
-            red, green, blue = int(143 + (90 - 143) * mix), int(128 + (209 - 128) * mix), int(255 + (230 - 255) * mix)
-            shade = 1 - 0.35 * max(0.0, dy)
-            alpha = 255 if distance < 0.92 else int(255 * (1 - distance) / 0.08)
-            pixels += bytes((int(blue * shade), int(green * shade), int(red * shade), max(0, alpha)))
-    mask = b"\x00" * (((size + 31) // 32) * 4 * size)
-    header = struct.pack("<IiiHHIIiiII", 40, size, size * 2, 1, 32, 0, len(pixels) + len(mask), 0, 0, 0, 0)
-    image = header + bytes(pixels) + mask
-    return struct.pack("<HHH", 0, 1, 1) + struct.pack("<BBBBHHII", size, size, 0, 0, 1, 32, len(image), 22) + image
+    """A small round icon in JARVIS colours, built in memory (no image files needed). See jcc/icon.py."""
+    from jcc import icon
+    return icon.ico(size)
 
 
 def hotkeys(cfg) -> dict:

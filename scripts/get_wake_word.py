@@ -32,6 +32,8 @@ def good(path: Path, size: int, digest: str) -> bool:
 
 def fetch(folder: Path, get=None, say=print) -> bool:
     """Put the three files into the folder. True when all three are there and are the known ones."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import jcc                                          # noqa: F401 - (on a Mac it gives Python the Mac's own certificates; see jcc.trust_store)
     folder.mkdir(parents=True, exist_ok=True)
     for name, (size, digest) in FILES.items():
         target = folder / name

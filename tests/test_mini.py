@@ -377,6 +377,34 @@ class TestTheSmallWindow(MiniCase):
             self.assertEqual(self.make().gap, (18, 18), text)
 
 
+class TestItNeverOpensOverTheWholeScreen(EngineTestCase):
+    """Found on the owner's PC: the small window opened over the whole screen. It shared the app window's browser, which
+    opens every window the way the app window was opened (full screen, or maximised as it was last left)."""
+
+    def test_it_runs_in_a_browser_of_its_own_at_its_own_size(self):
+        cfg = config.load()
+        argv = mini.launch_argv(cfg, "edge.exe", "http://127.0.0.1:8765/?mini")
+        self.assertIn("--user-data-dir=" + str(cfg.state_dir / mini.PROFILE), argv, "not the app window's profile, so not its browser")
+        self.assertNotIn("--user-data-dir=" + str(cfg.state_dir / "window-profile"), argv)
+        for never in ("--start-fullscreen", "--start-maximized", "--kiosk"):
+            self.assertNotIn(never, argv)
+        self.assertIn(f"--window-size={mini.WIDE},{mini.HIGH}", argv)
+        app = placement.arguments(cfg, [(0, 0, 1920, 1080)])
+        self.assertIn("--start-fullscreen", app, "(the app window itself still opens full screen the first time)")
+        prefs = json.loads((cfg.state_dir / mini.PROFILE / "Default" / "Preferences").read_text("utf-8"))
+        self.assertIn("http://127.0.0.1:8765,*", prefs["profile"]["content_settings"]["exceptions"]["media_stream_mic"], "its own profile may use the microphone at once too")
+
+    def test_a_window_that_comes_up_maximised_is_given_its_own_size_before_it_is_used(self):
+        address = "http://127.0.0.1:8765"
+        fake = FakeWindows()
+        undone = []
+        fake.unmaximise = lambda handle: undone.append(handle) or True
+        popup = mini.Mini(config.load(), address, launch=lambda: bool(fake.open(mini.title_for(address))), windows=lambda: fake, pause=lambda s: None)
+        popup._start()
+        self.assertTrue(popup.handle)
+        self.assertEqual(undone, [popup.handle])
+
+
 class TestJarvisWindowsAreAlwaysDrawn(EngineTestCase):
     def test_how_edge_is_started_for_them(self):
         """Found on the real thing: without these two, a new profile opens with Edge's sign-in notice over the whole small

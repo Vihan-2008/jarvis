@@ -52,14 +52,21 @@ Other options: `-InstallDir`, `-ShortcutDir`, `-NoShortcuts`, `-InstallObsidian`
    Audio Recording** and **Microphone**. JARVIS's Connections page shows which are allowed.
 
 Or, in Terminal: `bash install.sh --quiet --vault ~/Notes/JARVIS`. Other options: `--install-dir`, `--no-app`,
-`--install-obsidian` / `--no-obsidian`, `--wake-word` / `--no-wake-word`.
+`--install-obsidian` / `--no-obsidian`, `--wake-word` / `--no-wake-word`, `--login` / `--no-login`.
+
+The installer also asks whether JARVIS should start in the background when you log in (as it does on Windows), so
+"Hey JARVIS", the menu-bar icon and the shortcuts work without opening it first. The uninstaller removes that again.
+If your Python came from python.org and its "Install Certificates" step was never run, JARVIS uses the Mac's own list
+of trusted certificates, so downloads and the online services work anyway.
 
 The installer also puts in two small programs: one tells the Mac's own sound from your voice, the other is the icon
 in the menu bar and the shortcuts that work from any app (Control+Option with J, T, D or Delete). Each is built on your
 Mac when Apple's command line tools are installed; otherwise the ready-built one from the download is used.
 
-**The Mac installer is new.** Its script is run on a real Mac at GitHub for every change, into a temporary folder. The
-double-click path through Finder, and macOS's own permission questions, have not been tried by its authors. If it
+**The Mac installer is new.** For every change it is run on a real Mac at GitHub twice: once quietly, and once from
+the downloaded package through `Install JARVIS.command` with its questions answered, after which the app is opened (it
+answers, and its menu-bar icon runs) and uninstalled. Not tried there: Finder's double-click and Gatekeeper's warning,
+and macOS's own permission questions. If it
 fails, please open an issue with what it printed, and meanwhile run JARVIS from source.
 
 ## What the installer does
