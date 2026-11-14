@@ -38,13 +38,16 @@ if [ "$QUIET" = 0 ]; then
 fi
 
 # JARVIS's own programs that are running from this folder: stopped, so nothing is left running from removed files.
+stopped=0
 for pid in $(pgrep -f 'jcc(\.| )(desktop|gui|tray|local_history|cloud_memory|maintenance)|jarvis-menu|jarvis-sound-level' 2>/dev/null || true); do
-  where="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)"
+  where="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1 || true)"      # (it may have ended by now)
   program="$(ps -o command= -p "$pid" 2>/dev/null || true)"
   case "$where/ $program" in
-    "$INSTALL_DIR"/*|*"$INSTALL_DIR/"*) kill "$pid" 2>/dev/null || true ;;
+    "$INSTALL_DIR"/*|*"$INSTALL_DIR/"*) kill "$pid" 2>/dev/null || true; stopped=1 ;;
   esac
 done
+if [ "$stopped" = 1 ]; then printf 'Stopped JARVIS.
+'; sleep 2; fi      # (it ends before its files are removed)
 
 agent="$(head -n 1 "$INSTALL_DIR/.login-agent" 2>/dev/null || true)"
 case "$agent" in
