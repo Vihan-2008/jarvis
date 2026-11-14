@@ -279,7 +279,7 @@ class Ears:
     """Decides what to do when the wake word is heard, and keeps the listener in step with the settings."""
 
     def __init__(self, cfg, deliver, notify=None, listener=None, recorder=None, hear=None, beep=None, busy=None, device=None,
-                 control=None, attend=None, listen=None, sound=None, spotter=None, name_said=None, volume=None):
+                 control=None, attend=None, listen=None, sound=None, spotter=None, name_said=None, volume=None, muted=None):
         self.cfg, self.deliver, self.notify = cfg, deliver, notify or (lambda text: None)
         self.make_listener, self.make_recorder, self.hear, self.beep = listener or Listener, recorder, hear, beep or (lambda pitch: None)
         self.busy = busy or (lambda: False)          # True while JARVIS is already in a spoken conversation (so it never answers itself)
@@ -301,14 +301,36 @@ class Ears:
         # (heard, device) -> listener.
         self.make_spotter = spotter if spotter is not None else (None if listener is None else False)
         self.neural, self.neural_device, self.neural_retry, self.controlled = None, None, 0.0, ("", 0.0)
+        # muted(): is the microphone muted in Windows? Asked at most every few seconds. (Tests bring their own listener, and
+        # with it no question about the real microphone.)
+        self.muted = muted if muted is not None else (None if listener is not None else self._real_mute)
+        self.mute_seen, self.mute_at = False, 0.0
 
     def _chosen(self):
         from jcc import sound
         return sound.chosen_input(self.cfg)
 
+    def _real_mute(self) -> bool:
+        from jcc import sound
+        return sound.mic_muted(self.cfg) is True
+
+    def _is_muted(self) -> bool:
+        if not self.muted:
+            return False
+        if time.time() - self.mute_at > 3:
+            self.mute_at = time.time()
+            try:
+                self.mute_seen = bool(self.muted())
+            except Exception:  # noqa: BLE001 - not known: nothing is said
+                self.mute_seen = False
+        return self.mute_seen
+
     @property
     def note(self) -> str:
         """Something the owner should know that is not a failure."""
+        if (self.listener or self.neural) and self._is_muted():
+            from jcc import sound
+            return sound.MUTED.replace("JARVIS hears nothing", '"Hey JARVIS" cannot be heard')
         listener = self.listener
         if listener and self.device is not None and getattr(listener, "input", "") == "default":
             return "The chosen microphone could not be used for the wake word on this PC, so the Windows default microphone is listening for it."

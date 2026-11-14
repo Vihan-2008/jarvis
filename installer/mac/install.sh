@@ -177,7 +177,7 @@ elif [ "$WAKE" = ask ] && [ "$QUIET" = 0 ]; then
   say ""
   say 'JARVIS can listen for "Hey JARVIS" with a small model that runs on this Mac. Setting it up downloads two Python'
   say "packages (about 60 MB) and the model (4 MB; its makers allow non-commercial use)."
-  ask_yes 'Set up "Hey JARVIS"?' y && want_wake=1
+  if ask_yes 'Set up "Hey JARVIS"?' y; then want_wake=1; fi
 fi
 if [ "$want_wake" = 1 ]; then
   if { has_wake || "$PY" -m venv "$venv" >/dev/null 2>&1; } && \
@@ -270,12 +270,23 @@ if [ "$MAKE_APP" = 1 ]; then
 </dict>
 </plist>
 PLIST
-  # JARVIS's icon, drawn by JARVIS itself and turned into a Mac icon by the Mac's own sips.
-  if ( cd "$INSTALL_DIR" && "$PY" -m jcc.icon "$work/icon.png" 1024 ) && \
-     sips -s format icns "$work/icon.png" --out "$bundle/Contents/Resources/AppIcon.icns" >/dev/null 2>&1; then
+  # JARVIS's icon: drawn by JARVIS itself at each size a Mac icon holds, and put together by the Mac's own iconutil.
+  iconset="$work/AppIcon.iconset"
+  made_icon=0
+  mkdir -p "$iconset"
+  if ( cd "$INSTALL_DIR" && "$PY" -m jcc.icon "$iconset/icon_512x512@2x.png" 1024 ); then
+    made_icon=1
+    for size in 16 32 128 256 512; do
+      sips -z "$size" "$size" "$iconset/icon_512x512@2x.png" --out "$iconset/icon_${size}x${size}.png" >/dev/null 2>&1 || made_icon=0
+      [ "$size" = 512 ] && continue
+      twice=$((size * 2))
+      sips -z "$twice" "$twice" "$iconset/icon_512x512@2x.png" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null 2>&1 || made_icon=0
+    done
+  fi
+  if [ "$made_icon" = 1 ] && iconutil -c icns "$iconset" -o "$bundle/Contents/Resources/AppIcon.icns" 2>"$work/icon.err"; then
     touch "$bundle"                                   # (so Finder shows the new icon at once)
   else
-    say "The app's icon could not be made; JARVIS.app has the plain icon."
+    say "The app's icon could not be made, so JARVIS.app has the plain icon. $(head -n 1 "$work/icon.err" 2>/dev/null || true)"
   fi
   # The launcher names the install folder; printf %q quotes it so any folder name is safe in the script.
   {
@@ -300,7 +311,7 @@ want_login=0
 if [ "$LOGIN" = yes ]; then want_login=1
 elif [ "$LOGIN" = ask ] && [ -f "$agent" ]; then want_login=1          # chosen at an earlier install: kept
 elif [ "$LOGIN" = ask ] && [ "$QUIET" = 0 ]; then
-  ask_yes 'Start JARVIS in the background when you log in, so "Hey JARVIS" works without opening it?' y && want_login=1
+  if ask_yes 'Start JARVIS in the background when you log in, so "Hey JARVIS" works without opening it?' y; then want_login=1; fi
 elif [ "$LOGIN" = ask ]; then want_login=1                            # --quiet: as on Windows
 fi
 if [ "$want_login" = 1 ]; then
@@ -330,7 +341,7 @@ fi
 want=0
 if [ "$OBSIDIAN" = yes ]; then want=1
 elif [ "$OBSIDIAN" = ask ] && [ "$QUIET" = 0 ] && [ ! -d /Applications/Obsidian.app ]; then
-  ask_yes "Install Obsidian (a free app to read and edit your notes)?" y && want=1
+  if ask_yes "Install Obsidian (a free app to read and edit your notes)?" y; then want=1; fi
 fi
 if [ "$want" = 1 ]; then
   if command -v brew >/dev/null 2>&1; then
@@ -353,5 +364,6 @@ say "You can also switch these on beforehand: System Settings, Privacy & Securit
 say "Audio Recording, and Microphone. JARVIS's Connections page shows which are allowed."
 if [ "$QUIET" = 0 ] && [ "$MAKE_APP" = 1 ]; then
   say ""
-  ask_yes "Open JARVIS now?" y && open "$bundle"
+  if ask_yes "Open JARVIS now?" y; then open "$bundle" || true; fi
 fi
+exit 0

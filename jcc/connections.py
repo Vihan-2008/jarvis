@@ -87,8 +87,11 @@ def overview(cfg) -> list[dict]:
                        detail="" if keys["elevenlabs"] else "Without it JARVIS speaks with the voice built into Windows.", key="elevenlabs",
                        check=keys["elevenlabs"], remove=keys["elevenlabs"],
                        how="Choose a plan at elevenlabs.io, create a key under Developers, API Keys, and paste it here."))
-    items.append(_item("sound", "voice", "Microphone and speakers", "Which devices JARVIS listens and speaks through.", "ok",
-                       (chosen["mic"] or "Windows default microphone") + " · " + (chosen["speaker"] or "Windows default speakers"),
+    from jcc import sound
+    muted = sound.mic_muted(cfg) is True
+    items.append(_item("sound", "voice", "Microphone and speakers", "Which devices JARVIS listens and speaks through.", "problem" if muted else "ok",
+                       ("Muted in Windows · " if muted else "") + (chosen["mic"] or "Windows default microphone") + " · " + (chosen["speaker"] or "Windows default speakers"),
+                       **({"how": sound.MUTED} if muted else {}),
                        detail=f"Listening with {'Whisper' if listening == 'whisper' else 'ElevenLabs' if listening == 'eleven' else 'the built-in recogniser'}, "
                               f"speaking with {'ElevenLabs' if speaking == 'eleven' else 'the built-in voice'}.", open="voice"))
     tray = read_json(cfg.state_dir / "tray-status.json", {})

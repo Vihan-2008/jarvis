@@ -846,7 +846,8 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                         found = connections.overview(state.cfg)
                         result = {'items': found, 'summary': connections.summary(found), 'groups': [list(group) for group in connections.GROUPS]}
                     elif url.path == '/api/speech':
-                        result = {**speech.status(state.cfg, True), 'mail': mailer.status(state.cfg)}
+                        from jcc import sound
+                        result = {**speech.status(state.cfg, True), 'mail': mailer.status(state.cfg), 'mic_muted': sound.mic_muted(state.cfg)}
                         try:   # which of the tray helper's shortcuts are active (another app may already own one)
                             result['shortcuts'] = json.loads((state.cfg.state_dir / 'tray-status.json').read_text('utf-8'))
                         except (OSError, ValueError):
@@ -1111,6 +1112,9 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                     elif action == 'settings': speech.configure(state.cfg, body.get('settings')); result = speech.status(state.cfg)
                     elif action == 'token': result = {'token': speech.token(str(body.get('kind', '')))}
                     elif action == 'test': result = speech.self_test(state.cfg)
+                    elif action == 'unmute':                 # its owner pressed Unmute: the microphone Windows had muted is unmuted
+                        from jcc import sound
+                        result = {'ok': sound.unmute_mic(state.cfg), 'mic_muted': sound.mic_muted(state.cfg)}
                     elif action == 'warm': threading.Thread(target=speech.warm, daemon=True, name='speech-warm').start(); result = {'ok': True}
                     else: raise ValueError('Unknown speech action.')
                     self._json(HTTPStatus.OK, result);return

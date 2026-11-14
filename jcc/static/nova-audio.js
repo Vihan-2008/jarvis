@@ -98,6 +98,11 @@ async function micStart() {
     // The microphone was unplugged: carry on with whichever one Windows offers next, for whoever was listening.
     stream.getAudioTracks()[0]?.addEventListener('ended', () => { if (micStream === stream) reopen().catch(() => {}); });
     micContext = context; micStream = stream; micNode = node; micName = plain(stream.getAudioTracks()[0]?.label);
+    // Windows can have the microphone muted (its mute key, or Settings): then nothing at all arrives, and the browser says
+    // so on the track. Whoever listens is told, so the owner can be told why nothing is heard.
+    const track = stream.getAudioTracks()[0], tell = () => { if (micStream === stream) window.dispatchEvent(new CustomEvent('nova-mic-muted', { detail: !!track?.muted })); };
+    track?.addEventListener('mute', tell); track?.addEventListener('unmute', tell);
+    if (track?.muted) setTimeout(tell, 0); else setTimeout(() => { if (track?.muted) tell(); }, 1500);
     try { echoAll = stream.getAudioTracks()[0]?.getSettings?.().echoCancellation === 'all'; } catch { echoAll = false; }
     listenTruly(context, stream).catch(() => {});
     if (!outId && wantOut) findOut().then(sink).catch(() => {});   // the speakers' names are known now, too
@@ -493,5 +498,6 @@ window.NovaAudio = { RATE, micStart, micStop, hear, detector, join, pcm, encoded
   get echoAll() { return echoAll; }, get held() { return held; },
   onQuiet: fn => { whenQuiet = fn; }, devices, use, plain, levels, overheard, nearOnly, get truly() { return !!trueStream; },
   get micLevel() { return micLevel; }, get micOn() { return !!micNode; }, get micName() { return micName; },
+  get micMuted() { return !!micStream?.getAudioTracks()[0]?.muted; },
   get speakerChosen() { return !!outId; } };   // true while JARVIS's sound is being sent to speakers other than the Windows default
 })();

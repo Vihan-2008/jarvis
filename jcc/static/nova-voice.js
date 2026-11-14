@@ -28,6 +28,15 @@ async function post(path, bytes) {
   return data;
 }
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+// Windows has the microphone muted: said once a minute at most, with what to do about it.
+let mutedSaidAt = 0;
+window.addEventListener('nova-mic-muted', e => {
+  speech.mic_muted = !!e.detail;
+  if (e.detail && Date.now() - mutedSaidAt > 60000) {
+    mutedSaidAt = Date.now();
+    notify('Windows has the microphone muted, so JARVIS hears nothing. Unmute it with your microphone key, or press Unmute in Settings, Voice.');
+  }
+});
 async function loadSpeech() {
   try { speech = { ...speech, ...(await api('/api/speech')) }; } catch {}
   await A.use(speech.settings.mic || '', speech.settings.speaker || '').catch(() => {});   // the microphone and speakers chosen in the settings
@@ -988,6 +997,8 @@ async function openSettings(tab = 'voice') {
       ...(chosen && !list.some(d => d.name === chosen) ? [[chosen, chosen + ' (not connected: using the Windows default)']] : [])];
     const soundRows = '<h3>Microphone and speakers</h3>' +
       row('Microphone', pick('vs-mic', choices(sound.mics, s.mic, sound.defaultMic)), 'Used for voice chat, dictation and “Hey JARVIS”') +
+      (speech.mic_muted ? '<p class="small nv-muted-mic"><b>Windows has this microphone muted</b>, so JARVIS hears nothing. ' +
+        '<button class="plain" type="button" data-unmute>' + icon('mic') + 'Unmute</button></p>' : '') +
       row('Speakers', pick('vs-speaker', choices(sound.speakers, s.speaker, sound.defaultSpeaker)), 'Where JARVIS speaks and plays its sounds') +
       '<div class="nv-sound"><button class="plain" type="button" data-mic-test>' + icon('mic') + 'Test the microphone</button><div class="nv-meter hidden" aria-hidden="true"><i></i></div>' +
       '<button class="plain" type="button" data-speaker-test>' + icon('speak') + 'Test the speakers</button></div>' +
@@ -1030,6 +1041,16 @@ async function openSettings(tab = 'voice') {
     bind('vs-listen', s.listen, 'listen', setSpeech); bind('vs-language', s.language, 'language', setSpeech); bind('vs-words', s.words, 'words', setSpeech);
     const setSound = async values => { await setSpeech(values); if (pane.isConnected && pane.querySelector('#vs-mic')) voiceTab(); };   // redraw: the voice rows depend on the speakers
     bind('vs-mic', s.mic, 'mic', setSound); bind('vs-speaker', s.speaker, 'speaker', setSound);
+    const unmute = pane.querySelector('[data-unmute]');
+    if (unmute) unmute.onclick = async () => {   // its owner pressed Unmute: Windows unmutes the microphone JARVIS uses
+      unmute.disabled = true;
+      try {
+        const done = await api('/api/speech', { action: 'unmute' });
+        speech.mic_muted = !!done.mic_muted;
+        notify(done.ok ? 'The microphone is unmuted.' : 'Windows did not unmute the microphone. Unmute it in Windows: Settings, System, Sound, Input.');
+      } catch (error) { toast(error.message); }
+      voiceTab();
+    };
     const meter = pane.querySelector('.nv-meter'), micTest = pane.querySelector('[data-mic-test]');
     micTest.onclick = async () => {   // ten seconds of a moving bar, so you can see that the chosen microphone hears you
       if (meterTimer) return;
@@ -1067,7 +1088,8 @@ async function openSettings(tab = 'voice') {
     const forget = pane.querySelector('[data-forget]');
     if (forget) forget.onclick = async () => { if (!(await N.confirmBox({ title: 'Remove the ElevenLabs key?', text: 'JARVIS will go back to the built-in voice. You can add the key again at any time.', ok: 'Remove', danger: true }))) return; try { await api('/api/speech', { action: 'forget', which: 'elevenlabs' }); await loadSpeech(); voiceTab(); } catch (error) { toast(error.message); } };
     pane.querySelector('[data-test]').onclick = async e => {
-      const out = pane.querySelector('.nv-test'); e.currentTarget.disabled = true; out.classList.remove('hidden'); out.textContent = 'Checking… this takes a few seconds.';
+      const button = e.currentTarget;   // (kept: once the event is over the browser no longer says which button it was)
+      const out = pane.querySelector('.nv-test'); button.disabled = true; out.classList.remove('hidden'); out.textContent = 'Checking… this takes a few seconds.';
       A.unlock(); speaker.hush(); speaker.retry(); speaker.say('Hello. This is how I sound.');
       try {
         const report = await api('/api/speech', { action: 'test' }), lines = [];
@@ -1075,7 +1097,7 @@ async function openSettings(tab = 'voice') {
         if (report.speaking) lines.push(report.speaking.ok ? 'The ElevenLabs voice works: sound started after ' + report.speaking.first_audio_seconds + ' seconds.' : 'Voice problem: ' + report.speaking.problem);
         out.innerHTML = lines.map(line => '<p>' + esc(line) + '</p>').join('');
       } catch (error) { out.textContent = error.message; }
-      e.currentTarget.disabled = false;
+      button.disabled = false;
     };
   }
   function assistantTab() {

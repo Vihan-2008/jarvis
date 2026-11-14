@@ -32,6 +32,17 @@ def _agents_present() -> None:
 _agents_present()
 
 
+def _no_real_mute() -> None:
+    """Whether Windows has the real microphone muted differs from one machine to the next: tests are told it is not known.
+    Tests of that code stand in for it themselves."""
+    from jcc import sound
+    sound.real_mic_muted = sound.mic_muted
+    sound.mic_muted = lambda cfg: None
+
+
+_no_real_mute()
+
+
 def _no_real_mac() -> None:
     """On a Mac, JARVIS can look at the real windows, press real keys and move the real pointer (jcc/macax.py). No test may:
     asked for the real Mac, a test is told there is none. Tests of that code bring a stand-in of their own."""

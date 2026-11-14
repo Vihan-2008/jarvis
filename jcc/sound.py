@@ -81,6 +81,99 @@ def find(label, names: list[str]) -> int | None:
     return None
 
 
+MUTED = ("Windows has the microphone muted, so JARVIS hears nothing. Press Unmute in Settings, Voice, or unmute it in "
+         "Windows (Settings, System, Sound, Input) or with your microphone's mute key.")
+
+
+def input_mute(name: str = "", set_to: bool | None = None) -> bool | None:
+    """Whether Windows has a microphone muted: the one with this name, or the Windows default when there is no name or
+    it is not connected. set_to=False unmutes it (only ever when its owner pressed Unmute). None when it cannot be told.
+    Only the mute switch is read or changed: nothing is recorded."""
+    if os.name != "nt":
+        return None
+    from jcc.winctl import _ENUMERATOR, _IID_ENUMERATOR, _IID_VOLUME, _guid, _method
+    import uuid
+
+    class Key(ctypes.Structure):
+        _fields_ = [("fmtid", ctypes.c_ubyte * 16), ("pid", ctypes.c_ulong)]
+
+    class Value(ctypes.Structure):
+        _fields_ = [("vt", ctypes.c_ushort), ("r1", ctypes.c_ushort), ("r2", ctypes.c_ushort), ("r3", ctypes.c_ushort), ("data", ctypes.c_void_p),
+                    ("more", ctypes.c_void_p)]
+    held: list = []
+    try:
+        ole32 = ctypes.windll.ole32
+        ole32.CoInitializeEx(None, 0)
+        ole32.CoCreateInstance.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+        ole32.CoCreateInstance.restype = ctypes.c_long
+        enumerator = ctypes.c_void_p()
+        if ole32.CoCreateInstance(ctypes.byref(_guid(_ENUMERATOR)), None, 23, ctypes.byref(_guid(_IID_ENUMERATOR)), ctypes.byref(enumerator)) or not enumerator:
+            return None
+        held.append(enumerator)
+        chosen = None
+        wanted = plain(name).lower()
+        if wanted:
+            found = ctypes.c_void_p()
+            if not _method(enumerator, 3, ctypes.c_int, ctypes.c_ulong, ctypes.POINTER(ctypes.c_void_p))(enumerator, 1, 1, ctypes.byref(found)) and found:
+                held.append(found)
+                count = ctypes.c_uint()
+                _method(found, 3, ctypes.POINTER(ctypes.c_uint))(found, ctypes.byref(count))
+                label = Key((ctypes.c_ubyte * 16)(*uuid.UUID("a45c254e-df1c-4efd-8020-67d146a850e0").bytes_le), 14)    # its friendly name
+                for index in range(min(count.value, 32)):
+                    device, store, value = ctypes.c_void_p(), ctypes.c_void_p(), Value()
+                    if _method(found, 4, ctypes.c_uint, ctypes.POINTER(ctypes.c_void_p))(found, index, ctypes.byref(device)) or not device:
+                        continue
+                    held.append(device)
+                    if _method(device, 4, ctypes.c_ulong, ctypes.POINTER(ctypes.c_void_p))(device, 0, ctypes.byref(store)) or not store:
+                        continue
+                    held.append(store)
+                    _method(store, 5, ctypes.POINTER(Key), ctypes.POINTER(Value))(store, ctypes.byref(label), ctypes.byref(value))
+                    text = ctypes.wstring_at(value.data) if value.vt == 31 and value.data else ""
+                    if " ".join(text.split()).lower() == wanted:
+                        chosen = device
+                        break
+        if chosen is None:
+            device = ctypes.c_void_p()
+            if _method(enumerator, 4, ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p))(enumerator, 1, 0, ctypes.byref(device)) or not device:
+                return None                                  # no microphone at all
+            held.append(device)
+            chosen = device
+        volume = ctypes.c_void_p()
+        if _method(chosen, 3, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p))(
+                chosen, ctypes.byref(_guid(_IID_VOLUME)), 23, None, ctypes.byref(volume)) or not volume:
+            return None
+        held.append(volume)
+        if set_to is not None:
+            _method(volume, 14, ctypes.c_int, ctypes.c_void_p)(volume, 1 if set_to else 0, None)
+        muted = ctypes.c_int()
+        if _method(volume, 15, ctypes.POINTER(ctypes.c_int))(volume, ctypes.byref(muted)):
+            return None
+        return bool(muted.value)
+    except (OSError, AttributeError, ValueError):
+        return None
+    finally:
+        for item in reversed(held):
+            try:
+                _method(item, 2)(item)
+            except OSError:
+                pass
+
+
+def mic_muted(cfg) -> bool | None:
+    """Is the microphone JARVIS uses (the chosen one, else the Windows default) muted in Windows?"""
+    from jcc import speech
+    try:
+        return input_mute(speech.settings(cfg)["mic"])
+    except Exception:  # noqa: BLE001 - whatever goes wrong here, it is simply not known
+        return None
+
+
+def unmute_mic(cfg) -> bool:
+    """Unmute the microphone JARVIS uses. Only called when its owner pressed Unmute. True when it is unmuted now."""
+    from jcc import speech
+    return input_mute(speech.settings(cfg)["mic"], set_to=False) is False
+
+
 def chosen_input(cfg) -> int | None:
     from jcc import speech
     try:
