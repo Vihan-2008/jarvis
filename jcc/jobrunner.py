@@ -733,6 +733,16 @@ def main(workdir_arg: str) -> int:
         record(cfg, spec, workdir, res, time.monotonic() - t0)
     finally:
         lock.release()
+    # The next job waiting for room starts now, not at the watcher's next look (and also where no watcher runs).
+    try:
+        from jcc.engine import Engine
+        engine = Engine(cfg)
+        try:
+            engine.retry_queued()
+        finally:
+            engine.close()
+    except Exception:  # noqa: BLE001 - the watcher looks again in half a minute
+        pass
     return 0
 
 

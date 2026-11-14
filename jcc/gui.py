@@ -460,7 +460,7 @@ class GuiState:
         if tool == "list_projects":
             return {"projects": [{"key": k, "name": p.name, "path": str(p.path)} for k, p in cfg.projects.items()]}
         if tool == "create_project":
-            made = workspace.create(cfg, str(args.get("name", "")), str(args.get("kind", "web")))
+            made = workspace.create(cfg, str(args.get("name", "")), str(args.get("kind") or "any"))
             workspace.refresh(cfg)
             return {"key": made["key"], "name": made.get("name", made["key"]), "path": str(cfg.projects[made["key"]].path)}
         if tool == "build_with_coding_agents":
@@ -1667,7 +1667,7 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                     return
                 if self.path == "/api/projects":
                     self._json(HTTPStatus.OK, workspace.create(state.cfg, str(body.get("name", "")),
-                               str(body.get("kind", "python"))))
+                               str(body.get("kind") or "any")))
                     return
             except (ValueError, OSError, RuntimeError) as e:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": redact(str(e))[:300]})

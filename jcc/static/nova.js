@@ -1260,13 +1260,20 @@ async function loadMods() {
 form.onsubmit = async e => {
   e.preventDefault();
   let text = message.value.trim(), slot = current || 'new', cid = '';
+  if (armed && !text.startsWith('/')) {        // a check chosen in the menu is done now, and answers in the chat; nothing is sent yet
+    const what = armed; arm(what);
+    if (what === 'Security check') return void paneInChat('security');
+    if (!text) { arm(what); return toast('Type your message first, then press Send.'); }
+    if (what === 'Improve message') return void improveInChat(text);
+    return void beforeSending(what);
+  }
   if (!text || sending.has(slot)) return;
   if (window.jarvisUploading) return toast('Wait a moment for the file to finish loading.');
   const command = text.match(/^\/([a-z0-9-]+)(?:\s+([\s\S]*))?$/i);
   if (command) {   // one of JARVIS's own commands is done here; one of the owner's goes on to JARVIS, which knows what it stands for
     const name = command[1].toLowerCase(), words = (command[2] || '').trim();
     if (name === 'research' && words) { setResearch(true); text = words; }
-    else if (BEFORE_COMMANDS[name]) { message.value = words; grow(); beforeSending(BEFORE_COMMANDS[name]); return; }   // what follows stays in the box, unsent
+    else if (BEFORE_COMMANDS[name]) { message.value = words; grow(); if (words) beforeSending(BEFORE_COMMANDS[name]); else arm(BEFORE_COMMANDS[name]); return; }   // what follows stays in the box, unsent
     else if ((name === 'mode' || name === 'permissions') && words && runBuiltin(name, words)) { message.value = ''; grow(); return; }
     else if (!words && runBuiltin(name)) { message.value = ''; grow(); return; }
   }
@@ -1330,20 +1337,44 @@ toolsB.onclick = () => openPop(toolsB, p => {
   item(p, 'Research on the web', 'search', () => { setResearch(!window.Nova.research); message.focus(); }, { note: 'Answer with a report and its sources (/research)', tick: !!window.Nova.research });
   if (workMode === 'code') {
     item(p, 'Ultracode', 'spark', () => setUltra(!ultra), { note: 'The strongest AI, thinking hardest. Uses more allowance (/ultracode)', tick: ultra });
-    item(p, 'Security check', 'shield', () => paneInChat('security'), { note: 'Look for the usual holes in a project (/security)' });
+    item(p, 'Security check', 'shield', () => arm('Security check'), { note: 'Look for the usual holes in a project (/security)', tick: armed === 'Security check' });
   }
   p.append(el('hr'));
   const effort = el('label', {}, 'How carefully to think'); const select = el('select', { 'aria-label': 'How carefully to think' }); select.innerHTML = $('effort').innerHTML; select.value = $('effort').value;
   select.onchange = () => { $('effort').value = select.value; $('effort').dispatchEvent(new Event('change', { bubbles: true })); }; effort.append(select); p.append(effort, el('hr'));
   const options = $('easy-option-body');
-  item(p, $('prompt-master').textContent.trim(), 'spark', () => $('prompt-master').click(), { tip: TIPS['Improve message'] });
+  item(p, 'Improve message', 'spark', () => arm('Improve message'), { tip: TIPS['Improve message'], note: 'Your message, rewritten so the AI understands it better', tick: armed === 'Improve message' });
   if (!$('undo-prompt').classList.contains('hidden')) item(p, 'Undo the improvement', 'retry', () => $('undo-prompt').click());
   const speak = legacyButton(options, 'Read replies aloud') || legacyButton(options, 'Turn off spoken replies');
   if (speak) item(p, speak.textContent.trim(), 'speak', () => speak.click(), { tip: 'Have JARVIS speak each new reply' });
   // What can be looked at before anything is sent. (These were only shown with "expert tools" switched on; they are for everyone.)
   p.append(el('hr'), el('h5', {}, 'Before you send'));
-  for (const [name, glyph, note] of BEFORE) { const legacy = legacyButton(options, name); if (legacy) item(p, name, glyph, () => beforeSending(name), { note, tip: TIPS[name] }); }
+  for (const [name, glyph, note] of BEFORE) { const legacy = legacyButton(options, name); if (legacy) item(p, name, glyph, () => arm(name), { note, tip: TIPS[name], tick: armed === name }); }
 }, { up: !home });
+// Chosen in the menu, a check is done when the message is sent, and answers in the chat. Until then it shows in the bar
+// as a chip (press it to take it off). One at a time.
+let armed = '';
+const armedB = el('button', { class: 'nv-chip nv-armed hidden', type: 'button', data: { tip: 'Done when you press Send. Press here to take it off.' } });
+researchG.before(armedB);
+function arm(name) {
+  armed = armed === name ? '' : name;
+  armedB.innerHTML = armed ? icon(({ 'Dry run': 'pulse', Checklist: 'check', Context: 'eye', 'Compare rewrite': 'copy', 'Improve message': 'spark', 'Security check': 'shield' })[armed] || 'spark') + '<span>' + esc(armed) + '</span>' + icon('x') : '';
+  armedB.classList.toggle('hidden', !armed);
+  if (armed) notify(armed + ': type your message and press Send. ' + (armed === 'Security check' ? 'It checks the project you choose.' : 'Nothing is started; the answer comes in the chat.'));
+  closePop(); message.focus();
+}
+armedB.onclick = () => { if (armed) arm(armed); };
+// "Improve message", answered in the chat: the rewrite, with the choice to use it.
+async function improveInChat(original) {
+  let d;
+  try { d = await rewriteDraft(original); } catch (error) { return toast(error.message); }
+  window.lastPromptRewrite = d;
+  const card = localReply('Improve message', '<p class="small">Your message, rewritten so the AI understands it better:</p><pre>' + esc(d.prompt || '') + '</pre>' +
+    '<div class="nv-local-foot"><button class="plain" type="button" data-keep-mine>Keep mine</button><button class="plain" type="button" data-use-edit>Use it, I will edit</button><button class="primary" type="button" data-use-send>Use it and send</button></div>');
+  card.querySelector('[data-keep-mine]').onclick = () => { card.remove(); message.focus(); };
+  card.querySelector('[data-use-edit]').onclick = () => { card.remove(); setDraft(d.prompt || original); };
+  card.querySelector('[data-use-send]').onclick = () => { card.remove(); setDraft(d.prompt || original); form.requestSubmit(); };
+}
 const BEFORE = [['Dry run', 'pulse', 'What JARVIS would do, without doing it'], ['Checklist', 'check', 'What will count as done'],
   ['Context', 'eye', 'What JARVIS will read before answering'], ['Compare rewrite', 'copy', 'Your message beside the improved one']];
 // One of those four, from the menu, the Dry run button in Code, or /dryrun and /checklist. Nothing is sent and nothing is started.
@@ -1351,23 +1382,29 @@ const BEFORE = [['Dry run', 'pulse', 'What JARVIS would do, without doing it'], 
 const BEFORE_COMMANDS = { dryrun: 'Dry run', checklist: 'Checklist', context: 'Context', compare: 'Compare rewrite' };
 async function beforeSending(name) {
   if (!message.value.trim()) { toast('Type what you want first, then ' + ({ 'Dry run': 'Dry run shows what JARVIS would do with it, without doing it.', Checklist: 'Checklist shows what will count as done.', Context: 'Context shows what JARVIS will read before answering.', 'Compare rewrite': 'Compare rewrite shows your message beside the improved one.' }[name] || name)); message.focus(); return; }
+  // The reply is in the chat at once, saying it is being worked out; the answer fills it when it is ready.
+  const card = localReply(name, '<p class="small nv-set-wait"><i class="nv-spin"></i>Working it out…</p>'), spot = card.querySelector('.content');
   const before = new Set(document.querySelectorAll('dialog[open]'));
   legacyButton($('easy-option-body'), name)?.click();
   let last = '', steady = 0;
-  for (let i = 0; i < 80; i++) {                      // (its answer is drawn in a box of its own: it is shown in the chat instead)
+  for (let i = 0; i < 400; i++) {                     // (its answer is drawn in a box of its own: it is shown in the chat instead; up to a minute)
     await new Promise(resolve => setTimeout(resolve, 150));
+    if (!card.isConnected) return;                    // (closed meanwhile)
     const d = [...document.querySelectorAll('dialog[open]')].find(x => !before.has(x)); if (!d) continue;
-    const now = d.innerHTML; steady = now === last && d.textContent.trim().length > 20 && !/^\s*(Loading|One moment|Checking)/i.test(d.textContent) ? steady + 1 : 0; last = now;
+    d.classList.add('nv-offscreen');                  // (it is not shown while it is being worked out: its answer goes in the chat)
+    const now = d.innerHTML; steady = now === last && d.textContent.trim().length > 20 && !/^\s*(Loading|One moment|Checking)/i.test(d.textContent) && !/Preparing|Working/i.test(d.textContent.slice(0, 200)) ? steady + 1 : 0; last = now;
     if (steady < 2) continue;
     const copy = el('div'); copy.innerHTML = now;                 // (the window's own drawing of it, already made safe)
     copy.querySelectorAll('button, dialog, form [type=submit], h2').forEach(n => n.remove());
     copy.querySelectorAll('[id]').forEach(n => n.removeAttribute('id'));
-    d.close();
-    const card = localReply(name, copy.innerHTML + '<div class="nv-local-foot"><button class="plain" type="button" data-before-edit>Change my message</button><button class="primary" type="button" data-before-send>Send it</button></div>');
-    card.querySelector('[data-before-send]').onclick = () => { card.remove(); form.requestSubmit(); };
-    card.querySelector('[data-before-edit]').onclick = () => { card.remove(); message.focus(); };
+    d.close(); d.classList.remove('nv-offscreen');
+    spot.innerHTML = copy.innerHTML + '<div class="nv-local-foot"><button class="plain" type="button" data-before-edit>Change my message</button><button class="primary" type="button" data-before-send>Send it</button></div>';
+    spot.querySelector('[data-before-send]').onclick = () => { card.remove(); updateMode(); form.requestSubmit(); };
+    spot.querySelector('[data-before-edit]').onclick = () => { card.remove(); updateMode(); message.focus(); };
+    stick();
     return;
   }
+  spot.innerHTML = '<p>That took too long. Try again in a moment.</p>';
 }
 function modelLabel() { const option = $('model')?.selectedOptions[0]; $('nv-model-name').textContent = !option || option.value === 'auto' ? 'Auto' : option.textContent; }
 modelB.onclick = () => openPop(modelB, p => {

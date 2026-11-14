@@ -21,13 +21,17 @@ class WorkspaceTests(EngineTestCase):
 
     def test_new_projects_persist_and_checks_pass(self):
         cfg = self.cfg()
-        for kind in ("python", "web", "node"):
+        for kind in ("any", "python", "web", "node"):
             created = workspace.create(cfg, "New " + kind, kind)
             p = cfg.projects[created["key"]]
             self.assertEqual(projects.git(["branch", "--show-current"], p.path).strip(), "main")
             self.assertTrue(all(c.ok for c in projects.run_checks(p, p.path, dict(os.environ))))
             self.assertIn(created["key"], config.load().projects)
             self.assertTrue((self.vault / f"Projects/{created['key']}/Memory.md").exists())
+        anything = cfg.projects["new-any"]
+        self.assertEqual(anything.checks, [["check.py"]], "a project of any kind is checked by its own check.py")
+        self.assertIn("whatever language", (anything.path / "AGENTS.md").read_text("utf-8"))
+        self.assertEqual(workspace.create(cfg, "Made by default")["kind"], "any", "the usual kind: anything")
         with self.assertRaises(ValueError):
             workspace.create(cfg, "New python")
         with self.assertRaises(ValueError):

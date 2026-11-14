@@ -35,9 +35,12 @@ class TestWhatTheToolsSay(unittest.TestCase):
         cfg = types.SimpleNamespace(agents={})
         started = []
         with mock.patch.object(accounts, "_program", lambda cfg, ident: "C:/tools/codex.exe"), \
-                mock.patch.object(accounts.subprocess, "Popen", lambda argv, **kw: started.append(argv[:3] if argv[0] != "osascript" else ["osascript"])):
+                mock.patch.object(accounts, "_which", lambda name: "/usr/bin/" + name), \
+                mock.patch.object(accounts.subprocess, "Popen", lambda argv, **kw: started.append(list(argv))):
             self.assertEqual(accounts.sign_in(cfg, "codex")["name"], "ChatGPT")
-        self.assertTrue(started and (started[0][:2] == ["C:/tools/codex.exe", "login"] or started[0] == ["osascript"]))
+        said = " ".join(started[0]) if started else ""
+        # Windows runs it in a window of its own, a Mac in Terminal, Linux in the terminal it has: the tool's own sign-in each time.
+        self.assertTrue("C:/tools/codex.exe" in said and "login" in said, said)
         with self.assertRaises(ValueError):
             accounts.sign_in(cfg, "something-else")
         with mock.patch.object(accounts, "_program", lambda cfg, ident: ""):

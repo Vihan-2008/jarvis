@@ -1212,3 +1212,11 @@ body.nv-coding.nv-grouped #projects{display:none}
 /* Accounts (Settings, AI models & accounts): signed in with your own subscription, as in T3 Code. */
 .nv-account .nv-account-state{color:var(--ink-3)}.nv-account .nv-account-state.ok{color:var(--ok)}
 .nv-account-do{display:flex;justify-content:flex-end;gap:8px}
+
+/* A check chosen in the options menu, done when the message is sent (press it to take it off). */
+.nv-bar .nv-armed{color:var(--accent);background:var(--accent-soft)}
+.nv-bar .nv-armed svg.i:last-child{width:12px;height:12px;opacity:.7}
+
+/* A "Before you send" box being worked out: kept out of sight, its answer goes in the chat. */
+dialog.nv-offscreen{opacity:0!important;pointer-events:none!important}
+dialog.nv-offscreen::backdrop{background:transparent!important}

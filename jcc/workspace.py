@@ -13,6 +13,7 @@ from jcc.projects import GIT_ID, git
 from jcc.vault import Vault, atomic_write, render_note
 
 KEY = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
+CHECK_PY = '"""This project\'s check: JARVIS runs `python check.py` before it puts a change in, and only when it passes.\n\nWhoever builds this project keeps it running the project\'s own tests, whatever they are written in (for example\n`npm test`, `pytest`, `cargo test`, `dotnet test`, `go test ./...`), and makes it fail when they fail.\n"""\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nHERE = Path(__file__).resolve().parent\n\n# The commands that test this project, each a list (the program and its words). Add the project\'s own here.\nTESTS: list[list[str]] = []\n\n\ndef main() -> int:\n    if not (HERE / "README.md").exists():\n        print("README.md is missing.")\n        return 1\n    for command in TESTS:\n        print("$", " ".join(command), flush=True)\n        if subprocess.run(command, cwd=HERE).returncode != 0:\n            print("Failed:", " ".join(command))\n            return 1\n    print("All checks passed." if TESTS else "No tests yet: add the project\'s own to TESTS in check.py.")\n    return 0\n\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
 
 
 def refresh(cfg: Config) -> None:
@@ -25,13 +26,15 @@ def refresh(cfg: Config) -> None:
                 continue                      # one damaged entry must not hide the other projects
 
 
-def create(cfg: Config, name: str, kind: str = "python") -> dict:
+def create(cfg: Config, name: str, kind: str = "any") -> dict:
+    """A new project. kind "any" (the usual one): it starts empty, and the agents choose the language and tools that suit
+    what is asked; "python", "web" and "node" start from a small starter of that kind."""
     name = name.strip()
     key = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:48]
     if not KEY.fullmatch(key) or len(name) > 100:
         raise ValueError("Use a project name beginning with a letter (up to 100 characters).")
-    if kind not in ("python", "web", "node"):
-        raise ValueError("Choose Python, website or Node.js.")
+    if kind not in ("any", "python", "web", "node"):
+        raise ValueError("That is not a kind of project JARVIS knows.")
     if kind == "node" and not shutil.which("node"):
         raise ValueError("Node.js is not installed. Choose Python or website, or install Node.js first.")
     lock = InstanceLock(cfg.state_dir / "projects.lock")
@@ -50,7 +53,15 @@ def create(cfg: Config, name: str, kind: str = "python") -> dict:
         files = {"README.md": f"# {name}\n\nCreated in JARVIS. Describe requirements in the linked chat.\n",
                  ".gitignore": "__pycache__/\n.venv/\n.env\n.env.*\nnode_modules/\n",
                  "AGENTS.md": "Keep changes focused. Add meaningful tests for behavior. Never deploy or access secrets.\n"}
-        if kind == "python":
+        if kind == "any":
+            files["AGENTS.md"] = ("Build what the owner asks, in whatever language and tools suit it best. Keep changes focused, "
+                                  "add meaningful tests, and add the commands that run them to TESTS in check.py: JARVIS runs "
+                                  "`python check.py` before it puts a change in. Never deploy or access secrets.\n")
+            files["check.py"] = CHECK_PY
+            files[".gitignore"] = ("__pycache__/\n.venv/\nvenv/\n.env\n.env.*\nnode_modules/\ndist/\nbuild/\ntarget/\nbin/\nobj/\n"
+                                   "*.log\n.DS_Store\nThumbs.db\n")
+            checks = [["check.py"]]
+        elif kind == "python":
             files.update({"src/__init__.py": "", "src/app.py": 'def main():\n    return "Hello from JARVIS"\n',
                           "tests/__init__.py": "", "tests/test_app.py":
                           "import unittest\nfrom src.app import main\n\nclass AppTest(unittest.TestCase):\n"

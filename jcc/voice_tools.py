@@ -71,7 +71,7 @@ TOOLS = [
           {"command": _S, "folder": _S}, ["command"]),
     _tool("write_file", "Create a text file (or replace one) with the given content. Use full paths.", {"path": _S, "content": _S}, ["path", "content"]),
     _tool("read_file", "Read a text file.", {"path": _S}, ["path"]),
-    _tool("create_project", "Create a new JARVIS project folder with a starter. kind is web (website), python (tool or automation) or node.",
+    _tool("create_project", "Create a new JARVIS project folder for anything (any language or tools; the coding agents choose). kind is any (the usual), or web, python or node for a small starter of that kind.",
           {"name": _S, "kind": {"type": "string", "enum": ["web", "python", "node"]}}, ["name"]),
     _tool("build_with_coding_agents", "Hand a real building or coding task in a project to the coding agents (Claude Code and Codex). It runs in the background for minutes; its progress shows in this chat.",
           {"project": {"type": "string", "description": "project key from create_project or list_projects"}, "task": _S,
@@ -125,7 +125,7 @@ CORE = frozenset({"open_app", "open_website", "play_music", "play_show", "media"
 BRIEF = {"find_files": "find_files(name): find files on this PC by part of their name", "open_file": "open_file(path): open a file or folder",
          "read_file": "read_file(path): read a text file", "write_file": "write_file(path, content): create or replace a text file (full path)",
          "run_command": "run_command(command, folder?): run a PowerShell command and get its output", "list_windows": "list_windows(): the open windows",
-         "wait": "wait(seconds): wait up to 10 seconds for something to load", "create_project": "create_project(name, kind: web|python|node): a new JARVIS project folder",
+         "wait": "wait(seconds): wait up to 10 seconds for something to load", "create_project": "create_project(name, kind: any|web|python|node): a new JARVIS project folder (any: the agents choose the stack)",
          "list_projects": "list_projects(): the user's projects", "build_with_coding_agents": "build_with_coding_agents(project, task, ultra?): hand real coding work in a "
          "project to the coding agents; runs in the background for minutes; ultra true only when the user asks for Ultracode", "make_image": "make_image(description): create a picture and show it in the chat",
          "list_reminders": "list_reminders(): timers and reminders that are waiting", "cancel_reminder": "cancel_reminder(text?): cancel those containing these words, or all",
@@ -1189,8 +1189,8 @@ class Toolbox:
     def _said(self, tool: str, args: dict) -> str:
         return str(self._do(tool, args).get("message") or "Done.")
 
-    def create_project(self, name: str, kind: str = "web") -> str:
-        made = self._do("create_project", {"name": str(name)[:100], "kind": kind if kind in ("web", "python", "node") else "web"})
+    def create_project(self, name: str, kind: str = "any") -> str:
+        made = self._do("create_project", {"name": str(name)[:100], "kind": kind if kind in ("any", "web", "python", "node") else "any"})
         return f"Created project {made.get('name')} (key {made.get('key')}) in {made.get('path')}."
 
     def list_projects(self) -> str:
