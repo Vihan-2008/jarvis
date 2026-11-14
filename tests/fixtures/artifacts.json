@@ -1,0 +1,328 @@
+[
+ {
+  "why": "a page named by the line above it",
+  "text": "Here it is.\nFile: Bakery home\n```html\n<!doctype html>\n<html>\n<head><title>Rise & Shine Bakery</title></head>\n<body>\n<h1>Fresh bread</h1>\n</body>\n</html>\n```",
+  "made": [
+   {
+    "kind": "page",
+    "name": "Bakery home",
+    "lines": 7
+   }
+  ]
+ },
+ {
+  "why": "named by a short paragraph of its own, in bold, just before",
+  "text": "Here it is.\n\n**File:** `menu.html`\n\n```html\n<!doctype html>\n<html>\n<body>\n<h1>Opening hours</h1>\n<p>7 to 5</p>\n</body>\n</html>\n```",
+  "made": [
+   {
+    "kind": "page",
+    "name": "menu.html",
+    "lines": 7
+   }
+  ]
+ },
+ {
+  "why": "named in the block's own first line",
+  "text": "```html title=\"Our hours\"\n<!doctype html>\n<html>\n<body>\n<h1>Opening hours</h1>\n<p>7 to 5</p>\n</body>\n</html>\n```",
+  "made": [
+   {
+    "kind": "page",
+    "name": "Our hours",
+    "lines": 7
+   }
+  ]
+ },
+ {
+  "why": "a file name in the block's own first line",
+  "text": "```html hours.html\n<!doctype html>\n<html>\n<body>\n<h1>Opening hours</h1>\n<p>7 to 5</p>\n</body>\n</html>\n```",
+  "made": [
+   {
+    "kind": "page",
+    "name": "hours.html",
+    "lines": 7
+   }
+  ]
+ },
+ {
+  "why": "a page's own title, with an ampersand in it",
+  "text": "Done:\n\n```html\n<!doctype html>\n<html>\n<head><title>Rise & Shine Bakery</title></head>\n<body>\n<h1>Fresh bread</h1>\n</body>\n</html>\n```",
+  "made": [
+   {
+    "kind": "page",
+    "name": "Rise & Shine Bakery",
+    "lines": 7
+   }
+  ]
+ },
+ {
+  "why": "a title written with entities is read as the characters they stand for",
+  "text": "```html\n<!doctype html>\n<html>\n<head><title>Rise &amp; Shine &lt;Bakery&gt;</title></head>\n<body>\n<p>Bread</p>\n</body>\n</html>\n```",
+  "made": [
+   {
+    "kind": "page",
+    "name": "Rise & Shine <Bakery>",
+    "lines": 7
+   }
+  ]
+ },
+ {
+  "why": "a name given on the line above is taken as written",
+  "text": "File: Tom &amp; Jerry\n```svg\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\">\n<title>Sun</title>\n<circle cx=\"5\" cy=\"5\" r=\"3\"/>\n<path d=\"M5 0v1\"/>\n<path d=\"M5 9v1\"/>\n</svg>\n```",
+  "made": [
+   {
+    "kind": "picture",
+    "name": "Tom &amp; Jerry",
+    "lines": 6
+   }
+  ]
+ },
+ {
+  "why": "no title: the first heading of the page",
+  "text": "```htm\n<!doctype html>\n<html>\n<body>\n<h1>Opening hours</h1>\n<p>7 to 5</p>\n</body>\n</html>\n```",
+  "made": [
+   {
+    "kind": "page",
+    "name": "Opening hours",
+    "lines": 7
+   }
+  ]
+ },
+ {
+  "why": "a heading that carries attributes is not read as a name",
+  "text": "```html\n<!doctype html>\n<html>\n<body>\n<h1 class=\"big\">Opening hours</h1>\n<p>7 to 5</p>\n</body>\n</html>\n```",
+  "made": [
+   {
+    "kind": "page",
+    "name": "Page",
+    "lines": 7
+   }
+  ]
+ },
+ {
+  "why": "a document is named by its first heading",
+  "text": "```markdown\n# Trip plan\n\nDay one: the fort.\n\nDay two: the market.\n\n- pack water\n- book the train\n\nCosts are in the sheet.\n```",
+  "made": [
+   {
+    "kind": "document",
+    "name": "Trip plan",
+    "lines": 10
+   }
+  ]
+ },
+ {
+  "why": "a short piece of markdown is a snippet, not a document",
+  "text": "```md\n# Trip plan\n\nDay one: the fort.\n\nDay two: the market.\n\n```",
+  "made": []
+ },
+ {
+  "why": "an app is named by its component",
+  "text": "```jsx\nimport { useState } from 'react';\n\nexport default function Counter() {\n  const [n, set] = useState(0);\n  return <button onClick={() => set(n + 1)}>{n}</button>;\n}\n```",
+  "made": [
+   {
+    "kind": "app",
+    "name": "Counter",
+    "lines": 6
+   }
+  ]
+ },
+ {
+  "why": "a diagram has no name of its own",
+  "text": "```mermaid\nflowchart TD\n  A[Mix] --> B[Prove]\n  B --> C[Bake]\n  C --> D[Cool]\n  D --> E[Sell]\n  E --> A\n```",
+  "made": [
+   {
+    "kind": "diagram",
+    "name": "Diagram",
+    "lines": 6
+   }
+  ]
+ },
+ {
+  "why": "a picture's title",
+  "text": "```svg\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\">\n<title>Sun</title>\n<circle cx=\"5\" cy=\"5\" r=\"3\"/>\n<path d=\"M5 0v1\"/>\n<path d=\"M5 9v1\"/>\n</svg>\n```",
+  "made": [
+   {
+    "kind": "picture",
+    "name": "Sun",
+    "lines": 6
+   }
+  ]
+ },
+ {
+  "why": "slides are named by their first heading",
+  "text": "```slides\n# Why bread\n\nIt is cheap and people love it.\n\n---\n\n## The plan\n\n- bake at five\n- sell by nine\n```",
+  "made": [
+   {
+    "kind": "slides",
+    "name": "Why bread",
+    "lines": 10
+   }
+  ]
+ },
+ {
+  "why": "a sheet, named by the line above",
+  "text": "File: Bread sales\n```csv\nDay,Loaves,Price\nMon,40,4\nTue,55,4\nTotal,=SUM(B2:B3),\n```",
+  "made": [
+   {
+    "kind": "sheet",
+    "name": "Bread sales",
+    "lines": 4
+   }
+  ]
+ },
+ {
+  "why": "a sheet without a name",
+  "text": "```csv\nDay,Loaves,Price\nMon,40,4\nTue,55,4\nTotal,=SUM(B2:B3),\n```",
+  "made": [
+   {
+    "kind": "sheet",
+    "name": "Sheet",
+    "lines": 4
+   }
+  ]
+ },
+ {
+  "why": "two lines of csv are a snippet",
+  "text": "```csv\nDay,Loaves,Price\nMon,40,4\n```",
+  "made": []
+ },
+ {
+  "why": "a chart is named by its title",
+  "text": "```chart\n{\n  \"type\": \"bar\",\n  \"title\": \"Loaves sold\",\n  \"x\": [\"Mon\", \"Tue\"],\n  \"series\": [{\"name\": \"Loaves\", \"values\": [40, 55]}]\n}\n```",
+  "made": [
+   {
+    "kind": "data",
+    "name": "Loaves sold",
+    "lines": 6
+   }
+  ]
+ },
+ {
+  "why": "a chart written on one line is still a chart",
+  "text": "```chart\n{\"type\": \"bar\", \"title\": \"Cost of a loaf\", \"x\": [\"Flour\"], \"series\": [{\"name\": \"Cost\", \"values\": [0.4]}]}\n```",
+  "made": [
+   {
+    "kind": "data",
+    "name": "Cost of a loaf",
+    "lines": 1
+   }
+  ]
+ },
+ {
+  "why": "ordinary code is not an artifact",
+  "text": "```python\ndef f():\n    return 1\n\nprint(f())\nprint(2)\nprint(3)\nprint(4)\n```",
+  "made": []
+ },
+ {
+  "why": "json is not a chart",
+  "text": "```json\n{\n  \"type\": \"bar\",\n  \"title\": \"Loaves sold\",\n  \"x\": [\"Mon\", \"Tue\"],\n  \"series\": [{\"name\": \"Loaves\", \"values\": [40, 55]}]\n}\n```",
+  "made": []
+ },
+ {
+  "why": "a short page is a snippet",
+  "text": "```html\n<!doctype html>\n<html>\n<head><title>Rise & Shine Bakery</title></head>\n<body>\n```",
+  "made": []
+ },
+ {
+  "why": "a block that never closes makes nothing",
+  "text": "File: Half\n```html\n<!doctype html>\n<html>\n<head><title>Rise & Shine Bakery</title></head>\n<body>\n<h1>Fresh bread</h1>\n</body>\n</html>",
+  "made": []
+ },
+ {
+  "why": "the last line of a longer paragraph can name it",
+  "text": "I made the page you asked for.\nFile: Second try\n```html\n<!doctype html>\n<html>\n<body>\n<h1>Opening hours</h1>\n<p>7 to 5</p>\n</body>\n</html>\n```",
+  "made": [
+   {
+    "kind": "page",
+    "name": "Second try",
+    "lines": 7
+   }
+  ]
+ },
+ {
+  "why": "a name two blocks back is not used",
+  "text": "File: Old name\n\n- a list\n- in between\n\n```html\n<!doctype html>\n<html>\n<body>\n<h1>Opening hours</h1>\n<p>7 to 5</p>\n</body>\n</html>\n```",
+  "made": [
+   {
+    "kind": "page",
+    "name": "Opening hours",
+    "lines": 7
+   }
+  ]
+ },
+ {
+  "why": "a name inside a longer paragraph before a blank line is not used",
+  "text": "Some words.\nFile: Not this\n\n```html\n<!doctype html>\n<html>\n<body>\n<h1>Opening hours</h1>\n<p>7 to 5</p>\n</body>\n</html>\n```",
+  "made": [
+   {
+    "kind": "page",
+    "name": "Opening hours",
+    "lines": 7
+   }
+  ]
+ },
+ {
+  "why": "a heading before the block is not a name",
+  "text": "## File: Heading\n\n```html\n<!doctype html>\n<html>\n<body>\n<h1>Opening hours</h1>\n<p>7 to 5</p>\n</body>\n</html>\n```",
+  "made": [
+   {
+    "kind": "page",
+    "name": "Opening hours",
+    "lines": 7
+   }
+  ]
+ },
+ {
+  "why": "the same name twice is two versions of one thing",
+  "text": "File: Menu\n```html\n<!doctype html>\n<html>\n<body>\n<h1>Opening hours</h1>\n<p>7 to 5</p>\n</body>\n</html>\n```\n\nChanged:\nFile: menu\n```html\n<!doctype html>\n<html>\n<head><title>Rise & Shine Bakery</title></head>\n<body>\n<h1>Fresh bread</h1>\n</body>\n</html>\n```",
+  "made": [
+   {
+    "kind": "page",
+    "name": "Menu",
+    "lines": 7
+   },
+   {
+    "kind": "page",
+    "name": "menu",
+    "lines": 7
+   }
+  ]
+ },
+ {
+  "why": "two different things in one reply",
+  "text": "```mermaid\nflowchart TD\n  A[Mix] --> B[Prove]\n  B --> C[Bake]\n  C --> D[Cool]\n  D --> E[Sell]\n  E --> A\n```\n\nAnd the numbers:\n\n```chart\n{\n  \"type\": \"bar\",\n  \"title\": \"Loaves sold\",\n  \"x\": [\"Mon\", \"Tue\"],\n  \"series\": [{\"name\": \"Loaves\", \"values\": [40, 55]}]\n}\n```",
+  "made": [
+   {
+    "kind": "diagram",
+    "name": "Diagram",
+    "lines": 6
+   },
+   {
+    "kind": "data",
+    "name": "Loaves sold",
+    "lines": 6
+   }
+  ]
+ },
+ {
+  "why": "an indented block, after a table",
+  "text": "| a | b |\n|---|---|\n| 1 | 2 |\n\n  ```svg\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\">\n<title>Sun</title>\n<circle cx=\"5\" cy=\"5\" r=\"3\"/>\n<path d=\"M5 0v1\"/>\n<path d=\"M5 9v1\"/>\n</svg>\n  ```",
+  "made": [
+   {
+    "kind": "picture",
+    "name": "Sun",
+    "lines": 6
+   }
+  ]
+ },
+ {
+  "why": "stars are taken out of a name",
+  "text": "File: **Big plan**\n```markdown\n# Trip plan\n\nDay one: the fort.\n\nDay two: the market.\n\n- pack water\n- book the train\n\nCosts are in the sheet.\n```",
+  "made": [
+   {
+    "kind": "document",
+    "name": "Big plan",
+    "lines": 10
+   }
+  ]
+ }
+]

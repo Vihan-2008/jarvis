@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Features · JARVIS</title>
+<meta name="description" content="Every feature of JARVIS explained: voice and wake word, actions on your PC with approvals, coding agents in a copy of your project, security check, routines, artifacts, the Court, notes as memory, skills, privacy.">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0b0b0f">
+<meta name="referrer" content="no-referrer">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Features · JARVIS">
+<meta property="og:description" content="What the JARVIS desktop app does, how each part works, and what it needs.">
+<meta property="og:image" content="assets/social.svg">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to the content</a>
+<header class="site-head">
+  <div class="wrap">
+    <a class="brand" href="index.html"><img src="assets/logo.svg" alt="" width="28" height="28">JARVIS</a>
+    <button class="theme-toggle" type="button" aria-label="Switch theme">
+      <svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg>
+      <svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+    </button>
+    <nav aria-label="Site">
+      <ul class="tabs">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="features.html" aria-current="page">Features</a></li>
+        <li><a href="download.html">Download</a></li>
+        <li><a href="https://github.com/Vihan-2008/jarvis" rel="noopener">GitHub <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg></a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <div class="page-head">
+    <h1>Features</h1>
+    <p>What JARVIS does, how each part works, and what it needs. The app is free and has no account of its own; the AI work runs on your own accounts and subscriptions, named under each feature.</p>
+  </div>
+
+  <div class="note">
+    <p><b>Windows:</b> everything. <b>macOS:</b> new, the core app (chat, coding agents, artifacts, routines, security check); controlling other apps' windows, the tray and the background wake word are Windows-only for now. The Mac version has been checked by automated tests and has not yet been used day to day on a real Mac. Features marked <span class="tag win">Windows only</span> are not on the Mac yet.</p>
+  </div>
+
+  <nav aria-label="On this page">
+    <ul class="toc">
+      <li><a href="#talk">Talk to it</a></li>
+      <li><a href="#pc">It does things on your PC</a></li>
+      <li><a href="#coding">Coding with agents</a></li>
+      <li><a href="#security">Security check and fix</a></li>
+      <li><a href="#routines">Routines</a></li>
+      <li><a href="#artifacts">Artifacts</a></li>
+      <li><a href="#court">The Court of JARVIS</a></li>
+      <li><a href="#memory">Your notes as its memory</a></li>
+      <li><a href="#skills">Skills and mods</a></li>
+      <li><a href="#privacy">Privacy and safety</a></li>
+    </ul>
+  </nav>
+
+  <!-- ================= Talk to it ================= -->
+  <section class="feature-group" id="talk" aria-labelledby="talk-h">
+    <h2 id="talk-h">Talk to it</h2>
+    <p>Typed and spoken messages go to the same fast assistant.</p>
+    <div class="grid">
+      <article class="card">
+        <h3>The fast assistant</h3>
+        <p>Answers typed and spoken messages, with the words appearing as they are written.</p>
+        <p>Simple requests such as "set a timer for ten minutes" or "volume up" are carried out at once with no AI at all. Everything else goes to a Claude model (Haiku unless you choose Sonnet or Opus), and a spare session is kept ready so even the first message of a new chat starts quickly.</p>
+        <p class="needs"><b>Needs:</b> the Claude Code command-line tool, signed in with your Claude subscription.</p>
+      </article>
+      <article class="card">
+        <h3>Voice chat</h3>
+        <p>Press the wave button (or Ctrl+Space) and talk: JARVIS answers out loud, sentence by sentence, then listens again.</p>
+        <p>You can interrupt by talking: its voice dips at once and it stops when it hears real words from you. "Stop" ends what it is doing, "go to sleep" makes it wait for its name, and an idle session goes to sleep after 15 minutes (a setting). Questions that need a yes, such as "Shall I send this email?", can be answered out loud.</p>
+        <p class="needs"><b>Needs:</b> a Groq key (free tier) for speech-to-text with Whisper, or an OpenAI key. An ElevenLabs key for its voice is optional; without one, the browser engine's built-in voices speak.</p>
+      </article>
+      <article class="card">
+        <h3>Wake word: "Hey JARVIS" <span class="tag win">Windows only</span></h3>
+        <p>Say "Hey JARVIS" from anywhere, with or without the window open, or say the request in the same breath.</p>
+        <p>Windows' own offline speech recogniser listens for the wake word and nothing else, so ordinary talk is dropped on the spot and never leaves the PC. Only a sentence that begins with the name is transcribed and handed to JARVIS. An optional small neural model (openWakeWord) that also runs on the PC hears the name better across a room or over music. It can be switched off.</p>
+      </article>
+      <article class="card">
+        <h3>Your PC's own sound is ignored <span class="tag win">Windows only</span></h3>
+        <p>A film, a video or music playing through the speakers is not taken for you.</p>
+        <p>Windows reports how loud everything it plays is at each moment; sound at the microphone that rises and falls in step with it is dropped before anything is transcribed. While something is playing, only what is said to JARVIS by name counts, and a spoken yes needs the name too, so a film cannot give instructions or approve anything.</p>
+      </article>
+      <article class="card">
+        <h3>Dictation</h3>
+        <p>The microphone button writes what you say into the message box.</p>
+        <p>On Windows, Ctrl+Alt+D works in any app: speak, and the words are typed where your cursor is. Nothing is recorded unless the shortcut was pressed. An attached audio or video file (up to 25 MB) can also be written out as text.</p>
+      </article>
+      <article class="card">
+        <h3>Research</h3>
+        <p>Switch on Research beside the message box and your next message is looked into on the web.</p>
+        <p>JARVIS runs several web searches and answers with a report and its sources. A small arrow beside the chip chooses who does the research.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ================= PC ================= -->
+  <section class="feature-group" id="pc" aria-labelledby="pc-h">
+    <h2 id="pc-h">It does things on your PC</h2>
+    <p>And it asks before sending, deleting or paying. Every action is checked by the JARVIS service before it runs, and the AI cannot answer that check for you.</p>
+    <div class="grid">
+      <article class="card">
+        <h3>Acting on your computer <span class="tag win">Windows only</span></h3>
+        <p>Ask it to open apps, files and websites, switch windows, press buttons and fill boxes, find and read files, set timers and reminders, or change the volume and brightness.</p>
+        <p>Buttons are pressed by name through Windows' accessibility layer, which lists the buttons, boxes and links of a window. While it works for you, it types and clicks only in the window it opened or switched to, never in whatever happens to be in front and never in its own window; if that window cannot be brought to the front, nothing is typed.</p>
+      </article>
+      <article class="card">
+        <h3>Asks before sending, deleting or paying</h3>
+        <p>A control beside the message box shows how much JARVIS asks before it acts, and what is waiting for your yes or no.</p>
+        <p>You choose: ask only before sending, deleting and paying; also before anything risky; or before every change. Sending things to other people, deleting and paying are asked about in every mode. A yes covers exactly the action that was shown, with those details, once.</p>
+      </article>
+      <article class="card">
+        <h3>Never done, in any mode</h3>
+        <p>Some actions are refused outright, whatever you or the AI say.</p>
+        <p>It never types passwords, card numbers or keys, never reads saved passwords, browser profiles or its own settings, never acts on banking, payment or password-manager windows, and never runs commands that wipe disks, your user folder or the system's security.</p>
+      </article>
+      <article class="card">
+        <h3>Careful mode</h3>
+        <p>Web pages, files, the screen and the clipboard can hold text written to trick an AI.</p>
+        <p>Once a chat has read any of these, JARVIS asks before changing anything or sending anything out, for the rest of that chat, whatever your settings. A new chat starts clean.</p>
+      </article>
+      <article class="card">
+        <h3>Emergency stop</h3>
+        <p>Stop and Esc end what JARVIS is doing or saying at once.</p>
+        <p>On Windows, Ctrl+Alt+Backspace stops anything it is doing on the PC from any app, and saying "JARVIS, stop" is caught even while it is talking.</p>
+      </article>
+      <article class="card">
+        <h3>Step-by-step control <span class="tag win">Windows only</span></h3>
+        <p>Optional and off by default: an AI moves the mouse and types to carry out one task you give it.</p>
+        <p>By default each step is shown and waits for your OK. It refuses tasks and windows that involve sign-ins, payments, banking or trading, never types anything that looks like a password, and stops after 30 steps or 10 minutes. A picture of the screen is sent to Google's Gemini model for each step, and the panel says so.</p>
+        <p class="needs"><b>Needs:</b> a Gemini key.</p>
+      </article>
+      <article class="card">
+        <h3>Email and online accounts</h3>
+        <p>Optional: JARVIS can look things up in, and act on, the email and calendar accounts you connect through Composio.</p>
+        <p>For each request a small helper AI is started that reaches only your connected accounts. A helper that looks things up can only read; anything that sends, creates, changes or deletes waits for your yes first. Email can also be sent directly with an app password, after your yes, or opened as a draft in your mail app.</p>
+        <p class="needs"><b>Needs:</b> your own Composio project key, or an email app password.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ================= Coding ================= -->
+  <section class="feature-group" id="coding" aria-labelledby="coding-h">
+    <h2 id="coding-h">Coding with agents</h2>
+    <p>Describe what to build and choose Build. The coding agents run on your own subscriptions.</p>
+    <div class="grid">
+      <article class="card">
+        <h3>Jobs in a copy of your project</h3>
+        <p>A coding agent works in a separate git branch in its own folder, never in your real checkout.</p>
+        <p>The project's checks run on the result. It is merged into your project on this computer only if the checks pass, the base branch is unchanged and no protected file was touched. Nothing is pushed or deployed. Keys and tokens are removed from the job's environment, and the agents run in their normal permission mode, never with bypass flags.</p>
+        <p class="needs"><b>Needs:</b> the Claude Code and/or Codex command-line tools, signed in with your own subscriptions; Git.</p>
+      </article>
+      <article class="card">
+        <h3>The right agent for the size of the task</h3>
+        <p>Small, normal and complex tasks go to different models, chosen between Claude Code and Codex.</p>
+        <p>The allowance left on each subscription is read and shown, with its reset time. An agent that hits a usage limit is set aside and the job moves to the next one, keeping the edits made so far.</p>
+      </article>
+      <article class="card">
+        <h3>Checks, repairs and recovery</h3>
+        <p>If the project's checks fail, the job makes a limited number of attempts to repair them.</p>
+        <p>If no attempt passes, the branch is kept for you rather than merged. Jobs interrupted by a restart are recovered, and jobs on the same project run one after another.</p>
+      </article>
+      <article class="card">
+        <h3>Review and undo</h3>
+        <p>A change that passed its checks can wait for you to look at its diff before it is merged.</p>
+        <p>A merged change can be undone with a checked revert commit, and your own work is never discarded. An optional second review of the diff by the other provider can be switched on.</p>
+      </article>
+      <article class="card">
+        <h3>Ultracode and dry run</h3>
+        <p>Ultracode gives work that has to be right the strongest model, thinking as hard as it can, and a second AI looks at the result.</p>
+        <p>It uses much more of your allowance, and says so. Dry run shows what JARVIS would do with what you typed (which AI, which steps, what counts as done) without starting anything.</p>
+      </article>
+      <article class="card">
+        <h3>A job that stops to ask</h3>
+        <p>When a coding job needs an answer from you, it shows the question with a way to reply.</p>
+        <p>Your yes is tied to exactly the question on the screen and is used once; if the job is asking something else by then, the yes is refused. The same job then carries on. A yes in words never lifts the job's safety rules.</p>
+      </article>
+      <article class="card">
+        <h3>Planner and builder</h3>
+        <p>One model plans and never changes a file; another builds, a few steps at a time.</p>
+        <p>The planner can only read, list and search files. The builder is an ordinary coding job, with its own copy and the project's checks. What it did goes back to the planner, which revises the plan and hands over the next part. After a fixed number of hand-overs the pair stops and waits for you, so two models cannot go round in circles on your allowance.</p>
+      </article>
+      <article class="card">
+        <h3>Agents: the list of all work</h3>
+        <p>One panel shows every agent at work: coding jobs, planners and builders, the assistant answering in a chat, a trial in the Court, a skill pack being scanned.</p>
+        <p>It shows what each is doing this moment and since when, what is waiting for you, what is scheduled (timers, reminders, routines) and what has just finished. It only reads; nothing there starts or stops anything.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ================= Security ================= -->
+  <section class="feature-group" id="security" aria-labelledby="security-h">
+    <h2 id="security-h">Security check and fix</h2>
+    <p>Find the usual holes in one of your projects, and have them fixed in a copy.</p>
+    <div class="grid">
+      <article class="card">
+        <h3>The check</h3>
+        <p>JARVIS reads a project's files, says what kind of project it is and which scanners ran, and lists what it found with the line in question.</p>
+        <p>It only reads: nothing from the project is imported, run or installed, symbolic links are not followed, and it has hard limits on files, size and time. Any secret it finds is shown hidden. Nothing is sent anywhere; Bandit is used for Python projects only if it is installed outside the project.</p>
+      </article>
+      <article class="card">
+        <h3>The fix, and undo</h3>
+        <p>Tick the findings you want fixed, and one ordinary coding job fixes them in its own copy of the project.</p>
+        <p>The copy can be scanned again to see that the findings are gone. Applying the fix goes through the usual review and checks, and always waits for you to look, even in a project that otherwise merges by itself. It can be undone later.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ================= Routines ================= -->
+  <section class="feature-group" id="routines" aria-labelledby="routines-h">
+    <h2 id="routines-h">Routines</h2>
+    <p>Something you want done again and again, at the times you choose.</p>
+    <div class="grid">
+      <article class="card">
+        <h3>Requests on a schedule</h3>
+        <p>For example "every morning at 8, tell me what is on my calendar" or "every 2 hours, run my project's tests and fix what fails".</p>
+        <p>A routine is a request, the project it is about (if any), whether it is answered in a chat or run as a coding job, which agent does it, and when. Each run is a message in the routine's own chat, so its whole history is in one place.</p>
+      </article>
+      <article class="card">
+        <h3>No more rights than you</h3>
+        <p>Each run is sent through the same path as a message you type, so every approval, review and limit applies to it.</p>
+        <p>A run that needs your yes waits for it. A time slot is fired at most once; after the app was off, only the latest missed run is started, never a burst; runs never pile up; and after 5 failed runs in a row the routine pauses itself and says so.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ================= Artifacts ================= -->
+  <section class="feature-group" id="artifacts" aria-labelledby="artifacts-h">
+    <h2 id="artifacts-h">Artifacts</h2>
+    <p>Pages, slides, sheets, charts and whiteboards, with their history.</p>
+    <div class="grid">
+      <article class="card">
+        <h3>Things it makes, in one library</h3>
+        <p>A reply that makes something whole (a web page, a picture, a diagram, a small app, a document, slides, a sheet, a chart) shows it beside the chat.</p>
+        <p>Everything made in every chat is also kept in one library, and you can start a document, slides, a sheet, a chart, a design or a whiteboard there directly and edit it yourself.</p>
+      </article>
+      <article class="card">
+        <h3>Every version kept</h3>
+        <p>A version is never rewritten or dropped by a later one.</p>
+        <p>Going back to an earlier version adds it again as the newest, so nothing is lost. Artifacts are kept in the app's own folder on your computer, one file each, and anything that looks like a key is hidden before it is written.</p>
+      </article>
+      <article class="card">
+        <h3>Data, never run</h3>
+        <p>Slides, sheets (with formulas), charts and whiteboards are drawn by the app itself from plain text.</p>
+        <p>Nothing in an artifact is ever run as code or treated as an instruction. Pages run in a sealed frame that cannot reach the app or its data, and a sheet saved as CSV keeps only the plain sums the app itself understands: any other cell a spreadsheet program would run is saved as text. What private or deleted chats made is not listed.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ================= Court ================= -->
+  <section class="feature-group" id="court" aria-labelledby="court-h">
+    <h2 id="court-h">The Court of JARVIS</h2>
+    <p>One idea, put on trial, in the Courtroom panel.</p>
+    <div class="grid">
+      <article class="card">
+        <h3>Five stages</h3>
+        <p>You submit one idea per session. It goes before the Grand Jury (can it be tried at all?), the Prosecution (the strongest honest case against it), three Analysts (does it hold up in the real world, with sources from the web), the Tribunal (a ruling on fixed criteria) and the Executioner, who only pronounces.</p>
+        <p>An adverse decision at any stage sends the idea straight to the Executioner.</p>
+        <p class="needs"><b>Needs:</b> the Claude Code command-line tool.</p>
+      </article>
+      <article class="card">
+        <h3>A verdict worked out in code</h3>
+        <p>The AI writes the arguments; each stage's decision and the verdict are worked out by the app from what the stages said.</p>
+        <p>A stage that has decided is never asked again, so there are no second tries for a kinder answer. Once submitted, the idea cannot be changed. What the Analysts read on the web is evidence, never instructions, and if they could not search, the record says so. A trial that was cut off can be resumed.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ================= Memory ================= -->
+  <section class="feature-group" id="memory" aria-labelledby="memory-h">
+    <h2 id="memory-h">Your notes as its memory</h2>
+    <p>An Obsidian vault is JARVIS's second brain: plain Markdown notes you can read and edit.</p>
+    <div class="grid">
+      <article class="card">
+        <h3>Chats and memory as notes</h3>
+        <p>Chats, project memory and the results of coding jobs are saved as Markdown notes in your vault.</p>
+        <p>"Remember that…" is kept in a note you can edit. Each project has its own memory note for its requirements and decisions.</p>
+      </article>
+      <article class="card">
+        <h3>Only what is needed is sent</h3>
+        <p>A model gets recent history and the project's memory, not your whole archive.</p>
+        <p>Links to other notes in a message attach those notes, if they are not private. Notes are searched with a full-text index on your computer, with no cloud or model call.</p>
+      </article>
+      <article class="card">
+        <h3>Private notes stay private</h3>
+        <p>Notes in a Private folder, and notes marked private in their header, are never given to a model.</p>
+        <p>A chat can also be kept out of context. What is not listed cannot be fetched by its id either.</p>
+      </article>
+      <article class="card">
+        <h3>Bring your old conversations</h3>
+        <p>Claude and ChatGPT exports (JSON or ZIP) can be imported and kept as reference.</p>
+        <p>An optional browser extension, which you load and pair yourself, can capture conversations you open on those two websites and send them only to JARVIS on your computer. It does not read cookies or passwords.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ================= Skills ================= -->
+  <section class="feature-group" id="skills" aria-labelledby="skills-h">
+    <h2 id="skills-h">Skills and mods</h2>
+    <p>Playbooks for the coding agents, and your own changes to how JARVIS behaves.</p>
+    <div class="grid">
+      <article class="card">
+        <h3>Skill packs, scanned first</h3>
+        <p>A pack of skills (a folder, a .zip or a git address) is fetched once and scanned with SkillSpector before anything else happens.</p>
+        <p>Nothing in a pack is ever run: it is text for the coding agents to read. An item is only usable once a finished scan has covered it; an item with findings stays off unless you switch it on by name after seeing what was found.</p>
+        <p class="needs"><b>Needs:</b> SkillSpector installed; without it, no skill is added.</p>
+      </article>
+      <article class="card">
+        <h3>Only the skills that fit</h3>
+        <p>When a coding job starts, the few switched-on items that fit the task are put beside it as files and named in two lines each.</p>
+        <p>An agent that does not need them never reads them, so a large library adds little to each job.</p>
+      </article>
+      <article class="card">
+        <h3>Mods</h3>
+        <p>Your own commands (a short /name for a longer request), hooks, panels and a status line.</p>
+        <p>A hook can show a note or say something when JARVIS opens, an answer or coding job finishes, or a reminder is due. A panel is a page of your own, pinned beside the chat and sealed off like every page JARVIS makes.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ================= Privacy ================= -->
+  <section class="feature-group" id="privacy" aria-labelledby="privacy-h">
+    <h2 id="privacy-h">Privacy and safety</h2>
+    <p>JARVIS has no server and no account of its own. What leaves your computer goes to the services you set up, for the work you asked for.</p>
+    <div class="grid">
+      <article class="card">
+        <h3>Runs only on your computer</h3>
+        <p>The app is a small service listening at 127.0.0.1, on your computer only, shown in its own window.</p>
+        <p>It refuses requests addressed to any other host name, needs a fresh random token on every request, and keeps its port to itself so no other program can listen beside it. On Windows, the window page that carries the token is only given to programs of your own account.</p>
+      </article>
+      <article class="card">
+        <h3>Keys in the system key store</h3>
+        <p>API keys live only in environment variables or the system's credential store (Credential Manager on Windows).</p>
+        <p>They are never written to the vault, logs, receipts or chats, and are masked if they appear in any text. Coding jobs run with every key and token removed from their environment.</p>
+      </article>
+      <article class="card">
+        <h3>Private notes never sent to a model</h3>
+        <p>Notes in a Private folder or marked private are never released for AI use.</p>
+        <p>Secrets are removed from text before it is written to the vault or logs, or sent to a model.</p>
+      </article>
+      <article class="card">
+        <h3>Approvals bound to what was shown</h3>
+        <p>A yes covers one action, with exactly the details you were shown, once.</p>
+        <p>Actions the app carries out for the assistant (email, timers, memory, coding jobs) run from a one-time permit holding exactly what was approved. A yes to a coding job's question answers that question and no other.</p>
+      </article>
+      <article class="card">
+        <h3>Where your words go</h3>
+        <p>Messages go to Anthropic through your Claude subscription, or to OpenAI when Codex does a coding job.</p>
+        <p>Speech goes to Groq or OpenAI to be transcribed, and replies to ElevenLabs to be spoken, when you use those. Other services are reached only for the request that needs them: a web search, the weather, a picture (the free Pollinations service receives its description). The app has no server of its own to send anything to.</p>
+      </article>
+    </div>
+  </section>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <div>
+      <a class="brand" href="index.html"><img src="assets/logo.svg" alt="" width="24" height="24">JARVIS</a>
+      <p>Free and open source. No trackers, no cookies, no analytics on this site.</p>
+      <p>JARVIS is an independent project and is not affiliated with any company; "JARVIS" is simply the app's name.</p>
+    </div>
+    <nav aria-label="Footer">
+      <ul>
+        <li><a href="index.html">Home</a></li>
+        <li><a href="features.html">Features</a></li>
+        <li><a href="download.html">Download</a></li>
+        <li><a href="https://github.com/Vihan-2008/jarvis" rel="noopener">GitHub</a></li>
+        <li><a href="https://github.com/Vihan-2008/jarvis/releases/latest" rel="noopener">Releases</a></li>
+      </ul>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

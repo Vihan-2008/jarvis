@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <radialGradient id="glow" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#8f80ff" stop-opacity=".32"/>
+      <stop offset=".42" stop-color="#5ad1e6" stop-opacity=".09"/>
+      <stop offset=".7" stop-color="#5ad1e6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="sphere" cx=".34" cy=".28" r=".8">
+      <stop offset="0" stop-color="#d9d3ff"/>
+      <stop offset=".24" stop-color="#8f80ff"/>
+      <stop offset=".52" stop-color="#3b8fb4"/>
+      <stop offset=".8" stop-color="#15152a"/>
+    </radialGradient>
+    <pattern id="dots" width="9" height="9" patternUnits="userSpaceOnUse">
+      <circle cx="4.5" cy="4.5" r="1.3" fill="#0b0b0f" fill-opacity=".55"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="630" fill="#0b0b0f"/>
+  <circle cx="900" cy="315" r="300" fill="url(#glow)"/>
+  <circle cx="900" cy="315" r="160" fill="url(#sphere)"/>
+  <circle cx="900" cy="315" r="160" fill="url(#dots)"/>
+  <ellipse cx="900" cy="315" rx="215" ry="54" fill="none" stroke="#8f80ff" stroke-opacity=".5" stroke-width="2" stroke-dasharray="2 7" transform="rotate(-18 900 315)"/>
+  <ellipse cx="900" cy="315" rx="228" ry="70" fill="none" stroke="#5ad1e6" stroke-opacity=".35" stroke-width="2" stroke-dasharray="2 9" transform="rotate(24 900 315)"/>
+  <text x="80" y="236" fill="#ededf2" font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="30" font-weight="600" letter-spacing="6">JARVIS</text>
+  <text x="80" y="318" fill="#ededf2" font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="52" font-weight="600">A desktop assistant that</text>
+  <text x="80" y="380" fill="#ededf2" font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="52" font-weight="600">talks, codes and acts,</text>
+  <text x="80" y="442" fill="#ededf2" font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="52" font-weight="600">and asks first.</text>
+  <text x="80" y="512" fill="#a8a8b8" font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="26">Free and open source. Runs on your own computer.</text>
+</svg>

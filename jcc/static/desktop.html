@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>JARVIS · Workspace</title>
+<meta name="jcc-direct" content="__JCC_DIRECT__"><script nonce="__JCC_NONCE__">try{var t=localStorage.getItem("nv-theme")||"system";if(t==="light"||(t==="system"&&!matchMedia("(prefers-color-scheme: dark)").matches))document.documentElement.dataset.theme="light"}catch(e){}</script><link rel="stylesheet" href="/nova.css"><!-- The earlier stylesheets stay available but switched off: nova.css now styles every screen. --><link rel="stylesheet" href="/horizon.css" disabled><link rel="stylesheet" href="/everyday.css" disabled></head><body class="everyday">
+<div class="layout">
+<aside class="sidebar" id="sidebar"><div class="brand"><span class="mark">J</span><div>JARVIS<small>AUTONOMOUS SYSTEM</small></div></div>
+<button class="primary" id="new-chat">＋ New chat</button><input class="search" id="search" placeholder="Find a chat…" aria-label="Find a chat">
+<section><div class="section-label">Projects <button class="icon-button" id="new-project" aria-label="Create project">＋</button></div><div class="nav-list" id="projects"></div></section>
+<section><div class="library-tabs"><button id="workspace-tab" class="active">Workspace</button><button id="history-tab">History <span id="history-count"></span></button></div><div class="section-label" id="library-heading">Your chats</div><div class="nav-list" id="chats"></div></section>
+<footer class="sidebar-footer"><div id="service-status"><span class="dot off"></span>Connecting…</div><div>Saved in your Obsidian vault</div><button class="link-button" id="open-memory">Settings</button></footer></aside>
+<main class="center"><header class="topbar"><div style="display:flex;align-items:center;gap:10px"><button class="icon-button mobile-menu" id="menu" aria-label="Toggle navigation">☰</button><div><h1 id="chat-title">Your workspace</h1><div class="caption" id="chat-caption">A place to think, build and remember.</div></div></div><div style="display:flex;gap:8px;align-items:center"><button class="pill" id="project-pill">General</button><button class="plain" id="info" aria-label="Settings">Settings</button></div></header>
+<div class="offline hidden" id="offline">JARVIS is reconnecting. Your saved chats are safe.</div><section class="messages" id="messages" aria-live="polite"></section>
+<div class="composer-wrap"><span id="chat-turn-state" role="status"></span><form class="composer" id="composer"><textarea id="message" maxlength="2000" placeholder="Describe what you want to build, or ask anything…" aria-label="Message JARVIS" required></textarea><div class="composer-bottom"><div class="options"><select id="mode" aria-label="Task mode"><option value="auto">Auto · decide for me</option><option value="code">Build · edit code</option><option value="chat">Ask · discuss</option></select><select id="agent" aria-label="Coding agent"><option value="auto">Auto · Claude / GPT</option><option value="claude">Claude</option><option value="codex">GPT / Codex</option></select></div><button class="send" id="send" type="submit">Send ↑</button></div></form><p class="hint">Automatic model selection · Progress survives agent switches · Enter to send, Shift+Enter for a new line</p></div></main>
+<aside class="details" id="details"><div style="display:flex;align-items:center;justify-content:space-between"><h2>Workspace details</h2><span id="close-details" class="hidden"></span></div>
+<section class="detail-section"><h3>Automatic team</h3><div id="agents"></div><div class="small">JARVIS chooses by task complexity and skips agents or models cooling down.</div><div id="routing"></div></section>
+<section class="detail-section"><h3 style="display:flex;justify-content:space-between">Plan allowance <button class="link-button" id="quota-refresh">Refresh</button></h3><div id="quotas" class="small">Checking signed-in accounts…</div><p class="small">Remaining plan allowance, not an exact token balance. GPT figures cover Codex; ChatGPT chat-model caps are separate.</p></section><section class="detail-section"><h3>Second brain</h3><div class="memory-card"><b>Obsidian is your memory</b><p>Chats, project decisions, job results and imported histories stay in your vault. Only relevant project memory and recent turns are retrieved.</p></div><div class="links"><a id="vault-link" href="#">Open vault</a><a id="project-memory" class="hidden" href="#">Project memory</a><a id="chat-note" class="hidden" href="#">Chat note</a></div><div id="history-status" class="small" style="margin-top:12px"></div><label class="import-label">Import a Claude / ChatGPT export<input id="import-file" type="file" accept=".json,.zip,.jsonl,.ndjson"></label><div class="links"><button class="link-button" id="imports-folder">Import folder</button><button class="link-button" id="extension-folder">Browser sync setup</button><button class="link-button" id="pairing">Copy browser pairing code</button></div><p class="small">Website sync requires the one-time JARVIS browser extension setup. It captures opened chats; exports fill older history. No account passwords are stored by JARVIS.</p></section>
+<section class="detail-section"><h3>Active work</h3><div id="jobs" class="small">No jobs running.</div></section><section><h3 style="font-size:10px;letter-spacing:1px;color:var(--muted)">NEEDS YOUR ATTENTION</h3><div id="approvals" class="small">Nothing waiting.</div></section></aside></div>
+<dialog id="chat-dialog"><form id="chat-form"><h2>A fresh conversation</h2><p>Link a project to keep its context together. A chat stays connected once work begins.</p><label for="chat-name">Chat name</label><input id="chat-name" placeholder="New chat" maxlength="100"><label for="chat-project">Project</label><select id="chat-project"></select><div class="actions"><button type="button" class="plain" data-close="chat-dialog">Cancel</button><button class="primary" type="submit">Create chat</button></div></form></dialog>
+<dialog id="project-dialog"><form id="project-form"><h2>Make something new</h2><p>JARVIS creates a project folder, a Git repository and starter checks, then opens a linked chat. No paid service or deployment is created.</p><label for="project-name">Project name</label><input id="project-name" placeholder="My next idea" maxlength="100" required><label for="project-kind">Starting point</label><select id="project-kind"><option value="python">Python application</option><option value="web">Website · HTML, CSS, JavaScript</option><option value="node">Node.js application</option></select><p class="error hidden" id="project-error"></p><div class="actions"><button type="button" class="plain" data-close="project-dialog">Cancel</button><button class="primary" type="submit" id="create-project">Create project</button></div></form></dialog>
+<dialog id="settings-dialog" class="settings-dialog"><div class="settings-head"><div><h2>Settings</h2><p style="margin:5px 0 0">Your workspace, memory and account connections.</p></div><button class="plain" id="settings-close" aria-label="Close settings">Close</button></div><nav class="settings-tabs" aria-label="Settings sections"><button data-settings-tab="memory">Memory & sync</button><button data-settings-tab="usage">Usage & models</button><button data-settings-tab="app">App & projects</button></nav><div id="settings-body"></div></dialog><div id="toast" class="toast hidden" role="status"></div>
+<script nonce="__JCC_NONCE__">
+const PREFS=__JCC_PREFS__;
+// A script error in this window is told to the app (kept in a short log on this PC), so that a window that stopped working can be looked into.
+(()=>{let told=0;const tell=what=>{if(told++>=8)return;try{fetch("/api/window",{method:"POST",keepalive:true,headers:{"Content-Type":"application/json","X-JCC-Token":TOKEN},body:JSON.stringify({problem:String(what).slice(0,700)})}).catch(()=>{})}catch{}};
+addEventListener("error",e=>tell((e.message||"error")+" @ "+String(e.filename||"").split("/").pop()+":"+e.lineno+":"+e.colno));
+addEventListener("unhandledrejection",e=>{const why=e.reason;const text=String((why&&(why.stack||why.message))||why);if(!/reconnecting|Failed to fetch|aborted/i.test(text))tell("unhandled: "+text)});})();
+const TOKEN="__JCC_TOKEN__",$=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+if(sessionStorage.getItem('jcc-draft')){$('message').value=sessionStorage.getItem('jcc-draft');sessionStorage.removeItem('jcc-draft')}
+let state=null,chat=null,current='',busy=false,linkCurrent=false,lastMessages='',polling=false;let libraryMode=localStorage.getItem('jcc-library')||'workspace',selectedProject=localStorage.getItem('jcc-project-filter')||'';
+async function api(path,body){const r=await fetch(path,{method:body===undefined?'GET':'POST',headers:{'X-JCC-Token':TOKEN,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});if(r.status===401){sessionStorage.setItem('jcc-draft',$('message').value);location.reload();throw Error('JARVIS is reconnecting.')}const d=await r.json();if(!r.ok)throw Error(d.error||'Request failed');return d}
+function toast(text){$('toast').textContent=text;$('toast').classList.remove('hidden');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('toast').classList.add('hidden'),6500)}
+function projectName(key){return state?.projects.find(p=>p.key===key)?.name||'General'}
+function welcome(){return `<div class="welcome"><div class="eyebrow">JARVIS // SYSTEM ONLINE</div><h2>What are we<br>building today?</h2><p>Bring an idea. JARVIS picks the right coding agent, keeps the work moving, and remembers the context for next time.</p><div class="suggestions"><button class="suggestion" data-action="project">Start a new project<span>Turn an idea into a working starting point ↗</span></button><button class="suggestion" data-prompt="Explain how this workspace remembers my projects">Think it through<span>Ask a question, plan a feature, explore an idea ↗</span></button></div></div>`}
+function renderChat(c){chat=c;const key=JSON.stringify(c?.messages||[]);$('chat-title').textContent=c?.title||(selectedProject?projectName(selectedProject):'Your workspace');$('chat-caption').textContent=c?.project?'Working in '+projectName(c.project):'A place to think, build and remember.';$('project-pill').textContent=projectName(c?.project||selectedProject);$('chat-note').classList.toggle('hidden',!c);if(c)$('chat-note').href=obsidian('Conversations/'+c.id);const p=state?.projects.find(p=>p.key===(c?.project||selectedProject));$('project-memory').classList.toggle('hidden',!p);if(p)$('project-memory').href=p.memory;if(key===lastMessages)return;lastMessages=key;const box=$('messages'),atBottom=box.scrollHeight-box.scrollTop-box.clientHeight<120;if(!c?.messages.length){box.innerHTML=welcome();return}box.innerHTML=c.messages.map(m=>`<article class="message ${m.role==='user'?'user':'assistant'}"><div class="speaker">${m.role==='user'?'You':'JARVIS'}</div><div class="content">${m.role==='assistant'&&window.renderRichText?window.renderRichText(m.content):esc(m.content)}</div><div class="message-meta">${m.role==='assistant'?`<button class="message-action" data-answer-action="copy" data-message-index="${c.messages.indexOf(m)}">Copy</button><button class="message-action" data-answer-action="speak" data-message-index="${c.messages.indexOf(m)}">Read aloud</button><button class="message-action" data-answer-action="save" data-message-index="${c.messages.indexOf(m)}">Save</button>`:''}${m.image_ids?.length?`<span>${m.image_ids.length} image${m.image_ids.length===1?'':'s'} in this chat context</span>`:''}${m.status?`<span class="status ${esc(m.status)}">${esc(m.status.replaceAll('_',' '))}</span>`:''}${m.agent?esc(m.agent==='codex'?'GPT / Codex':m.agent):''}${m.model&&m.model!=='none'?esc(m.model):''}${m.receipt?`<a href="${esc(obsidian('Requests/'+m.receipt.slice(0,4)+'/'+m.receipt.slice(4,6)+'/'+m.receipt))}">Details ↗</a>`:''}</div></article>`).join('');if(atBottom||busy)box.scrollTop=box.scrollHeight}
+function obsidian(note){return 'obsidian://open?vault='+encodeURIComponent(state?.vault.name||'Obsidian Vault')+'&file='+encodeURIComponent(note)}
+function isWorkspace(c){return !c.archived&&(c.workspace===true||!c.source||!!c.project)}
+function renderLists(){
+ const openGroups=new Set([...$('chats').querySelectorAll('details[open]')].map(e=>e.dataset.group));
+ const q=$('search').value.trim().toLowerCase();const active=state.chats.filter(isWorkspace),archive=state.chats.filter(c=>!isWorkspace(c));
+ $('workspace-tab').classList.toggle('active',libraryMode==='workspace');$('history-tab').classList.toggle('active',libraryMode==='history');$('history-count').textContent=archive.length||'';
+ let items=q?state.chats.filter(c=>(c.title+' '+projectName(c.project)+' '+(c.source||'')).toLowerCase().includes(q)):libraryMode==='history'?archive:active.filter(c=>!selectedProject||c.project===selectedProject);
+ $('library-heading').textContent=q?'Search results · '+items.length:libraryMode==='history'?'Saved history':selectedProject?projectName(selectedProject):'Active conversations';
+ const row=c=>`<button class="nav-item ${c.id===current?'active':''}" data-chat="${esc(c.id)}">${esc(c.title)}<small>${esc(projectName(c.project))}</small></button>`;
+ if(libraryMode==='history'&&!q){
+ const labels={'Claude':'Claude conversations','ChatGPT':'ChatGPT conversations','Codex local':'Codex desktop & CLI','Claude Code local':'Claude Code sessions','null':'JARVIS chats'};
+ const sources=[...new Set(items.map(c=>c.source))].sort((a,b)=>['Claude','ChatGPT','Codex local','Claude Code local'].indexOf(a)-['Claude','ChatGPT','Codex local','Claude Code local'].indexOf(b));
+ $('chats').innerHTML=sources.map(source=>{const group=items.filter(c=>c.source===source);return `<details class="history-group" data-group="${esc(source)}" ${openGroups.has(source)?'open':''}><summary>${esc(labels[source]||source)}<span>${group.length}</span></summary><div class="nav-list">${group.slice(0,50).map(row).join('')}${group.length>50?'<div class="nav-empty">Search to find more conversations.</div>':''}</div></details>`}).join('')||'<div class="nav-empty">Imported and synced history will appear here.</div>';
+ }else $('chats').innerHTML=items.slice(0,50).map(row).join('')||`<div class="nav-empty">${q?'No matching conversations.':'Start a new chat'+(selectedProject?' for this project':'')+'. Older conversations are in History.'}</div>`;
+ $('projects').innerHTML=`<button class="nav-item project-item ${!selectedProject?'active':''}" data-project="all">All projects</button>`+state.projects.map(p=>`<button class="nav-item project-item ${selectedProject===p.key?'active':''}" data-project="${esc(p.key)}">◇ &nbsp;${esc(p.name)}<span class="project-count">${active.filter(c=>c.project===p.key).length||''}</span></button>`).join('');
+}
+function selectProject(key){selectedProject=key==='all'?'':key;localStorage.setItem('jcc-project-filter',selectedProject);libraryMode='workspace';localStorage.setItem('jcc-library',libraryMode);current='';localStorage.removeItem('jcc-chat');lastMessages='';renderChat(null);renderLists();$('sidebar').classList.remove('open')}
+$('workspace-tab').onclick=()=>{libraryMode='workspace';localStorage.setItem('jcc-library',libraryMode);renderLists()};$('history-tab').onclick=()=>{libraryMode='history';localStorage.setItem('jcc-library',libraryMode);renderLists()};
+
+function renderState(d){state=d;if(pendingSettings){const section=pendingSettings;pendingSettings=null;openSettings(section)}if(window.updateModelPicker)window.updateModelPicker(d);renderLists();$('service-status').innerHTML=`<span class="dot ${d.watcher==='off'?'off':''}"></span>${d.watcher==='off'?'Background paused':'Background running'}`;$('vault-link').href=d.dashboard;$('agents').innerHTML=Object.entries(d.agents).map(([name,a])=>`<div class="agent-row"><strong><span class="dot ${a.state==='ready'?'':'off'}"></span>${name==='codex'?'GPT / Codex':'Claude Code'}</strong><small>${esc(a.state==='ready'?'Available locally':a.state)} · ${a.runs_today} runs today</small></div>`).join('');$('routing').innerHTML=Object.entries(d.routing.levels).map(([level,order])=>`<div class="route-row"><span>${esc(level[0].toUpperCase()+level.slice(1))} tasks</span><span>${esc(d.routing.models[order[0]]?.[level]||'Default model')}</span></div>`).join('');$('quotas').innerHTML=Object.entries(d.quotas||{}).map(([name,q])=>'<div style="margin:14px 0"><b>'+(name==='codex'?'GPT / Codex':'Claude')+'</b>'+((q.windows||[]).map(w=>'<div style="margin-top:9px">'+esc(w.name)+' · <b>'+Math.round(w.remaining_percent)+'% left</b><div style="height:5px;background:#e1e4dc;border-radius:5px;margin:6px 0"><div style="height:5px;border-radius:5px;background:#66846a;width:'+Math.max(0,Math.min(100,w.remaining_percent))+'%"></div></div>'+(w.reset_at?'Resets '+new Date(w.reset_at*1000).toLocaleString():'')+'</div>').join('')||'<p>'+esc(q.error||'Not available yet.')+'</p>')+(q.at?'<div style="margin-top:6px">Checked '+new Date(q.at*1000).toLocaleTimeString()+(Date.now()/1000-q.at>600?' · stale':'')+'</div>':'')+'</div>').join('');$('jobs').innerHTML=d.jobs.map(j=>`<div class="job-card"><a href="${esc(j.obsidian)}">${esc(j.task||'Coding task')}</a><span class="status ${esc(j.status)}">${esc(j.status)}</span> ${esc(j.agent||'Auto')} · ${esc(j.model||j.level)}</div>`).join('')||'No jobs running.';$('approvals').innerHTML=d.approvals.map(j=>`<div class="job-card"><a href="${esc(j.obsidian)}">${esc(j.task)}</a>${esc(j.blocked_by||'Review the saved branch and job details.')}</div>`).join('')||'Nothing waiting.';let h='JARVIS chats: saving continuously.';if(d.history.import)h+='<br>Last export: '+(d.history.import.total_conversations||d.history.import.conversations)+' conversations.';if(d.history.capture)h+='<br>Website capture: '+esc(d.history.capture.source)+' · '+new Date(d.history.capture.at*1000).toLocaleTimeString();else h+='<br>Website capture: waiting for connection.';$('history-status').innerHTML=h;if(window.renderEfficiencyStatus)window.renderEfficiencyStatus(d);if($('settings-dialog').open&&settingsSection==='usage'){$('settings-body').querySelector('.settings-usage').innerHTML=$('quotas').innerHTML}if($('settings-capture-status')){$('settings-capture-status').textContent=d.history.capture?'Last website capture: '+d.history.capture.source+' at '+new Date(d.history.capture.at*1000).toLocaleTimeString():'Waiting for the one-time browser connection'}}
+async function refresh(){if(polling)return;polling=true;try{renderState(await api('/api/state'));$('offline').classList.add('hidden');if(current){try{renderChat(await api('/api/chat?id='+encodeURIComponent(current)))}catch(e){current='';localStorage.removeItem('jcc-chat');renderChat(null)}}else renderChat(null)}catch(e){$('offline').classList.remove('hidden')}finally{polling=false}}
+async function openChat(id){current=id;localStorage.setItem('jcc-chat',id);lastMessages='';renderChat(await api('/api/chat?id='+encodeURIComponent(id)));renderLists();$('sidebar').classList.remove('open')}
+async function makeChat(project=selectedProject||null,title='New chat'){selectedProject=project||'';libraryMode='workspace';localStorage.setItem('jcc-project-filter',selectedProject);localStorage.setItem('jcc-library',libraryMode);const c=await api('/api/chats',{project,title});current=c.id;localStorage.setItem('jcc-chat',current);lastMessages='';await refresh();$('message').focus()}
+function chatDialog(project='none',link=false){linkCurrent=link;$('chat-project').innerHTML='<option value="none">General · no project</option>'+state.projects.map(p=>`<option value="${esc(p.key)}">${esc(p.name)}</option>`).join('');$('chat-project').value=project;$('chat-name').value=link?(chat?.title||''):'';$('chat-dialog').querySelector('h2').textContent=link?'Connect this conversation':'A fresh conversation';$('chat-dialog').querySelector('.primary').textContent=link?'Save connection':'Create chat';$('chat-dialog').showModal()}
+let settingsSection='memory',pendingSettings=null;
+function openSettings(section='memory'){
+ if(!state){pendingSettings=section;toast('Connecting to JARVIS…');return}
+ settingsSection=section;const body=$('settings-body');
+ document.querySelectorAll('[data-settings-tab]').forEach(b=>b.classList.toggle('active',b.dataset.settingsTab===section));
+ if(section==='memory'){
+ const captured=state?.history.capture;
+ body.innerHTML=`<div class="settings-box"><h3>Browser chat sync</h3><p>Connect once to save conversations you open on ChatGPT and Claude directly into Obsidian.</p><div class="settings-status" id="settings-capture-status">${captured?'Last website capture: '+esc(captured.source)+' at '+new Date(captured.at*1000).toLocaleTimeString():'Waiting for the one-time browser connection'}</div><div class="settings-buttons"><button class="primary" id="settings-browser-setup">Browser sync setup</button><button class="plain" id="settings-pairing">Copy pairing code</button></div><ol class="small"><li>Open the setup folder using the button above.</li><li>In Chrome, Edge or Comet, open Extensions → enable Developer mode → Load unpacked → select that folder.</li><li>Open the extension settings and paste the pairing code once.</li><li>Refresh a saved conversation and check the sync status here.</li></ol><p class="small">This local extension is unpacked, not store-reviewed. It reads visible messages on those two sites and sends them only to JARVIS on this computer. Closed chats and chats on other devices need a full export.</p></div><div class="settings-box"><h3>Obsidian memory</h3><div class="settings-path">${esc(state?.memory.path)}</div><p>JARVIS chats and local Codex / Claude Code dialogue save automatically. Project decisions stay in Obsidian. Imported Claude history: ${state?.history.import?.total_conversations||0} conversations.</p><div class="settings-buttons"><button class="plain" id="settings-imports">Open import folder</button><a href="${esc(obsidian('System/JARVIS Guide'))}">Read the guide ↗</a></div><label for="settings-import-file">Import a Claude or ChatGPT export</label><input type="file" id="settings-import-file" accept=".json,.zip,.jsonl,.ndjson"></div>`;
+ if(window.mountMemorySettings)window.mountMemorySettings();$('settings-body').insertAdjacentHTML('beforeend','<div class="settings-box"><h3>Sync diagnostics</h3><div id="sync-diagnostics"></div><p class="small">A saved capture confirms that source only. Older timestamps do not confirm continuous desktop chat capture.</p></div>');if(window.renderEfficiencyStatus)window.renderEfficiencyStatus(state);$('settings-browser-setup').onclick=()=>$('extension-folder').click();$('settings-pairing').onclick=()=>$('pairing').click();$('settings-imports').onclick=()=>$('imports-folder').click();$('settings-import-file').onchange=e=>$('import-file').onchange(e);
+ }else if(section==='usage'){
+ body.innerHTML='<div class="settings-buttons"><button class="primary" id="settings-refresh-usage">Refresh allowances</button></div><p>Provider-reported remaining plan allowance and reset times. These are percentages, not an exact token balance. GPT figures cover Codex; ChatGPT chat-model limits are separate.</p><div class="settings-usage">'+$('quotas').innerHTML+'</div><div class="settings-box"><h3>Automatic model choice</h3>'+$('routing').innerHTML+'<p>Fresh allowance readings, model access and a 5% reserve can change the selected agent. Jobs preserve edits and checkpoints when switching.</p></div>';
+ $('settings-refresh-usage').onclick=()=>$('quota-refresh').click();if(window.mountRoutingSettings)window.mountRoutingSettings();if(window.mountEfficiencySettings)window.mountEfficiencySettings();
+ }else{
+ body.innerHTML=`<div class="settings-box"><h3>Desktop app & startup</h3><p>JARVIS starts in the background when you sign in to Windows. Open it from the Desktop or Start menu. Closing the window leaves background jobs and syncing running.</p><p>Saved Claude and ChatGPT sign-ins are reused. Providers may occasionally expire a session.</p></div><div class="settings-box"><h3>Projects</h3><p>Create Python, website or Node.js projects with starter checks. Use a chat's project chip to connect it to a project.</p><button class="primary" id="settings-new-project">New project</button></div>`;
+ $('settings-new-project').onclick=()=>{$('settings-dialog').close();$('project-dialog').showModal()};
+ }
+ if(!$('settings-dialog').open)$('settings-dialog').showModal();$('settings-dialog').scrollTop=0;
+}
+$('settings-close').onclick=()=>$('settings-dialog').close();document.querySelectorAll('[data-settings-tab]').forEach(b=>b.onclick=()=>openSettings(b.dataset.settingsTab));
+$('new-chat').onclick=()=>state&&chatDialog(selectedProject||'none');$('new-project').onclick=()=>$('project-dialog').showModal();$('project-pill').onclick=()=>state&&chatDialog(chat?.project||selectedProject||'none',!!current);$('search').oninput=()=>state&&renderLists();$('menu').onclick=()=>$('sidebar').classList.toggle('open');$('info').onclick=()=>openSettings('memory');$('close-details').onclick=()=>$('details').classList.remove('open');$('open-memory').onclick=()=>openSettings('memory');
+document.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;try{if(b.dataset.close)$(b.dataset.close).close();if(b.dataset.chat)await openChat(b.dataset.chat);if(b.dataset.project)selectProject(b.dataset.project);if(b.dataset.action==='project')$('project-dialog').showModal();if(b.dataset.prompt){$('message').value=b.dataset.prompt;$('message').focus()}}catch(e){toast(e.message)}});
+$('chat-form').onsubmit=async e=>{e.preventDefault();try{if(linkCurrent){await api('/api/chat/update',{id:current,project:$('chat-project').value,title:$('chat-name').value});await refresh()}else{await makeChat($('chat-project').value==='none'?null:$('chat-project').value,$('chat-name').value||'New chat')}$('chat-dialog').close()}catch(e){toast(e.message)}};
+$('project-form').onsubmit=async e=>{e.preventDefault();$('create-project').disabled=true;$('project-error').classList.add('hidden');try{const p=await api('/api/projects',{name:$('project-name').value,kind:$('project-kind').value});await refresh();await makeChat(p.key);$('project-dialog').close();$('project-name').value='';toast('Project created. Describe what you want to build.')}catch(e){$('project-error').textContent=e.message;$('project-error').classList.remove('hidden')}finally{$('create-project').disabled=false}};
+$('composer').onsubmit=async e=>{e.preventDefault();let text=$('message').value.trim();if(!text||busy)return;busy=true;$('chat-turn-state').textContent='JARVIS is working on your reply…';$('send').disabled=true;try{if(window.preparePromptForSend){const prepared=await window.preparePromptForSend(text);text=prepared.text;if(prepared.review){$('message').value=text;toast('Prompt improved. Review the changes, then press Send again.');return}}if(!current)await makeChat();$('message').value='';const optimistic={...chat,messages:[...(chat?.messages||[]),{role:'user',content:text}]};renderChat(optimistic);const c=await api('/api/chat/send',{id:current,text,agent:$('agent').value,mode:$('mode').value,model:$('model')?.value||'auto',effort:$('effort')?.value||'auto',files:window.jarvisFiles||[],uploads:window.pendingUploads||[],use_browser:$('attach-page')?.checked||false});renderChat(c);window.readNewReply?.(c);if(window.clearJarvisAttachments)window.clearJarvisAttachments();await refresh()}catch(e){$('message').value=text;toast(e.message)}finally{$('chat-turn-state').textContent='';busy=false;$('send').disabled=false;$('message').focus()}};
+$('message').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();$('composer').requestSubmit()}};
+$('quota-refresh').onclick=async()=>{try{await api('/api/quota/refresh',{});toast('Refreshing account allowances. No model tokens are used.')}catch(e){toast(e.message)}};
+$('pairing').onclick=async()=>{try{const d=await api('/api/sync/pairing');await navigator.clipboard.writeText(d.code);toast('Pairing code copied. Paste it into the JARVIS browser extension once.')}catch(e){toast(e.message)}};
+$('extension-folder').onclick=async()=>{try{await api('/api/open-browser-sync',{});toast('Load this browser-sync folder in your browser extensions, then paste the pairing code.')}catch(e){toast(e.message)}};
+$('imports-folder').onclick=async()=>{try{await api('/api/open-imports',{});toast('Drop export ZIP or JSON files into the opened folder.')}catch(e){toast(e.message)}};
+$('import-file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{toast('Importing '+file.name+'…');const r=await fetch('/api/import?name='+encodeURIComponent(file.name),{method:'POST',headers:{'X-JCC-Token':TOKEN,'Content-Type':'application/octet-stream'},body:file});if(r.status===401){sessionStorage.setItem('jcc-draft',$('message').value);location.reload();throw Error('JARVIS is reconnecting.')}const d=await r.json();if(!r.ok)throw Error(d.error);toast('Imported '+d.conversations+' conversations and '+d.metadata_records+' reference records.');await refresh()}catch(e){toast(e.message)}finally{e.target.value=''}};
+lastMessages='initial';renderChat(null);refresh().then(()=>{if(new URLSearchParams(location.search).has('settings'))openSettings('memory')});setTimeout(function poll(){if(!document.hidden)refresh();setTimeout(poll,document.hidden?15000:busy||state?.core==='working'?3500:8000)},3500);
+</script><script src="/workbench.js"></script><script src="/assistant.js"></script><script src="/horizon.js"></script><script src="/delivery.js"></script><script src="/reliability.js"></script><script src="/operations.js"></script><script src="/everyday.js"></script><script nonce="__JCC_NONCE__">
+(() => {
+ const body = document.body;
+ const message = $('message');
+ message.placeholder = 'Talk to JARVIS…';
+ message.addEventListener('focus', () => body.classList.add('home-expanded'));
+ const button = (label, parent, action) => {
+  const control = document.createElement('button');
+  control.type = 'button';
+  control.className = 'plain';
+  control.textContent = label;
+  control.onclick = async () => { try { await action(control); } catch(error) { toast(error.message); } };
+  parent.append(control);
+  return control;
+ };
+ let voiceEnabled = false;
+ const voiceButton = button('Read replies aloud', $('easy-option-body'), control => {
+  if (!window.speechSynthesis) return toast('Read aloud is unavailable on this device.');
+  if (!voiceEnabled && !speechSynthesis.getVoices().some(voice => voice.localService))
+   return toast('No local reading voice is available on this device.');
+  voiceEnabled = !voiceEnabled;
+  if (!voiceEnabled) speechSynthesis.cancel();
+  control.setAttribute('aria-pressed', String(voiceEnabled));
+  control.textContent = voiceEnabled ? 'Turn off spoken replies' : 'Read replies aloud';
+ });
+ voiceButton.setAttribute('aria-pressed','false');
+ window.readNewReply = conversation => {
+  const reply = conversation.messages.at(-1);
+  if (!voiceEnabled || current !== conversation.id || reply?.role !== 'assistant' || !reply.content) return;
+  const voice = speechSynthesis.getVoices().find(item => item.localService);
+  if (!voice) return;
+  const utterance = new SpeechSynthesisUtterance(reply.content);
+  utterance.voice = voice;
+  speechSynthesis.cancel();
+  speechSynthesis.speak(utterance);
+ };
+ button('Workspace', document.querySelector('.composer-bottom'), () => {
+  body.classList.add('workspace-open');
+  $('easy-saved-tab').focus();
+ });
+ const menu = document.querySelector('.easy-more-list');
+ button('Focus view',menu,async () => {
+  await showTool('chat');
+  selectProject(selectedProject);
+  body.classList.remove('workspace-open','home-expanded');
+  message.focus();
+  message.blur();
+  body.classList.remove('home-expanded');
+ });
+ const full = button('Enter fullscreen',menu,async () => {
+  if(document.fullscreenElement) await document.exitFullscreen();
+  else await document.documentElement.requestFullscreen();
+ });
+ document.addEventListener('fullscreenchange', () => {
+  full.textContent = document.fullscreenElement ? 'Leave fullscreen' : 'Enter fullscreen';
+ });
+ button('Delete this chat',menu,async () => {
+  const id = current;
+  if(!id || busy) return toast('Open a saved chat and wait for its reply first.');
+  if(!confirm('Remove this chat from JARVIS? You can restore it in Deleted chats. Its Obsidian note and backups are kept.')) return;
+  await api('/api/library',{action:'delete',id});
+  if(current === id) selectProject(selectedProject);
+  await refresh();
+  toast('Chat moved to Deleted chats.');
+ });
+ button('Deleted chats',menu,async () => {
+  const result = await api('/api/library',{action:'deleted'});
+  const dialog = document.createElement('dialog');
+  dialog.className = 'easy-dialog';
+  dialog.id = 'deleted-list';
+  dialog.setAttribute('aria-label','Deleted chats');
+  const title = document.createElement('h2');
+  title.textContent = 'Deleted chats';
+  dialog.append(title);
+  function empty() {
+   if(!dialog.querySelector('[data-restore]')) title.textContent = 'No deleted chats';
+  }
+  for(const row of result.chats){
+   const restore = button('Restore '+row.title,dialog,async control => {
+    await api('/api/library',{action:'restore',id:row.id});
+    control.remove();
+    empty();
+    await refresh();
+   });
+   restore.dataset.restore = row.id;
+  }
+  empty();
+  button('Close',dialog,() => dialog.close());
+  dialog.onclose = () => dialog.remove();
+  body.append(dialog);
+  dialog.showModal();
+ });
+})();
+</script><script src="/nova-core.js"></script><script src="/nova-rich.js"></script><script src="/nova.js"></script><script src="/nova-kinds.js"></script><script src="/nova-panels.js"></script><script src="/nova-gallery.js"></script><script src="/nova-work.js"></script><script src="/nova-security.js"></script><script src="/nova-permissions.js"></script><script src="/nova-routines.js"></script><script src="/nova-audio.js"></script><script src="/nova-voice.js"></script></body></html>

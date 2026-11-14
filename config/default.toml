@@ -1,0 +1,104 @@
+# JARVIS Command Center configuration (no secrets here — keys live in env vars or
+# the system's own key store). Put your own values in config/local.toml: it is read after this file.
+
+[paths]
+# Your notes (an Obsidian vault). The installer and the first run set this in config/local.toml.
+vault = '~/Documents/JARVIS Vault'
+# Tier 3 job working folders and branch copies (outside the vault, not synced)
+# (%LOCALAPPDATA% is this app's data folder on every system: AppData\Local on Windows,
+# ~/Library/Application Support on a Mac, ~/.local/share on Linux.)
+jobs_root = '%LOCALAPPDATA%/JarvisCommand/jobs'
+state_dir = '%LOCALAPPDATA%/JarvisCommand'
+projects_root = '%LOCALAPPDATA%/JarvisCommand/projects'
+# Folders coding agents may never read or write. Project main checkouts are added automatically:
+# agents only ever work in a separate branch copy (git worktree), never in your real folder.
+protected = ['~/.ssh']
+
+[router]
+classifier = "gemini_lite"     # "gemini_lite" or "none" (swappable; add new ones in jcc/router.py)
+rule_confidence = 0.8          # rules at/above this skip the classifier
+model_confidence = 0.6         # classifier below this falls back to tier 2
+tier3_min_confidence = 0.8     # classifier must be this sure to escalate to tier 3
+
+[models]
+gemini_lite = "gemini-3.5-flash-lite"
+gemini_flash = "gemini-3.5-flash"   # 3.8-flash works but was overloaded (~38 s) on the free tier
+groq = "openai/gpt-oss-20b"
+
+# Daily caps per provider, deliberately BELOW the free-tier limits.
+# Check your real limits in AI Studio (Gemini) and console.groq.com (Groq) and lower these if needed.
+[caps.gemini_lite]
+requests = 150
+tokens = 200000
+
+[caps.gemini_flash]
+requests = 15
+tokens = 100000
+
+[caps.groq]
+requests = 200
+tokens = 60000
+
+[tier3]
+max_running = 2
+timeout_minutes = 45
+cooldown_hours = 5             # skip an agent this long after it reports a usage limit
+reserve_percent = 5           # use another agent when a fresh quota reading is this low
+
+# Which coding agent to try first for each task level (cheapest capable first).
+# Agents that are missing, disabled or cooling down are skipped automatically.
+[tier3.levels]
+small = ["codex", "claude"]
+medium = ["codex", "claude"]
+large = ["claude", "codex"]
+
+# Coding agents use your existing subscriptions (never API keys; those are stripped from the job).
+[agents.claude]               # Claude Code CLI, signed in with Claude Pro
+enabled = true
+command = "claude"
+models = { small = "haiku", medium = "sonnet", large = "opus" }
+
+[agents.codex]                # Codex CLI, signed in with ChatGPT Plus ("" = Codex's own default)
+enabled = true
+command = "codex"
+models = { small = "gpt-6-luna", medium = "gpt-6.1-sol", large = "gpt-6-astra" }
+
+# Grok's command-line agent (x.ai), signed in with your own account. Off until you switch it on (put
+# "[agents.grok]" and "enabled = true" in config/local.toml). Once on, it is used when you choose it, and as a last
+# resort when the others have reached their limits.
+[agents.grok]
+enabled = false
+command = "grok"
+models = { small = "", medium = "", large = "" }      # "" = the tool's own default model (its "fast" one costs twice as much)
+
+# Projects coding jobs may work on: always in a branch copy, tested before merging.
+# Projects you create or connect in the app are kept in the app's own list. One can also be written here or in
+# config/local.toml by hand:
+#
+# [projects.example]
+# name = "Example"
+# path = '~/code/example'
+# base_branch = "main"
+# python = '.venv/Scripts/python.exe'          # relative to the project path ('.venv/bin/python' on Mac and Linux)
+# pythonpath = ["src", "."]
+# checks = [["-m", "pytest", "-q"]]
+# keywords = ["example"]
+# auto_merge = false
+
+[bot]
+# Optional: the read-only summary address of a dashboard of your own that "/bot" reads. Empty = switched off.
+url = ""
+user = ""
+
+[safety]
+# Extra words that mark a window, an address or a request as private or off limits on this PC (a server's name,
+# a product's name). Put your own in config/local.toml.
+private_terms = []
+# Servers of your own that a coding job must never be sent to (an address, a host name).
+server_terms = []
+
+# Desktop helper: a tray icon next to the clock, Ctrl+Alt+J to open JARVIS from anywhere, and
+# Ctrl+Alt+Backspace to stop computer control at once. Set either to false to switch it off.
+[desktop]
+tray = true
+hotkey = true

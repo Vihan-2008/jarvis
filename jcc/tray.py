@@ -1,0 +1,361 @@
+"""Tray icon and keyboard shortcuts for JARVIS (Windows). Runs as a small background helper.
+
+- Tray icon: left-click opens JARVIS; right-click shows a short menu.
+- Ctrl+Alt+J from anywhere opens JARVIS.
+- Ctrl+Alt+Space from anywhere starts talking to JARVIS (the window does not need to be in front).
+- Ctrl+Alt+D from anywhere dictates: speak, and the words are typed where your cursor is.
+- Ctrl+Alt+Backspace is the emergency stop for computer control.
+Standard library only. Start with:  pythonw -m jcc.tray
+"""
+from __future__ import annotations
+
+import ctypes
+import os
+import struct
+import subprocess
+import sys
+import threading
+from ctypes import wintypes
+from pathlib import Path
+
+from jcc.config import ROOT, load
+from jcc.lock import InstanceLock
+
+WM_DESTROY, WM_COMMAND, WM_HOTKEY, WM_APP_TRAY = 0x0002, 0x0111, 0x0312, 0x8001
+WM_LBUTTONUP, WM_RBUTTONUP = 0x0202, 0x0205
+OPEN, STOP_COMPUTER, QUIT, TALK, DICTATE = 1, 2, 3, 4, 5
+HOTKEY_OPEN, HOTKEY_STOP, HOTKEY_TALK, HOTKEY_DICTATE = 1, 2, 3, 4
+PORT = 8765
+# Each shortcut with its choices, best first. Another program may already own one; then the next is tried.
+CHOICES = {HOTKEY_OPEN: [("Ctrl+Alt+J", ord("J"))], HOTKEY_STOP: [("Ctrl+Alt+Backspace", 0x08)],
+           HOTKEY_TALK: [("Ctrl+Alt+Space", 0x20), ("Ctrl+Alt+T", ord("T")), ("Ctrl+Alt+K", ord("K"))],
+           HOTKEY_DICTATE: [("Ctrl+Alt+D", ord("D")), ("Ctrl+Alt+Y", ord("Y")), ("Ctrl+Alt+U", ord("U"))]}
+NAMES = {HOTKEY_OPEN: "open", HOTKEY_STOP: "stop", HOTKEY_TALK: "talk", HOTKEY_DICTATE: "dictate"}
+
+
+def claim(register) -> dict:
+    """Register each shortcut with the first of its choices that is free. Returns {id: label} for those that worked."""
+    active = {}
+    for ident, choices in CHOICES.items():
+        for label, key in choices:
+            if register(ident, key):
+                active[ident] = label
+                break
+    return active
+TITLE = "JARVIS · Workspace"
+
+
+def icon_bytes(size: int = 32) -> bytes:
+    """A small round icon in JARVIS colours, built in memory (no image files needed)."""
+    pixels = bytearray()
+    centre = (size - 1) / 2
+    for y in range(size - 1, -1, -1):
+        for x in range(size):
+            dx, dy = (x - centre) / centre, (y - centre) / centre
+            distance = (dx * dx + dy * dy) ** 0.5
+            if distance > 1:
+                pixels += b"\x00\x00\x00\x00"
+                continue
+            mix = (dx + 1) / 2
+            red, green, blue = int(143 + (90 - 143) * mix), int(128 + (209 - 128) * mix), int(255 + (230 - 255) * mix)
+            shade = 1 - 0.35 * max(0.0, dy)
+            alpha = 255 if distance < 0.92 else int(255 * (1 - distance) / 0.08)
+            pixels += bytes((int(blue * shade), int(green * shade), int(red * shade), max(0, alpha)))
+    mask = b"\x00" * (((size + 31) // 32) * 4 * size)
+    header = struct.pack("<IiiHHIIiiII", 40, size, size * 2, 1, 32, 0, len(pixels) + len(mask), 0, 0, 0, 0)
+    image = header + bytes(pixels) + mask
+    return struct.pack("<HHH", 0, 1, 1) + struct.pack("<BBBBHHII", size, size, 0, 0, 1, 32, len(image), 22) + image
+
+
+def hotkeys(cfg) -> dict:
+    desktop = cfg.raw.get("desktop", {}) if isinstance(cfg.raw.get("desktop"), dict) else {}
+    return {"tray": desktop.get("tray", True) is not False, "hotkey": desktop.get("hotkey", True) is not False}
+
+
+def ask_service(cfg, action: str, text: str = "") -> dict | None:
+    """Tell the running JARVIS service something from the tray. None if it is not running."""
+    import json
+    import urllib.request
+    try:
+        key = (cfg.state_dir / "tray-key").read_text("utf-8").strip()
+        request = urllib.request.Request(f"http://127.0.0.1:{PORT}/api/tray", data=json.dumps({"action": action, "text": text}).encode(), method="POST",
+                                         headers={"Content-Type": "application/json", "X-JCC-Tray": key, "Host": f"127.0.0.1:{PORT}"})
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=4) as response:
+            return json.loads(response.read().decode("utf-8") or "{}")
+    except (OSError, ValueError):
+        return None
+
+
+def talk(cfg) -> None:
+    """Start a voice chat. Uses the open window if there is one; otherwise opens JARVIS already listening."""
+    answer = ask_service(cfg, "listen")
+    if not (answer and answer.get("window")):
+        start_window()
+
+
+def start_window(listen: bool = True) -> None:
+    python = Path(sys.executable).with_name("pythonw.exe")
+    subprocess.Popen([str(python if python.exists() else sys.executable), "-m", "jcc.desktop", *(["--listen"] if listen else [])], cwd=ROOT,
+                     env={**os.environ, "PYTHONPATH": str(ROOT)}, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
+
+
+def nudge(cfg) -> None:
+    """"Hey JARVIS" and then nothing: JARVIS asks what is wanted and listens, opening its window if it is closed."""
+    answer = ask_service(cfg, "nudge")
+    if not (answer and answer.get("window")):
+        start_window()
+
+
+def attend(cfg) -> None:
+    """"Hey JARVIS" on its own: have the window show that it is listening, opening it if it is closed."""
+    answer = ask_service(cfg, "attend")
+    if not (answer and answer.get("window")):
+        start_window()
+
+
+def say(cfg, text: str) -> None:
+    """Hand JARVIS something that was said after the wake word. Opens the window if there is none; the request waits for it."""
+    import time
+    answer = ask_service(cfg, "say", text)
+    if answer is None:                       # the service itself is not running yet
+        start_window()
+        for _ in range(40):
+            time.sleep(0.5)
+            answer = ask_service(cfg, "say", text)
+            if answer is not None:
+                return
+    elif answer.get("window") is False:
+        start_window()
+        threading.Thread(target=_make_sure, args=(cfg,), daemon=True, name="wake-follow-through").start()
+
+
+def _make_sure(cfg, notify=None, seconds: float = 20.0) -> bool:
+    """A window was opened for something that was said. If it has not picked it up after a while, say so, so that nobody
+    is left waiting in silence. Returns whether it was picked up."""
+    import time
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        time.sleep(1.0)
+        answer = ask_service(cfg, "status")
+        if answer is not None and not answer.get("waiting"):
+            return True
+    (notify or _say_so)("JARVIS heard you, but its window did not pick that up. Please say it again.")
+    return False
+
+
+def _say_so(text: str) -> None:
+    try:
+        from jcc.assistant import notify_native
+        notify_native(text)
+    except Exception:  # noqa: BLE001 - a missing notice must not break the tray helper
+        pass
+
+
+def open_jarvis() -> None:
+    user32 = ctypes.windll.user32
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def visit(handle, _):
+        buffer = ctypes.create_unicode_buffer(200)
+        user32.GetWindowTextW(handle, buffer, 200)
+        if buffer.value.startswith("JARVIS") and "Workspace" in buffer.value and user32.IsWindowVisible(handle):
+            found.append(handle)
+        return True
+
+    user32.EnumWindows(visit, 0)
+    if found:
+        user32.ShowWindow(found[0], 9)  # restore if minimised
+        user32.SetForegroundWindow(found[0])
+        return
+    python = Path(sys.executable).with_name("pythonw.exe")
+    subprocess.Popen([str(python if python.exists() else sys.executable), "-m", "jcc.desktop"], cwd=ROOT,
+                     env={**os.environ, "PYTHONPATH": str(ROOT)}, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
+
+
+def main() -> int:
+    if os.name != "nt":
+        return 0
+    cfg = load()
+    options = hotkeys(cfg)
+    if not options["tray"] and not options["hotkey"]:
+        return 0
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    lock = InstanceLock(cfg.state_dir / "tray.lock")
+    if not lock.acquire():
+        return 0
+    user32, shell32, kernel32 = ctypes.windll.user32, ctypes.windll.shell32, ctypes.windll.kernel32
+    WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+    user32.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    user32.DefWindowProcW.restype = ctypes.c_ssize_t
+    user32.CreateWindowExW.restype = wintypes.HWND
+    user32.CreateWindowExW.argtypes = [wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_int, ctypes.c_int,
+                                       ctypes.c_int, ctypes.c_int, wintypes.HWND, wintypes.HMENU, wintypes.HINSTANCE, wintypes.LPVOID]
+    user32.LoadImageW.restype = wintypes.HANDLE
+    user32.CreatePopupMenu.restype = wintypes.HMENU
+    user32.AppendMenuW.argtypes = [wintypes.HMENU, wintypes.UINT, ctypes.c_size_t, wintypes.LPCWSTR]
+    user32.TrackPopupMenu.argtypes = [wintypes.HMENU, wintypes.UINT, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.HWND, wintypes.LPVOID]
+    user32.DestroyMenu.argtypes = [wintypes.HMENU]
+    user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+
+    class WNDCLASSW(ctypes.Structure):
+        _fields_ = [("style", wintypes.UINT), ("lpfnWndProc", WNDPROC), ("cbClsExtra", ctypes.c_int), ("cbWndExtra", ctypes.c_int),
+                    ("hInstance", wintypes.HINSTANCE), ("hIcon", wintypes.HANDLE), ("hCursor", wintypes.HANDLE),
+                    ("hbrBackground", wintypes.HANDLE), ("lpszMenuName", wintypes.LPCWSTR), ("lpszClassName", wintypes.LPCWSTR)]
+
+    class NOTIFYICONDATAW(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("hWnd", wintypes.HWND), ("uID", wintypes.UINT), ("uFlags", wintypes.UINT),
+                    ("uCallbackMessage", wintypes.UINT), ("hIcon", wintypes.HANDLE), ("szTip", wintypes.WCHAR * 128),
+                    ("dwState", wintypes.DWORD), ("dwStateMask", wintypes.DWORD), ("szInfo", wintypes.WCHAR * 256),
+                    ("uVersion", wintypes.UINT), ("szInfoTitle", wintypes.WCHAR * 64), ("dwInfoFlags", wintypes.DWORD),
+                    ("guidItem", ctypes.c_byte * 16), ("hBalloonIcon", wintypes.HANDLE)]
+
+    shell32.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATAW)]
+    active: dict[int, str] = {}
+    data = NOTIFYICONDATAW()
+    tray_added = False
+
+    def stop_computer() -> None:
+        (cfg.state_dir / "computer-stop").write_text("stop", "utf-8")
+
+    def balloon(text: str) -> None:
+        """A short Windows notification from the tray icon."""
+        if not tray_added:
+            return
+        data.uFlags = 0x1 | 0x2 | 0x4 | 0x10
+        data.szInfoTitle, data.szInfo, data.dwInfoFlags = "JARVIS", text[:250], 0x1
+        shell32.Shell_NotifyIconW(1, ctypes.byref(data))
+        data.uFlags = 0x1 | 0x2 | 0x4
+
+    from jcc.dictate import Dictation
+    from jcc.wake import Ears
+    from jcc import pcsound, sound
+
+    def beep(pitch: int) -> None:       # on the speakers chosen in Voice and assistant, or the Windows default
+        sound.beep(cfg, pitch)
+    dictation = Dictation(cfg, balloon, beep=beep)
+    # "Hey JARVIS", all the time: spotted on this PC, then handed to JARVIS. Quiet while a spoken conversation is already going on.
+    ears = Ears(cfg, lambda text: say(cfg, text), balloon, beep=beep, busy=lambda: (ask_service(cfg, "status") or {}).get("voice") is True,
+                control=lambda word: ask_service(cfg, "control", word), attend=lambda: attend(cfg), listen=lambda: nudge(cfg), sound=pcsound.shared,
+                name_said=lambda at: ask_service(cfg, "name", str(at)))
+    from jcc.wake import restore_volume
+    restore_volume(cfg)                   # (if JARVIS was closed in the few seconds it had turned the sound down to listen)
+    state = {"wake": None}
+
+    def write_status() -> None:
+        import json
+        (cfg.state_dir / "tray-status.json").write_text(json.dumps({
+            "tray": tray_added, **{NAMES[ident] + "_hotkey": ident in active for ident in NAMES},
+            "keys": {NAMES[ident]: label for ident, label in active.items()}, "wake": bool(state["wake"]),
+            "wake_problem": ears.problem or ears.note, "wake_mic": ears.microphone(), "wake_engine": ears.engine}), "utf-8")
+
+    def keep_ears() -> None:
+        try:
+            listening = ears.sync()
+        except Exception:  # noqa: BLE001 - the wake word is optional; the tray must keep running
+            listening = False
+        seen = (ears.problem or ears.note, ears.microphone(), ears.engine)
+        if listening != state["wake"] or seen != state.get("seen"):
+            state["wake"], state["seen"] = listening, seen
+            write_status()
+
+    def menu(window) -> None:
+        handle = user32.CreatePopupMenu()
+        def shown(text, ident):
+            return text + ("\t" + active[ident] if ident in active else "")
+        user32.AppendMenuW(handle, 0, OPEN, shown("Open JARVIS", HOTKEY_OPEN))
+        user32.AppendMenuW(handle, 0, TALK, shown("Talk to JARVIS", HOTKEY_TALK))
+        user32.AppendMenuW(handle, 0, DICTATE, shown("Finish dictating" if dictation.listening else "Dictate into any app", HOTKEY_DICTATE))
+        user32.AppendMenuW(handle, 0, STOP_COMPUTER, shown("Stop everything JARVIS is doing", HOTKEY_STOP))
+        user32.AppendMenuW(handle, 0x800, 0, None)
+        user32.AppendMenuW(handle, 0, QUIT, "Hide this icon until next sign-in")
+        point = wintypes.POINT()
+        user32.GetCursorPos(ctypes.byref(point))
+        user32.SetForegroundWindow(window)
+        choice = user32.TrackPopupMenu(handle, 0x0100 | 0x0002, point.x, point.y, 0, window, None)
+        user32.DestroyMenu(handle)
+        act(window, choice)
+
+    def act(window, choice) -> None:
+        if choice == OPEN:
+            open_jarvis()
+        elif choice == STOP_COMPUTER:
+            stop_computer()
+        elif choice == TALK:
+            talk(cfg)
+        elif choice == DICTATE:
+            dictation.toggle()
+        elif choice == QUIT:
+            user32.DestroyWindow(window)
+
+    def procedure(window, message, wparam, lparam):
+        if message == WM_APP_TRAY:
+            if lparam == WM_LBUTTONUP:
+                open_jarvis()
+            elif lparam == WM_RBUTTONUP:
+                menu(window)
+            return 0
+        if message == 0x0113:   # the timer: keep the wake-word listener in step with the settings
+            keep_ears()
+            return 0
+        if message == WM_HOTKEY:
+            if wparam == HOTKEY_OPEN:
+                open_jarvis()
+            elif wparam == HOTKEY_TALK:
+                talk(cfg)
+            elif wparam == HOTKEY_DICTATE:
+                dictation.toggle()
+            else:
+                stop_computer()
+            return 0
+        if message == WM_DESTROY:
+            if tray_added:
+                shell32.Shell_NotifyIconW(2, ctypes.byref(data))
+            user32.PostQuitMessage(0)
+            return 0
+        return user32.DefWindowProcW(window, message, wparam, lparam)
+
+    callback = WNDPROC(procedure)
+    instance = kernel32.GetModuleHandleW(None)
+    cls = WNDCLASSW()
+    cls.lpfnWndProc, cls.hInstance, cls.lpszClassName = callback, instance, "JarvisTrayHelper"
+    user32.RegisterClassW(ctypes.byref(cls))
+    window = user32.CreateWindowExW(0, cls.lpszClassName, "JARVIS helper", 0, 0, 0, 0, 0, None, None, instance, None)
+    if not window:
+        lock.release()
+        return 1
+    if options["tray"]:
+        icon_path = cfg.state_dir / "jarvis.ico"
+        try:
+            icon_path.write_bytes(icon_bytes())
+            icon = user32.LoadImageW(None, str(icon_path), 1, 32, 32, 0x0010)
+        except OSError:
+            icon = None
+        data.cbSize, data.hWnd, data.uID = ctypes.sizeof(NOTIFYICONDATAW), window, 1
+        data.uFlags, data.uCallbackMessage = 0x1 | 0x2 | 0x4, WM_APP_TRAY
+        data.hIcon = icon or user32.LoadIconW(None, ctypes.c_void_p(32512))
+        data.szTip = "JARVIS — click to open (Ctrl+Alt+J)"
+        tray_added = bool(shell32.Shell_NotifyIconW(0, ctypes.byref(data)))
+    if options["hotkey"]:
+        active.update(claim(lambda ident, key: bool(user32.RegisterHotKey(window, ident, 0x0001 | 0x0002 | 0x4000, key))))
+    registered = list(active)
+    keep_ears()
+    write_status()
+    user32.SetTimer(window, 1, 4000, None)
+    if "--check" in sys.argv:
+        user32.DestroyWindow(window)
+    message = wintypes.MSG()
+    while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
+        user32.TranslateMessage(ctypes.byref(message))
+        user32.DispatchMessageW(ctypes.byref(message))
+    ears.stop()
+    for ident in registered:
+        user32.UnregisterHotKey(window, ident)
+    lock.release()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

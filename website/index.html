@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JARVIS: a desktop assistant that talks, codes and acts on your computer</title>
+<meta name="description" content="JARVIS is a free, open-source desktop assistant. Talk to it, have coding agents build in a copy of your project, make pages, slides and sheets. It runs on your computer and asks before sending, deleting or paying.">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0b0b0f">
+<meta name="referrer" content="no-referrer">
+<meta property="og:type" content="website">
+<meta property="og:title" content="JARVIS">
+<meta property="og:description" content="A desktop assistant that talks, codes and acts on your computer, and asks before anything that matters.">
+<meta property="og:image" content="assets/social.svg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to the content</a>
+<header class="site-head">
+  <div class="wrap">
+    <a class="brand" href="index.html"><img src="assets/logo.svg" alt="" width="28" height="28">JARVIS</a>
+    <button class="theme-toggle" type="button" aria-label="Switch theme">
+      <svg class="i moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg>
+      <svg class="i sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+    </button>
+    <nav aria-label="Site">
+      <ul class="tabs">
+        <li><a href="index.html" aria-current="page">Home</a></li>
+        <li><a href="features.html">Features</a></li>
+        <li><a href="download.html">Download</a></li>
+        <li><a href="https://github.com/Vihan-2008/jarvis" rel="noopener">GitHub <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg></a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero wrap" aria-labelledby="hero-title">
+    <div class="orb" aria-hidden="true"><canvas data-orb="large" width="400" height="400"></canvas></div>
+    <h1 id="hero-title">A desktop assistant that talks, codes and acts on your computer, and asks before anything that matters.</h1>
+    <p class="lede">Speak to it or type. It opens your apps, has coding agents build in a copy of your project, makes pages, slides and sheets, and keeps its memory in your own notes. Free and open source.</p>
+    <div class="actions">
+      <a class="btn primary big" id="download-main" href="download.html"
+         data-windows="https://github.com/Vihan-2008/jarvis/releases/latest/download/JARVIS-Setup.exe"
+         data-mac="https://github.com/Vihan-2008/jarvis/releases/latest/download/JARVIS.dmg">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg>
+        <span data-label>Download JARVIS</span>
+      </a>
+      <a class="btn big" href="features.html">See every feature</a>
+    </div>
+    <p class="fine" id="download-hint">For Windows and macOS. Not code-signed yet, so your system will warn once: the download page says what to click.</p>
+  </section>
+
+  <section class="shot-section wrap" aria-labelledby="shot-title">
+    <h2 id="shot-title" class="visually-hidden">What the app looks like</h2>
+    <figure class="shot-figure">
+      <div class="shot" role="img" aria-label="A drawing of the JARVIS window: a list of chats on the left, the glowing orb above the message box in the middle, and the Agents panel on the right listing two coding jobs and a routine.">
+        <div class="app-side" aria-hidden="true">
+          <div class="app-brand"><span class="app-mark"></span>JARVIS</div>
+          <div class="app-nav"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New chat</div>
+          <div class="app-nav"><svg class="i" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M4 10h16"/></svg>My work</div>
+          <div class="app-search">Search chats</div>
+          <div class="app-label">Chats</div>
+          <div class="app-item active"><span class="live"></span>Bakery website</div>
+          <div class="app-item"><span class="unread"></span>Weekend trip plan</div>
+          <div class="app-item">Monthly budget sheet</div>
+          <div class="app-item">Slides for the book club</div>
+          <div class="app-item">Garden watering routine</div>
+          <div class="app-foot"><span class="app-avatar"></span><b>You</b></div>
+        </div>
+        <div class="app-center" aria-hidden="true">
+          <div class="app-orb"><canvas data-orb="small" width="190" height="190"></canvas></div>
+          <div class="app-composer">
+            <div class="ph">Ask anything, or describe what to build</div>
+            <div class="app-bar">
+              <span class="app-ico"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>
+              <span class="app-ico"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></span>
+              <span class="app-chip opt wide"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Research</span>
+              <span class="app-chip opt on"><svg class="i" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6Z"/></svg>Asks before sending</span>
+              <span class="sp"></span>
+              <span class="app-chip">Auto <svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>
+              <span class="app-ico"><svg class="i" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span>
+              <span class="app-send"><svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></svg></span>
+            </div>
+          </div>
+        </div>
+        <div class="app-panel" aria-hidden="true">
+          <div class="app-panel-tabs"><span class="on">Agents</span><span>Artifacts</span><span>Routines</span></div>
+          <div class="app-panel-body">
+            <h4>Agents</h4>
+            <p>What every agent is doing right now, in one list.</p>
+            <div class="app-row"><span class="ic"><svg class="i" viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4"/></svg></span><span class="mainc"><b>Bakery website: menu page</b><small>Coding job in a copy of the project. Running the checks.</small><span class="pill-state run">Building</span></span></div>
+            <div class="app-row"><span class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M5 12l4 4 10-10"/></svg></span><span class="mainc"><b>Bakery website: contact form</b><small>Checks passed. Waiting for you to look at the change.</small><span class="pill-state wait">Waiting for your review</span></span></div>
+            <div class="app-row"><span class="ic"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span><span class="mainc"><b>Weekend trip plan</b><small>Routine, every Friday at 6 pm: weather and train times.</small><span class="pill-state ok">Scheduled</span></span></div>
+          </div>
+        </div>
+      </div>
+      <figcaption class="shot-caption">A simplified drawing of the app's window, with made-up chats. The orb sits above one message box; panels open beside the chat.</figcaption>
+    </figure>
+  </section>
+
+  <section class="section wrap" aria-labelledby="what-title">
+    <div class="section-head">
+      <h2 id="what-title">What it does</h2>
+      <p>Each of these is explained in full, with what it needs, on the Features page.</p>
+    </div>
+    <div class="grid">
+      <a class="card" href="features.html#talk"><div class="ico"><svg class="i" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></div><h3>Talk to it</h3><p>Voice chat that answers out loud and can be interrupted, and on Windows a wake word: "Hey JARVIS".</p></a>
+      <a class="card" href="features.html#pc"><div class="ico"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div><h3>Does things on your PC</h3><p>Opens apps and files, presses buttons by name, sets timers. Sending, deleting and paying always wait for your yes.</p></a>
+      <a class="card" href="features.html#coding"><div class="ico"><svg class="i" viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4"/></svg></div><h3>Coding with agents</h3><p>Claude Code and Codex work in a copy of your project. Merged locally only when the project's checks pass.</p></a>
+      <a class="card" href="features.html#security"><div class="ico"><svg class="i" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6Z"/></svg></div><h3>Security check and fix</h3><p>Finds the usual holes in a project, fixes them in a copy, shows you, and can undo.</p></a>
+      <a class="card" href="features.html#routines"><div class="ico"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></div><h3>Routines</h3><p>Something you want done again and again, at the times you choose, with the same approvals as a typed message.</p></a>
+      <a class="card" href="features.html#artifacts"><div class="ico"><svg class="i" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M4 10h16M10 10v10"/></svg></div><h3>Artifacts</h3><p>Pages, slides, sheets, charts and whiteboards, kept in one library with every version.</p></a>
+      <a class="card" href="features.html#court"><div class="ico"><svg class="i" viewBox="0 0 24 24"><path d="M12 4v16M6 8h12M6 8l-3 6h6ZM18 8l-3 6h6ZM8 20h8"/></svg></div><h3>The Court of JARVIS</h3><p>Put one idea on trial: a prosecution, analysts with web sources, a ruling worked out in code.</p></a>
+      <a class="card" href="features.html#memory"><div class="ico"><svg class="i" viewBox="0 0 24 24"><path d="M6 4h9l3 3v13H6Z"/><path d="M9 10h6M9 14h6"/></svg></div><h3>Your notes as its memory</h3><p>Chats and memory are Markdown notes in an Obsidian vault that you can read and edit.</p></a>
+      <a class="card" href="features.html#privacy"><div class="ico"><svg class="i" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div><h3>Private by design</h3><p>Runs only on your computer at 127.0.0.1. Keys stay in the system key store. Private notes never go to a model.</p></a>
+    </div>
+  </section>
+
+  <section class="section wrap" aria-labelledby="accounts-title">
+    <div class="section-head">
+      <h2 id="accounts-title">Bring your own accounts</h2>
+      <p>The app is free and has no account of its own. The AI work runs on the accounts and subscriptions you already have.</p>
+    </div>
+    <div class="strip">
+      <div class="card"><h3>Claude Code</h3><p>The assistant, coding jobs, the planner and the Court use Anthropic's command-line tool, signed in with your Claude subscription.</p></div>
+      <div class="card"><h3>Codex</h3><p>OpenAI's command-line agent, if you have it, takes coding jobs too. Jobs move to the other agent when one hits its usage limit.</p></div>
+      <div class="card"><h3>Groq</h3><p>A free Groq key turns your speech into text with Whisper. An OpenAI key can be used instead.</p></div>
+      <div class="card"><h3>ElevenLabs</h3><p>Optional. With your key, replies are spoken in an ElevenLabs voice; without it, the voices built into the app's browser engine are used.</p></div>
+    </div>
+  </section>
+
+  <section class="section wrap" aria-labelledby="platform-title">
+    <div class="note">
+      <h2 id="platform-title" class="visually-hidden">Platforms</h2>
+      <p><b>Windows:</b> everything. <b>macOS:</b> new, the core app (chat, coding agents, artifacts, routines, security check); controlling other apps' windows, the tray and the background wake word are Windows-only for now. The Mac version has been checked by automated tests and has not yet been used day to day on a real Mac.</p>
+    </div>
+  </section>
+
+  <section class="cta wrap" aria-labelledby="cta-title">
+    <h2 id="cta-title">Try it on your own computer</h2>
+    <p>Install it, or run it from source with Python 3.11 or newer and nothing to pip install.</p>
+    <div class="actions">
+      <a class="btn primary big" href="download.html">Download</a>
+      <a class="btn big" href="https://github.com/Vihan-2008/jarvis" rel="noopener">Source on GitHub</a>
+    </div>
+  </section>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <div>
+      <a class="brand" href="index.html"><img src="assets/logo.svg" alt="" width="24" height="24">JARVIS</a>
+      <p>Free and open source. No trackers, no cookies, no analytics on this site.</p>
+      <p>JARVIS is an independent project and is not affiliated with any company; "JARVIS" is simply the app's name.</p>
+    </div>
+    <nav aria-label="Footer">
+      <ul>
+        <li><a href="index.html">Home</a></li>
+        <li><a href="features.html">Features</a></li>
+        <li><a href="download.html">Download</a></li>
+        <li><a href="https://github.com/Vihan-2008/jarvis" rel="noopener">GitHub</a></li>
+        <li><a href="https://github.com/Vihan-2008/jarvis/releases/latest" rel="noopener">Releases</a></li>
+      </ul>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

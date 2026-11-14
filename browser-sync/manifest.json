@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "JARVIS · Obsidian chat sync",
+  "version": "1.3.2",
+  "description": "Save opened ChatGPT and Claude conversations to your local JARVIS Obsidian vault.",
+  "permissions": ["storage", "alarms", "activeTab", "scripting"],
+  "host_permissions": ["http://127.0.0.1:8765/*"],
+  "background": {"service_worker": "background.js"},
+  "options_page": "options.html",
+  "action": {"default_title": "JARVIS workspace", "default_popup": "popup.html"},
+  "content_scripts": [{"matches": ["https://chatgpt.com/*", "https://claude.ai/*"], "js": ["content.js"], "run_at": "document_idle"}]
+}

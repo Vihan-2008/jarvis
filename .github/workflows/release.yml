@@ -1,0 +1,77 @@
+# On a version tag (v0.1.0, ...), builds the four installer packages and attaches them to that tag's GitHub release.
+# The upload uses the gh tool that the runners already have and the workflow's own GITHUB_TOKEN; no third-party
+# actions are involved.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: The tag matches the VERSION file
+        run: test "v$(tr -d '[:space:]' < VERSION)" = "$GITHUB_REF_NAME" || { echo "VERSION says $(cat VERSION) but the tag is $GITHUB_REF_NAME"; exit 1; }
+      - name: Build JARVIS-Setup.exe and JARVIS-windows.zip
+        run: python installer/windows/build.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/JARVIS-Setup.exe
+            dist/JARVIS-windows.zip
+          if-no-files-found: error
+
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build JARVIS-mac.zip
+        run: python3 installer/mac/build.py
+      - name: Build JARVIS.dmg
+        run: bash installer/mac/build_dmg.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: |
+            dist/JARVIS-mac.zip
+            dist/JARVIS.dmg
+          if-no-files-found: error
+
+  release:
+    needs: [windows, mac]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Attach the packages to the release for this tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ls -l dist
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/JARVIS-Setup.exe dist/JARVIS-windows.zip dist/JARVIS-mac.zip dist/JARVIS.dmg \
+              --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" dist/JARVIS-Setup.exe dist/JARVIS-windows.zip dist/JARVIS-mac.zip dist/JARVIS.dmg \
+              --title "JARVIS $TAG" --generate-notes --repo "$GITHUB_REPOSITORY"
+          fi

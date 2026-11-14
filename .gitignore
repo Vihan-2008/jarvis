@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+config/local.toml
+.python
+dist/
+.env
+.env.*
+config/export-forbidden.txt
+dist/
+.python
+.deployed.json
+.start.lnk

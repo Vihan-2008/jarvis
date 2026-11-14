@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JARVIS</title>
+<style>
+:root{
+  --bg:#04060c;--panel:rgba(16,22,38,.62);--panel-solid:#0d1322;--line:rgba(150,180,255,.14);
+  --fg:#e7eefc;--muted:#8b98b6;--faint:#5b6782;--accent:#9fd4ff;--accent2:#7cf3e4;
+  --ok:#5ee6a8;--warn:#ffc46b;--bad:#ff6f7d;--radius:16px;
+  --mono:"Cascadia Mono","Cascadia Code",Consolas,ui-monospace,monospace;
+  --sans:"Segoe UI Variable","Segoe UI",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+body{min-height:100vh;background:radial-gradient(1200px 700px at 50% 22%,rgba(60,90,170,.18),transparent 60%),var(--bg)}
+button,input{font:inherit;color:inherit}
+#sky{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
+.wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:18px 16px 60px}
+
+/* top bar */
+.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.brand{font:600 13px/1 var(--mono);letter-spacing:.32em;color:var(--accent)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;flex:1}
+.chip{font:500 11px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;padding:7px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(10,16,30,.55);color:var(--muted);display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.chip i{width:6px;height:6px;border-radius:50%;background:var(--faint);display:inline-block}
+.chip.ok i{background:var(--ok);box-shadow:0 0 8px var(--ok)} .chip.warn i{background:var(--warn)} .chip.bad i{background:var(--bad);box-shadow:0 0 8px var(--bad)}
+.seg{display:inline-flex;padding:4px;border-radius:12px;border:1px solid var(--line);background:rgba(10,16,30,.7)}
+.seg button{border:0;background:transparent;padding:7px 14px;border-radius:9px;font:500 12px/1 var(--mono);letter-spacing:.06em;color:var(--muted);cursor:pointer}
+.seg button.on{background:rgba(159,212,255,.14);color:var(--fg);box-shadow:inset 0 0 0 1px rgba(159,212,255,.35)}
+.seg button:disabled{opacity:.4;cursor:not-allowed}
+.pick{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pick label{font:500 10px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
+.pick select{appearance:none;background:rgba(10,16,30,.8) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238b98b6'/%3E%3C/svg%3E") no-repeat right 10px center;border:1px solid var(--line);border-radius:10px;color:var(--fg);padding:7px 28px 7px 10px;font:500 12px/1.2 var(--mono);cursor:pointer}
+.pick select:focus{outline:1px solid rgba(159,212,255,.5)}
+.agents{display:grid;gap:8px}
+.ag{display:flex;align-items:center;gap:10px;padding:6px 6px;border-radius:10px}
+.ag b{font-weight:600;min-width:64px} .ag .s{margin-left:auto;font:12px var(--mono);color:var(--faint)}
+.ag i{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:none}
+.ag.ready i{background:var(--ok);box-shadow:0 0 8px var(--ok)} .ag.cool i{background:var(--warn)} .ag.off i{background:var(--faint)}
+
+/* hero */
+.hero{display:flex;flex-direction:column;align-items:center;text-align:center;padding:min(30vh,300px) 0 8px}
+.title{font:300 clamp(46px,9vw,92px)/1 var(--sans);letter-spacing:.32em;margin:0 0 0 .32em;color:#f3f7ff;text-shadow:0 0 28px rgba(159,212,255,.35)}
+.sub{font:500 12px/1 var(--mono);letter-spacing:.2em;color:var(--muted);margin-top:14px;text-transform:uppercase}
+.states{display:flex;gap:6px;margin-top:18px;flex-wrap:wrap;justify-content:center}
+.st{font:500 11px/1 var(--mono);letter-spacing:.12em;padding:7px 11px;border-radius:9px;border:1px solid transparent;color:var(--faint);text-transform:uppercase}
+.st.on{color:var(--fg);border-color:rgba(159,212,255,.4);background:rgba(159,212,255,.1)}
+.st.on.error{border-color:rgba(255,111,125,.5);background:rgba(255,111,125,.1)}
+.st.on.working{border-color:rgba(255,196,107,.5);background:rgba(255,196,107,.1)}
+.motion{margin-top:10px;font:500 11px/1 var(--mono);color:var(--faint);letter-spacing:.1em;background:none;border:0;text-decoration:underline dotted;cursor:pointer}
+
+/* ask */
+.ask{margin:26px auto 0;max-width:820px;width:100%}
+.bar{display:flex;gap:8px;padding:8px;border-radius:18px;border:1px solid rgba(159,212,255,.28);background:rgba(8,13,26,.82);backdrop-filter:blur(10px);box-shadow:0 10px 40px rgba(0,0,0,.45),0 0 0 6px rgba(159,212,255,.03)}
+.bar input{flex:1;min-width:0;border:0;outline:0;background:transparent;padding:12px 12px;font-size:16px}
+.bar input::placeholder{color:var(--faint)}
+.icon{border:1px solid var(--line);background:rgba(255,255,255,.03);border-radius:12px;width:46px;cursor:pointer;color:var(--muted);display:grid;place-items:center}
+.icon.on{color:var(--accent);border-color:rgba(159,212,255,.4)}
+.send{border:0;border-radius:12px;padding:0 20px;background:linear-gradient(180deg,#bfe4ff,#7fb8ff);color:#06111f;font-weight:650;cursor:pointer}
+.send:disabled{opacity:.5;cursor:wait}
+.quick{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:10px}
+.quick button{border:1px solid var(--line);background:rgba(10,16,30,.55);border-radius:999px;padding:6px 12px;font-size:13px;color:var(--muted);cursor:pointer}
+.quick button:hover{color:var(--fg);border-color:rgba(159,212,255,.35)}
+
+/* answer */
+.answer{margin:18px auto 0;max-width:820px;border-radius:var(--radius);border:1px solid var(--line);background:var(--panel);backdrop-filter:blur(12px);padding:16px 18px;display:none;text-align:left}
+.answer.show{display:block}
+.meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;font:500 12px/1 var(--mono);color:var(--muted)}
+.tag{padding:5px 8px;border-radius:7px;background:rgba(159,212,255,.12);color:var(--accent)}
+.tag.t1{background:rgba(94,230,168,.12);color:var(--ok)} .tag.t3{background:rgba(255,196,107,.12);color:var(--warn)}
+.tag.failed,.tag.needs_approval{background:rgba(255,111,125,.12);color:var(--bad)} .tag.queued{background:rgba(255,196,107,.12);color:var(--warn)}
+.meta a{color:var(--accent);margin-left:auto;text-decoration:none}
+.md{font-size:15px;overflow-wrap:anywhere}
+.md p{margin:.45em 0} .md ul{margin:.4em 0;padding-left:1.3em} .md h3{font-size:15px;margin:.8em 0 .3em}
+.md code{font:13px var(--mono);background:rgba(255,255,255,.07);padding:1px 5px;border-radius:5px}
+.md pre{font:13px/1.45 var(--mono);background:rgba(0,0,0,.35);border:1px solid var(--line);padding:10px 12px;border-radius:10px;overflow:auto}
+.md pre code{background:none;padding:0}
+.md a{color:var(--accent)} .md .wl{color:var(--accent2)}
+.err{color:var(--bad)}
+
+/* panels */
+.grid{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:14px;margin-top:34px}
+@media (max-width:900px){.grid{grid-template-columns:1fr}}
+.panel{border-radius:var(--radius);border:1px solid var(--line);background:var(--panel);backdrop-filter:blur(12px);padding:14px 14px 10px;min-width:0}
+.panel h2{font:600 11px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin:2px 0 12px;display:flex;justify-content:space-between}
+.panel h2 a{color:var(--faint);text-decoration:none;letter-spacing:.08em}
+.row{display:flex;gap:10px;align-items:flex-start;padding:8px 6px;border-radius:10px;cursor:pointer}
+.row:hover{background:rgba(255,255,255,.04)}
+.row .t{flex:none;font:600 11px/1 var(--mono);padding:4px 6px;border-radius:6px;background:rgba(159,212,255,.12);color:var(--accent);margin-top:2px}
+.row .t.t1{background:rgba(94,230,168,.12);color:var(--ok)} .row .t.t3{background:rgba(255,196,107,.12);color:var(--warn)}
+.row .x{flex:1;min-width:0}
+.row .q{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .s{font:12px var(--mono);color:var(--faint)}
+.empty{color:var(--faint);font-size:13px;padding:6px}
+.meter{margin:10px 2px 14px}
+.meter .l{display:flex;justify-content:space-between;font:12px var(--mono);color:var(--muted);margin-bottom:6px}
+.track{height:6px;border-radius:9px;background:rgba(255,255,255,.07);overflow:hidden}
+.fill{height:100%;border-radius:9px;background:linear-gradient(90deg,var(--accent2),var(--accent));width:0;transition:width .6s}
+.fill.hot{background:linear-gradient(90deg,var(--warn),var(--bad))}
+.log{font:12px/1.6 var(--mono);color:var(--faint);max-height:150px;overflow:auto;white-space:pre-wrap}
+.foot{margin-top:22px;text-align:center;font:12px var(--mono);color:var(--faint);letter-spacing:.06em}
+.foot a{color:var(--muted)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+</style>
+</head>
+<body>
+<canvas id="sky" aria-hidden="true"></canvas>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">JARVIS</div>
+    <div class="chips" id="chips"></div>
+    <div class="pick">
+      <label for="agent">Agent</label>
+      <select id="agent" title="Which coding agent tier 3 jobs use. Auto picks by task size and remaining limits.">
+        <option value="auto">Auto</option>
+      </select>
+      <label for="project">Project</label>
+      <select id="project" title="Where coding jobs work. Projects are edited in a branch copy and merged only when tests pass.">
+        <option value="auto">Auto-detect</option><option value="none">None (new files)</option>
+      </select>
+    </div>
+  </header>
+
+  <section class="hero">
+    <h1 class="title">JARVIS</h1>
+    <div class="sub">Command center · free tiers · cost 0</div>
+    <div class="states" id="states">
+      <span class="st" data-s="idle">Idle</span><span class="st" data-s="thinking">Thinking</span>
+      <span class="st" data-s="working">Working</span><span class="st" data-s="speaking">Speaking</span>
+      <span class="st" data-s="error">Error</span>
+    </div>
+    <button class="motion" id="motion">Pause motion</button>
+
+    <div class="ask">
+      <form class="bar" id="form" autocomplete="off">
+        <label class="sr" for="q">Request</label>
+        <input id="q" placeholder="Ask JARVIS…  e.g. what's on today · fix the stop-loss in the trading bot" maxlength="2000">
+        <button type="button" class="icon" id="speak" title="Read answers aloud (uses Windows' own voices, offline)" aria-pressed="false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/></svg>
+        </button>
+        <button class="send" id="send" type="submit">Send</button>
+      </form>
+      <div class="quick" id="quick">
+        <button data-q="what are my priorities">Priorities</button>
+        <button data-q="what's on today">Today</button>
+        <button data-q="/status">Bot status</button>
+        <button data-q="/recent">Recent</button>
+        <button data-q="/usage">Usage</button>
+        <button data-q="help">Help</button>
+      </div>
+    </div>
+
+    <article class="answer" id="answer" aria-live="polite"></article>
+  </section>
+
+  <section class="grid">
+    <div class="panel">
+      <h2>Recent requests <a id="dash-link" href="#">Dashboard ↗</a></h2>
+      <div id="recent"><div class="empty">Loading…</div></div>
+    </div>
+    <div class="panel">
+      <h2>Coding agents</h2>
+      <div class="agents" id="agents"></div>
+      <h2 style="margin-top:14px">Jobs &amp; approvals</h2>
+      <div id="jobs"></div>
+    </div>
+    <div class="panel">
+      <h2>Free-tier usage today</h2>
+      <div id="usage"></div>
+      <h2 style="margin-top:14px">Activity</h2>
+      <div class="log" id="log"></div>
+    </div>
+  </section>
+  <div class="foot">Personal &amp; financial requests stay on this laptop · <code>Private/</code> is never sent to AI · <a id="inbox-link" href="#">Open Inbox in Obsidian</a></div>
+</div>
+
+<script>
+"use strict";
+const TOKEN = "__JCC_TOKEN__";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+/* ------------------------------------------------------------------ galaxy */
+const sky = $("sky"), ctx = sky.getContext("2d");
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let paused = reduce, W = 0, H = 0, DPR = 1, stars = [], field = [];
+const PRESET = {
+  idle:     {speed:.12, glow:.85, hue:[205,215], warm:0,   jitter:0,  pulse:0},
+  thinking: {speed:.42, glow:1.2, hue:[185,200], warm:0,   jitter:0,  pulse:1},
+  working:  {speed:.26, glow:1.05,hue:[200,212], warm:.55, jitter:0,  pulse:.6},
+  speaking: {speed:.18, glow:1.1, hue:[190,205], warm:.15, jitter:0,  pulse:.8},
+  error:    {speed:.08, glow:.9,  hue:[350,360], warm:0,   jitter:1.2,pulse:.3},
+};
+let target = PRESET.idle, cur = {...PRESET.idle, hue:[...PRESET.idle.hue]};
+function resize(){
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  sky.width = W * DPR; sky.height = H * DPR; ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+function makeStars(){
+  stars = []; field = [];
+  const ARMS = 3, N = Math.min(4600, Math.max(1800, Math.round(innerWidth * 3.4)));
+  for (let i = 0; i < N; i++){
+    const core = Math.random() < .16;
+    const r = core ? Math.pow(Math.random(), 2.2) * .18 : .12 + Math.pow(Math.random(), .9) * .88;
+    const arm = i % ARMS;
+    const twist = 3.1;                                   // logarithmic-ish spiral
+    const spread = (core ? .9 : .32) * (1 - r * .45);
+    const a = arm * (Math.PI * 2 / ARMS) + r * twist * Math.PI + (Math.random() - .5) * spread;
+    stars.push({r, a, z:(Math.random() - .5) * .08 * (1 - r), s:Math.random() * 1.3 + .35,
+                b:Math.random() * .6 + .4, tw:Math.random() * 6.28, core});
+  }
+  for (let i = 0; i < 160; i++) field.push({x:Math.random(), y:Math.random(), s:Math.random() * 1.1 + .2, tw:Math.random() * 6.28});
+}
+function lerp(a, b, t){ return a + (b - a) * t; }
+let t0 = performance.now(), angle = 0, pulseR = 0;
+function frame(now){
+  const dt = Math.min(.05, (now - t0) / 1000); t0 = now;
+  for (const k of ["speed","glow","warm","jitter","pulse"]) cur[k] = lerp(cur[k], target[k], .04);
+  cur.hue[0] = lerp(cur.hue[0], target.hue[0], .04); cur.hue[1] = lerp(cur.hue[1], target.hue[1], .04);
+  if (!paused) angle += dt * cur.speed;
+  pulseR = (pulseR + dt * .35 * (cur.pulse > .05 ? 1 : 0)) % 1.2;
+  ctx.clearRect(0, 0, W, H);
+  // background field stars
+  for (const f of field){
+    const a = .25 + .25 * Math.sin(now / 1400 + f.tw);
+    ctx.fillStyle = `rgba(200,220,255,${a})`; ctx.fillRect(f.x * W, f.y * H, f.s, f.s);
+  }
+  const cx = W / 2, cy = Math.min(H * .25, 270) + 18, R = Math.min(W * .42, 330);
+  const tilt = .58;
+  ctx.globalCompositeOperation = "lighter";
+  // core glow
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * .42);
+  const breath = cur.pulse * (.5 + .5 * Math.sin(now / 380));
+  g.addColorStop(0, `hsla(${cur.hue[0]},90%,88%,${.35 * cur.glow + .15 * breath})`);
+  g.addColorStop(1, "hsla(220,80%,40%,0)");
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, R * .42, 0, 6.283); ctx.fill();
+  for (const s of stars){
+    const omega = 1 / Math.sqrt(s.r + .06);           // inner stars orbit faster
+    const a = s.a + angle * omega;
+    let x = Math.cos(a) * s.r * R, y = Math.sin(a) * s.r * R * tilt + s.z * R;
+    if (cur.jitter > .01){ x += (Math.random() - .5) * cur.jitter * 2; y += (Math.random() - .5) * cur.jitter * 2; }
+    const ring = Math.abs(s.r - pulseR) < .05 ? cur.pulse * .9 : 0;
+    const tw = .75 + .25 * Math.sin(now / 700 + s.tw);
+    const L = Math.min(97, (s.core ? 88 : 78) + ring * 12);
+    const hue = lerp(cur.hue[0], cur.hue[1], s.r);
+    const warmHue = 38, h = lerp(hue, warmHue, cur.warm * (s.r > .45 ? .9 : .2));
+    ctx.fillStyle = `hsla(${h},${s.core ? 60 : 85}%,${L}%,${Math.min(1, s.b * tw * cur.glow * .9 + ring * .5)})`;
+    const sz = s.s * (s.core ? 1.35 : 1.15) + ring * 1.2;
+    ctx.fillRect(cx + x, cy + y, sz, sz);
+  }
+  ctx.globalCompositeOperation = "source-over";
+  requestAnimationFrame(frame);
+}
+addEventListener("resize", () => { resize(); makeStars(); });
+resize(); makeStars(); requestAnimationFrame(frame);
+$("motion").onclick = () => { paused = !paused; $("motion").textContent = paused ? "Resume motion" : "Pause motion"; };
+if (reduce) $("motion").textContent = "Resume motion";
+
+/* ------------------------------------------------------------------ state */
+let serverCore = "idle", speaking = false, asking = false, lastState = null, pickersBuilt = false;
+function setCore(){
+  const s = speaking ? "speaking" : asking ? "thinking" : serverCore;
+  target = PRESET[s] || PRESET.idle;
+  for (const el of document.querySelectorAll(".st")) el.className = "st" + (el.dataset.s === s ? " on " + s : "");
+}
+async function api(path, opts = {}){
+  const r = await fetch(path, {...opts, headers:{"X-JCC-Token":TOKEN, ...(opts.body ? {"Content-Type":"application/json"} : {}), ...(opts.headers || {})}});
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
+  return r.json();
+}
+function chip(label, cls){ return `<span class="chip ${cls}"><i></i>${esc(label)}</span>`; }
+function renderState(d){
+  lastState = d; serverCore = d.core; setCore();
+  const k = d.keys;
+  $("chips").innerHTML = [
+    chip("Core · " + d.core, d.core === "error" ? "bad" : d.core === "idle" ? "ok" : "warn"),
+    chip("Vault · " + (d.vault.ok ? "connected" : "missing"), d.vault.ok ? "ok" : "bad"),
+    chip("Inbox watcher · " + d.watcher, d.watcher === "running" ? "ok" : d.watcher === "external" ? "warn" : "bad"),
+    chip("Gemini " + (k.gemini ? "✓" : "✗") + "  Groq " + (k.groq ? "✓" : "✗"), k.gemini && k.groq ? "ok" : "warn"),
+    chip("Bot key " + (k.bot ? "✓" : "✗"), k.bot ? "ok" : "warn"),
+  ].join("");
+  const LABEL = {claude:"Claude Code", codex:"Codex", gemini:"Gemini CLI"};
+  if (!pickersBuilt){
+    for (const [name, a] of Object.entries(d.agents)){
+      const o = document.createElement("option"); o.value = name;
+      o.textContent = (LABEL[name] || name) + (a.state === "ready" ? "" : " (" + a.state + ")");
+      o.disabled = a.state === "not installed" || a.state === "disabled"; $("agent").appendChild(o);
+    }
+    for (const p of d.projects){
+      const o = document.createElement("option"); o.value = p.key; o.textContent = p.name; $("project").appendChild(o);
+    }
+    try { $("agent").value = localStorage.getItem("jcc-agent") || "auto"; $("project").value = localStorage.getItem("jcc-project") || "auto"; } catch (_) {}
+    if (!$("agent").value || $("agent").selectedOptions[0]?.disabled) $("agent").value = "auto";
+    pickersBuilt = true;
+  }
+  $("agents").innerHTML = Object.entries(d.agents).map(([name, a]) => {
+    const cls = a.state === "ready" ? "ready" : a.state === "cooling down" ? "cool" : "off";
+    const until = a.until ? " · back " + new Date(a.until * 1000).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}) : "";
+    return `<div class="ag ${cls}"><i></i><b>${esc(LABEL[name] || name)}</b><span>${esc(a.state)}${esc(until)}</span><span class="s">${esc(a.runs_today)} today</span></div>`;
+  }).join("");
+  $("inbox-link").href = d.inbox; $("dash-link").href = d.dashboard;
+  // recent
+  $("recent").innerHTML = d.recent.length ? d.recent.map(r => `
+    <div class="row" data-id="${esc(r.id)}" tabindex="0">
+      <span class="t t${esc(r.tier)}">T${esc(r.tier)}</span>
+      <div class="x"><div class="q">${esc(r.request)}</div>
+      <div class="s">${esc((r.time || "").slice(11, 16))} · ${esc(r.status)} · ${esc(r.model)}</div></div>
+    </div>`).join("") : `<div class="empty">No requests yet. Ask something above.</div>`;
+  // jobs
+  const jobs = d.jobs.map(j => `<div class="row" data-href="${esc(j.obsidian)}"><span class="t t3">${j.status === "queued" ? "Q" : "▶"}</span><div class="x"><div class="q">${esc(j.task)}</div><div class="s">${esc(j.status)} · ${esc(LABEL[j.agent] || j.agent || "?")} · ${esc(j.level)}${j.project ? " · " + esc(j.project) : ""}</div></div></div>`);
+  const appr = d.approvals.map(j => `<div class="row" data-href="${esc(j.obsidian)}"><span class="t" style="background:rgba(255,111,125,.12);color:var(--bad)">!</span><div class="x"><div class="q">${esc(j.task)}</div><div class="s">needs approval · ${esc(j.blocked_by)}</div></div></div>`);
+  $("jobs").innerHTML = (jobs.length ? jobs.join("") : `<div class="empty">No tier 3 jobs running.</div>`) +
+    (appr.length ? `<h2 style="margin-top:12px">Needs your approval</h2>` + appr.join("") : "");
+  // usage
+  const NAMES = {gemini_lite:"Gemini Flash-Lite", gemini_flash:"Gemini Flash", groq:"Groq"};
+  $("usage").innerHTML = Object.entries(d.usage).map(([p, u]) => {
+    const pct = Math.min(100, Math.max(u.requests / Math.max(1, u.requests_cap), u.tokens / Math.max(1, u.tokens_cap)) * 100);
+    return `<div class="meter"><div class="l"><span>${esc(NAMES[p] || p)}</span><span>${u.requests}/${u.requests_cap} req · ${(u.tokens/1000).toFixed(1)}k tok</span></div><div class="track"><div class="fill${pct > 80 ? " hot" : ""}" style="width:${pct.toFixed(1)}%"></div></div></div>`;
+  }).join("");
+  $("log").textContent = d.log.length ? d.log.join("\n") : "Waiting for activity…";
+}
+async function poll(){
+  try { renderState(await api("/api/state")); }
+  catch (e) { serverCore = "error"; setCore(); $("chips").innerHTML = chip("Server offline · restart jcc gui", "bad"); }
+}
+poll(); setInterval(poll, 3000);
+
+/* ------------------------------------------------------------------ markdown-lite (escapes first) */
+function md(src){
+  const blocks = String(src || "").split(/```/);
+  return blocks.map((b, i) => {
+    if (i % 2) return `<pre><code>${esc(b.replace(/^[a-z0-9]*\n/i, ""))}</code></pre>`;
+    let h = esc(b);
+    h = h.replace(/`([^`]+)`/g, "<code>$1</code>")
+         .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+         .replace(/!?\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, a, c) => `<span class="wl">${c || a}</span>`)
+         .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    const out = []; let list = false;
+    for (const line of h.split("\n")){
+      const li = line.match(/^\s*[-*] (?:\[[ x]\] )?(.*)$/), hd = line.match(/^#{1,4} (.*)$/);
+      if (li){ if (!list){ out.push("<ul>"); list = true; } out.push(`<li>${li[1]}</li>`); continue; }
+      if (list){ out.push("</ul>"); list = false; }
+      if (hd) out.push(`<h3>${hd[1]}</h3>`); else if (line.trim()) out.push(`<p>${line}</p>`);
+    }
+    if (list) out.push("</ul>");
+    return out.join("");
+  }).join("");
+}
+function showAnswer(r){
+  const el = $("answer");
+  const tier = r.tier ?? "?";
+  const label = tier == 1 ? "Tier 1 · no AI" : tier == 2 ? "Tier 2 · " + (r.model || "") : "Tier 3 · " + (r.model || "");
+  el.innerHTML = `<div class="meta"><span class="tag t${esc(tier)}">${esc(label)}</span>
+    <span class="tag ${esc(r.status)}">${esc(r.status)}</span>
+    <span>${esc(r.router_method)} ${r.confidence != null ? Number(r.confidence).toFixed(2) : ""}</span>
+    ${r.duration_ms != null ? `<span>${esc(r.duration_ms)} ms</span>` : ""}
+    <a href="${esc(r.obsidian)}">Open receipt ↗</a></div>
+    <div class="md">${md(r.answer)}${r.error ? `<p class="err">${esc(r.error)}</p>` : ""}</div>`;
+  el.classList.add("show");
+  if ($("speak").getAttribute("aria-pressed") === "true" && r.answer) say(r.answer);
+}
+
+/* ------------------------------------------------------------------ actions */
+async function ask(text){
+  text = text.trim(); if (!text || asking) return;
+  asking = true; setCore(); $("send").disabled = true;
+  $("answer").classList.add("show"); $("answer").innerHTML = `<div class="meta"><span class="tag">Routing…</span></div>`;
+  try { showAnswer(await api("/api/ask", {method:"POST", body:JSON.stringify({text, agent:$("agent").value, project:$("project").value})})); $("q").value = ""; }
+  catch (e) { $("answer").innerHTML = `<p class="err">Request failed: ${esc(e.message)}</p>`; }
+  finally { asking = false; setCore(); $("send").disabled = false; poll(); }
+}
+$("form").onsubmit = e => { e.preventDefault(); ask($("q").value); };
+$("quick").onclick = e => { const q = e.target.dataset?.q; if (q) ask(q); };
+$("recent").onclick = async e => {
+  const row = e.target.closest(".row"); if (!row) return;
+  try { showAnswer(await api("/api/receipt?id=" + encodeURIComponent(row.dataset.id))); } catch (_) {}
+};
+$("recent").onkeydown = e => { if (e.key === "Enter") $("recent").onclick(e); };
+$("jobs").onclick = e => {
+  const row = e.target.closest(".row[data-href]");
+  if (row && row.dataset.href.startsWith("obsidian://")) location.href = row.dataset.href;
+};
+for (const id of ["agent", "project"]) $(id).onchange = () => { try { localStorage.setItem("jcc-" + id, $(id).value); } catch (_) {} };
+
+/* ------------------------------------------------------------------ speech (local Windows voices) */
+function say(text){
+  if (!("speechSynthesis" in window)) return;
+  speechSynthesis.cancel();
+  const plain = text.replace(/```[\s\S]*?```/g, " code block. ").replace(/[*`#>\[\]]/g, "").slice(0, 1200);
+  const u = new SpeechSynthesisUtterance(plain);
+  const voice = speechSynthesis.getVoices().find(v => v.localService && /en-(GB|IN|US)/.test(v.lang));
+  if (voice) u.voice = voice;
+  u.onstart = () => { speaking = true; setCore(); };
+  u.onend = u.onerror = () => { speaking = false; setCore(); };
+  speechSynthesis.speak(u);
+}
+$("speak").onclick = () => {
+  const on = $("speak").getAttribute("aria-pressed") !== "true";
+  $("speak").setAttribute("aria-pressed", String(on)); $("speak").classList.toggle("on", on);
+  if (!on && "speechSynthesis" in window) { speechSynthesis.cancel(); speaking = false; setCore(); }
+};
+document.addEventListener("keydown", e => { if (e.key === "/" && document.activeElement !== $("q")) { e.preventDefault(); $("q").focus(); } });
+$("q").focus();
+</script>
+</body>
+</html>
