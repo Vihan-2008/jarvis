@@ -26,7 +26,8 @@ The AI comes from the accounts you already have.
 - **Your notes are its memory.** It keeps what it learns in a folder of Markdown notes (an Obsidian vault): your
   second brain, readable and editable by you.
 
-Every feature is described in [the guide](docs/GUIDE.md).
+Every feature is described in [the guide](docs/GUIDE.md). How JARVIS compares with T3 Code and Cursor, feature by
+feature, is in [docs/PARITY.md](docs/PARITY.md).
 
 ## Install
 

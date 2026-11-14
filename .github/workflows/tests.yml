@@ -116,6 +116,7 @@ jobs:
           curl -fsS -o /dev/null http://127.0.0.1:8765/ || { echo "JARVIS stopped once the app's launcher ended"; exit 1; }
           echo "JARVIS still answers 20 seconds after the app's launcher ended"
           echo "the app's log:"; tail -n 5 "$HOME/Library/Logs/JARVIS/launcher.log" || true
+          grep -q "JARVIS opened from its app" "$HOME/Library/Logs/JARVIS/launcher.log" || { echo "the app's log says nothing"; exit 1; }
           for i in $(seq 1 20); do pgrep -f "JARVIS2/bin/jarvis-menu" >/dev/null && break; sleep 1; done
           pgrep -fl "JARVIS2/bin/jarvis-menu" && echo "the menu-bar icon is running"
           bash "$RUNNER_TEMP/JARVIS2/uninstall.sh" --quiet

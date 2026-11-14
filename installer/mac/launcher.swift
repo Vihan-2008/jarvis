@@ -63,5 +63,7 @@ setenv("PYTHONUNBUFFERED", "1", 1)
 let passed = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-psn_") }      // (old macOS adds a process number)
 let argv = [python, "-m", "jcc.desktop"] + passed
 var cArgs = argv.map { strdup($0) } + [nil]
+print("starting: \(argv.joined(separator: " "))")
+fflush(stdout)                                         // (what was printed so far is written before Python takes over)
 execv(python, &cArgs)
 fail("Python could not be started (\(String(cString: strerror(errno)))).")
