@@ -278,10 +278,11 @@ def main() -> int:
             one = dictate.Dictation(config.load(), said.append, recorder=Heard, hear=lambda sound: "dictated on a Mac", beep=lambda pitch: None)
             if (one.toggle(), one.toggle()) != ("listening", "typing"):
                 raise OSError("dictation did not start and stop: " + "; ".join(said))
-            now = wait_for(lambda: (lambda t: t if "dictated on a Mac" in t else "")(text_now()), 8)
+            # (TextEdit itself gives a sentence its capital letter, so the words are compared without regard to case.)
+            now = wait_for(lambda: (lambda t: t if "dictated on a mac" in t.lower() else "")(text_now()), 8)
             if not now:
                 raise OSError(f"the text is {text_now()[:80]!r}; JARVIS said {said}")
-            return "what dictation heard was typed where the cursor is"
+            return f"what dictation heard was typed where the cursor is: {now.strip()!r}"
         run("dictation types into the app in front", dictated)
 
         def pictured():
