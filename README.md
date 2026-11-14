@@ -52,10 +52,12 @@ The installers are not code-signed yet, so Windows SmartScreen and macOS Gatekee
 
 ### Windows, macOS, Linux
 
-Everything works on Windows, where the app was built and is used every day. macOS and Linux support is new: the
-core app runs there (chat, coding agents, artifacts, routines, security check), while controlling other apps'
-windows, the tray icon and the background wake word are Windows-only for now. The table is in
-[docs/PLATFORMS.md](docs/PLATFORMS.md).
+Everything works on Windows, where the app was built and is used every day. On a Mac the app runs with the wake
+word, working in other apps' windows, step-by-step control and telling the Mac's own sound from your voice; the tray
+icon, the keyboard shortcuts that work from any app, dictation into other apps and the built-in browser panel are
+Windows-only for now. The Mac side is run by the automated tests and by a check on a real Mac at GitHub
+(`scripts/mac_live_check.py`); nobody has yet used it day to day. Linux has the core app (chat, coding agents,
+artifacts, routines, security check). The table is in [docs/PLATFORMS.md](docs/PLATFORMS.md).
 
 ## How it keeps you safe
 

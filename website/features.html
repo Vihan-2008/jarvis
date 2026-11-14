@@ -43,7 +43,7 @@
   </div>
 
   <div class="note">
-    <p><b>Windows:</b> everything. <b>macOS:</b> new, the core app (chat, coding agents, artifacts, routines, security check); controlling other apps' windows, the tray and the background wake word are Windows-only for now. The Mac version has been checked by automated tests and has not yet been used day to day on a real Mac. Features marked <span class="tag win">Windows only</span> are not on the Mac yet.</p>
+    <p><b>Windows:</b> everything. <b>macOS:</b> the app with the wake word, working in other apps' windows, step-by-step control and telling the Mac's own sound from your voice. The tray icon, the keyboard shortcuts that work from any app, dictation into other apps and the built-in browser panel are Windows-only for now. Every change is run by automated tests and, on a real Mac at GitHub, by a check that opens TextEdit, types and presses in it, takes a picture of the screen, plays "Hey Jarvis" to the wake word and measures a sound the Mac plays. Nobody has yet used the Mac version day to day. Features marked <span class="tag win">Windows only</span> are not on the Mac yet.</p>
   </div>
 
   <nav aria-label="On this page">
@@ -79,14 +79,14 @@
         <p class="needs"><b>Needs:</b> a Groq key (free tier) for speech-to-text with Whisper, or an OpenAI key. An ElevenLabs key for its voice is optional; without one, the browser engine's built-in voices speak.</p>
       </article>
       <article class="card">
-        <h3>Wake word: "Hey JARVIS" <span class="tag win">Windows only</span></h3>
+        <h3>Wake word: "Hey JARVIS"</h3>
         <p>Say "Hey JARVIS" from anywhere, with or without the window open, or say the request in the same breath.</p>
-        <p>Windows' own offline speech recogniser listens for the wake word and nothing else, so ordinary talk is dropped on the spot and never leaves the PC. Only a sentence that begins with the name is transcribed and handed to JARVIS. An optional small neural model (openWakeWord) that also runs on the PC hears the name better across a room or over music. It can be switched off.</p>
+        <p>The listening happens on your computer and is for the wake word only, so ordinary talk is dropped on the spot and never leaves it. Only a sentence that begins with the name is transcribed and handed to JARVIS. On Windows, Windows' own offline speech recogniser listens, and an optional small neural model (openWakeWord) hears the name better across a room or over music. On a Mac that small model is what listens, and the installer sets it up. It can be switched off.</p>
       </article>
       <article class="card">
-        <h3>Your PC's own sound is ignored <span class="tag win">Windows only</span></h3>
+        <h3>Your computer's own sound is ignored</h3>
         <p>A film, a video or music playing through the speakers is not taken for you.</p>
-        <p>Windows reports how loud everything it plays is at each moment; sound at the microphone that rises and falls in step with it is dropped before anything is transcribed. While something is playing, only what is said to JARVIS by name counts, and a spoken yes needs the name too, so a film cannot give instructions or approve anything.</p>
+        <p>JARVIS knows how loud everything the computer plays is at each moment: Windows reports it, and on a Mac (macOS 13 or newer) a small helper measures it and keeps nothing of what it hears. Sound at the microphone that rises and falls in step with it is dropped before anything is transcribed. While something is playing, only what is said to JARVIS by name counts, and a spoken yes needs the name too, so a film cannot give instructions or approve anything.</p>
       </article>
       <article class="card">
         <h3>Dictation</h3>
@@ -107,9 +107,9 @@
     <p>And it asks before sending, deleting or paying. Every action is checked by the JARVIS service before it runs, and the AI cannot answer that check for you.</p>
     <div class="grid">
       <article class="card">
-        <h3>Acting on your computer <span class="tag win">Windows only</span></h3>
+        <h3>Acting on your computer</h3>
         <p>Ask it to open apps, files and websites, switch windows, press buttons and fill boxes, find and read files, set timers and reminders, or change the volume and brightness.</p>
-        <p>Buttons are pressed by name through Windows' accessibility layer, which lists the buttons, boxes and links of a window. While it works for you, it types and clicks only in the window it opened or switched to, never in whatever happens to be in front and never in its own window; if that window cannot be brought to the front, nothing is typed.</p>
+        <p>Buttons are pressed by name through the system's accessibility layer (UI Automation on Windows, the Accessibility interface on a Mac), which lists the buttons, boxes and links of a window. While it works for you, it types and clicks only in the window it opened or switched to, never in whatever happens to be in front and never in its own window; if that window cannot be brought to the front, nothing is typed. On a Mac, macOS asks you once to allow this under Privacy &amp; Security.</p>
       </article>
       <article class="card">
         <h3>Asks before sending, deleting or paying</h3>
@@ -132,10 +132,10 @@
         <p>On Windows, Ctrl+Alt+Backspace stops anything it is doing on the PC from any app, and saying "JARVIS, stop" is caught even while it is talking.</p>
       </article>
       <article class="card">
-        <h3>Step-by-step control <span class="tag win">Windows only</span></h3>
+        <h3>Step-by-step control</h3>
         <p>Optional and off by default: an AI moves the mouse and types to carry out one task you give it.</p>
         <p>By default each step is shown and waits for your OK. It refuses tasks and windows that involve sign-ins, payments, banking or trading, never types anything that looks like a password, and stops after 30 steps or 10 minutes. A picture of the screen is sent to Google's Gemini model for each step, and the panel says so.</p>
-        <p class="needs"><b>Needs:</b> a Gemini key.</p>
+        <p class="needs"><b>Needs:</b> a Gemini key. On a Mac, also the Accessibility and Screen Recording permissions.</p>
       </article>
       <article class="card">
         <h3>Email and online accounts</h3>

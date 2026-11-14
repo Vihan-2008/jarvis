@@ -47,7 +47,8 @@ class TestConnections(SpeechMixin, EngineTestCase):
             if item["state"] in ("needed", "problem") or item.get("key"):
                 self.assertTrue(item.get("how") or item.get("open") or item.get("settings"), "there is always a way forward: " + item["id"])
         total = connections.summary(list(found.values()))
-        self.assertEqual((total["needed"], total["problems"], total["of"]), (["Whisper listening (Groq)"], ["\"Hey JARVIS\" and shortcuts"], len(found)))
+        problems = [] if system.kind() == "linux" else ["\"Hey JARVIS\" and shortcuts"]       # (Linux has no helper to be missing)
+        self.assertEqual((total["needed"], total["problems"], total["of"]), (["Whisper listening (Groq)"], problems, len(found)))
 
     def test_what_is_connected_is_shown_as_connected_and_no_key_is_ever_shown(self):
         os.environ["JCC_GROQ_API_KEY"] = GROQ

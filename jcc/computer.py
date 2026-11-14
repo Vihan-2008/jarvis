@@ -55,6 +55,12 @@ KEYS = {"enter": 0x0D, "return": 0x0D, "tab": 0x09, "esc": 0x1B, "escape": 0x1B,
 BLOCKED_COMBOS = ({"win", "r"}, {"win", "x"}, {"ctrl", "alt", "delete"}, {"ctrl", "alt", "del"}, {"win", "l"}, {"alt", "f4"})
 
 
+def _here() -> bool:
+    """Can this system be steered step by step? Windows and a Mac can."""
+    from jcc import system
+    return system.kind() in ("windows", "mac")
+
+
 def system_prompt() -> str:
     """What the AI that chooses each step is told: the same on every system, with this system's name and its own keys."""
     from jcc import system
@@ -359,7 +365,7 @@ class Computer:
                 "proposal": ({**self.proposal, "label": describe(self.proposal)} if self.proposal else None),
                 "log": self.log[-40:], "outcome": self.outcome, "width": self.size[0], "height": self.size[1],
                 "image": base64.b64encode(self.image).decode() if with_image and self.image else "",
-                "has_key": bool(secrets.get("gemini")), "available": os.name == "nt"}
+                "has_key": bool(secrets.get("gemini")), "available": _here()}
 
     # ------------------------------------------------------------------ the loop
     def _stopped(self) -> bool:

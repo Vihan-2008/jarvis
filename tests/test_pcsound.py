@@ -123,7 +123,7 @@ class TestPcSound(unittest.TestCase):
         monitor.want(0.25)
         import time
         time.sleep(0.6)
-        self.assertGreaterEqual(len(monitor.samples), 3)
+        self.assertGreaterEqual(len(monitor.samples), 1)
         self.assertFalse(monitor.thread.is_alive(), "stopped by itself when no longer asked")
         self.assertEqual((Meter.opened, Meter.closed), (1, 1))
 

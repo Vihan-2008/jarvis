@@ -318,22 +318,37 @@ def main() -> int:
             raise Skip("the model's files are not there: " + ", ".join(missing))
         work = Path(tempfile.mkdtemp(prefix=MARK + "-say-"))
         try:
-            def best(words: str) -> float:
+            import wave
+
+            def best(words: str, voice: str) -> tuple[float, int]:
+                """(the model's highest score, how loud the speech was) for these words in one of the Mac's voices."""
                 spoken, plain = work / "say.aiff", work / "say.wav"
-                made = subprocess.run(["say", "-o", str(spoken), words], capture_output=True, timeout=60)
+                for old in (spoken, plain):
+                    old.unlink(missing_ok=True)
+                made = subprocess.run(["say", *(["-v", voice] if voice else []), "-o", str(spoken), words], capture_output=True, timeout=60)
                 if made.returncode != 0 or not spoken.is_file():
-                    raise Skip("the Mac's own voice (say) is not available here")
+                    return -1.0, 0
                 subprocess.run(["afconvert", "-f", "WAVE", "-d", "LEI16@16000", "-c", "1", str(spoken), str(plain)], capture_output=True, timeout=60, check=True)
-                import wave
                 with wave.open(str(plain), "rb") as sound:
                     pcm = sound.readframes(sound.getnframes())
+                loud = max((abs(int.from_bytes(pcm[i:i + 2], "little", signed=True)) for i in range(0, len(pcm) - 1, 16)), default=0)
                 spotter = wakeword.Spotter(files)
-                scores = spotter.feed(b"\x00" * 32000 + pcm + b"\x00" * 32000)
-                return max(scores, default=0.0)
-            name, other = best("Hey Jarvis, what time is it?"), best("The weather is lovely this afternoon, is it not?")
-            if name < 0.5 or other >= 0.5:
-                raise OSError(f'"Hey Jarvis" scored {name:.2f} (wanted 0.5 or more) and ordinary talk scored {other:.2f} (wanted less)')
-            return f'"Hey Jarvis" scored {name:.2f}; ordinary talk scored {other:.2f}'
+                return max(spotter.feed(b"\x00" * 32000 + pcm + b"\x00" * 32000), default=0.0), loud
+            # The voices a Mac comes with differ from one macOS to the next, and some are too flat for any wake word.
+            # The name must be heard in at least one natural voice, and ordinary talk in none.
+            tried = []
+            for voice in ("", "Samantha", "Alex", "Daniel", "Karen", "Fred"):
+                name, loud = best("Hey Jarvis, what time is it?", voice)
+                if name < 0:
+                    continue
+                other, _ = best("The weather is lovely this afternoon, is it not?", voice)
+                tried.append((voice or "the usual voice", name, other, loud))
+            if not tried:
+                raise Skip("the Mac's own voice (say) is not available here")
+            told = "; ".join(f'{voice}: "Hey Jarvis" {name:.2f}, ordinary talk {other:.2f}, loudest sample {loud}' for voice, name, other, loud in tried)
+            if not any(name >= 0.5 for _, name, _, _ in tried) or any(other >= 0.5 for _, _, other, _ in tried):
+                raise OSError("the name was not heard in any voice, or ordinary talk was taken for it. " + told)
+            return told
         finally:
             shutil.rmtree(work, ignore_errors=True)
     run('the wake word model hears "Hey Jarvis" on this Mac', wake_word)

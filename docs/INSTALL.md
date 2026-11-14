@@ -43,14 +43,23 @@ Other options: `-InstallDir`, `-ShortcutDir`, `-NoShortcuts`, `-InstallObsidian`
 
 1. Open `JARVIS.dmg` (or unpack `JARVIS-mac.zip`) and double-click **Install JARVIS.command** (see the Gatekeeper note
    above).
-2. Answer the questions in the Terminal window that opens.
+2. Answer the questions in the Terminal window that opens. One of them offers to set up "Hey JARVIS": two Python
+   packages (numpy and onnxruntime, about 60 MB, kept in a Python environment of JARVIS's own inside the install
+   folder) and the wake word's small model (4 MB, fetched from its makers and checked; they allow non-commercial use).
 3. Open **JARVIS** from `Applications` in your home folder.
+4. The first time JARVIS presses a button in another app, looks at the screen or listens, macOS asks you to allow it.
+   You can switch these on beforehand under System Settings, Privacy & Security: **Accessibility**, **Screen & System
+   Audio Recording** and **Microphone**. JARVIS's Connections page shows which are allowed.
 
 Or, in Terminal: `bash install.sh --quiet --vault ~/Notes/JARVIS`. Other options: `--install-dir`, `--no-app`,
-`--install-obsidian` / `--no-obsidian`.
+`--install-obsidian` / `--no-obsidian`, `--wake-word` / `--no-wake-word`.
 
-**The Mac installer is new and was not run on a real Mac by its authors.** If it fails, please open an issue with
-what it printed, and meanwhile run JARVIS from source.
+The installer also puts in a small helper that tells the Mac's own sound from your voice. It is built on your Mac when
+Apple's command line tools are installed; otherwise the ready-built one from the download is used.
+
+**The Mac installer is new.** Its script is run on a real Mac at GitHub for every change, into a temporary folder. The
+double-click path through Finder, and macOS's own permission questions, have not been tried by its authors. If it
+fails, please open an issue with what it printed, and meanwhile run JARVIS from source.
 
 ## What the installer does
 

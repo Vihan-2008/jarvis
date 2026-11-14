@@ -19,7 +19,8 @@
 #   8. Optionally installs Obsidian (Homebrew, or opens its download page).
 #   9. Writes uninstall.sh into the install folder.
 #
-# This script is new and was not run on a real Mac by its authors. Bash 3.2 (the one macOS ships) is enough.
+# This script is new. It is run on a real Mac at GitHub for every change (into a temporary folder, with --quiet);
+# nobody has yet run it by double-clicking in Finder. Bash 3.2 (the one macOS ships) is enough.
 set -euo pipefail
 
 INSTALL_DIR="$HOME/Applications/JARVIS"
