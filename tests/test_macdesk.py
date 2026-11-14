@@ -333,6 +333,54 @@ class TestKeys(OnAMac):
             self.assertEqual(step("win+r")["action"], "need_user")
 
 
+class TestHowAShortcutIsPressed(unittest.TestCase):
+    """The part of jcc/macax.py that sends keys, with macOS's own library stood in for."""
+
+    def mac(self, down=()):
+        from jcc import macax
+        sent, flags = [], {}
+
+        class Library:
+            def AXIsProcessTrusted(self):
+                return 1
+
+            def CGEventCreateKeyboardEvent(self, source, code, is_down):
+                flags[len(flags) + 1] = [code, is_down, None]
+                return len(flags)
+
+            def CGEventSetFlags(self, event, marks):
+                flags[event][2] = marks
+
+            def CGEventPost(self, tap, event):
+                sent.append(tuple(flags[event]))
+
+            def CFRelease(self, ref):
+                pass
+
+            def CGEventSourceKeyState(self, state, key):
+                return 1 if key in down else 0
+        one = object.__new__(macax.Mac)
+        one.lib = Library()
+        return one, sent
+
+    def test_the_modifier_keys_go_down_first_and_come_up_last(self):
+        command, shift = 1 << 20, 1 << 17
+        with mock.patch.object(time, "sleep", lambda seconds: None):
+            mac, sent = self.mac()
+            mac.key(1, command | shift)                         # Command-Shift-S
+            self.assertEqual(sent, [(55, 1, command), (56, 1, command | shift), (1, 1, command | shift), (1, 0, command | shift),
+                                    (56, 0, command), (55, 0, 0)], "afterwards no key is down and nothing is marked as held")
+            mac, sent = self.mac()
+            mac.key(36)
+            self.assertEqual(sent, [(36, 1, 0), (36, 0, 0)], "a key on its own is just that key")
+
+    def test_whether_a_modifier_is_held_is_asked_of_the_keys_themselves(self):
+        self.assertFalse(self.mac()[0].modifiers_held())
+        self.assertTrue(self.mac(down=(58,))[0].modifiers_held(), "Option is down")
+        self.assertTrue(self.mac(down=(54,))[0].modifiers_held(), "the right-hand Command key counts too")
+        self.assertFalse(self.mac(down=(0,))[0].modifiers_held(), "a letter is not a modifier")
+
+
 class TestTheScreenThePointerAndTheKeys(OnAMac):
     def setUp(self):
         super().setUp()

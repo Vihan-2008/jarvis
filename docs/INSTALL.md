@@ -54,8 +54,9 @@ Other options: `-InstallDir`, `-ShortcutDir`, `-NoShortcuts`, `-InstallObsidian`
 Or, in Terminal: `bash install.sh --quiet --vault ~/Notes/JARVIS`. Other options: `--install-dir`, `--no-app`,
 `--install-obsidian` / `--no-obsidian`, `--wake-word` / `--no-wake-word`.
 
-The installer also puts in a small helper that tells the Mac's own sound from your voice. It is built on your Mac when
-Apple's command line tools are installed; otherwise the ready-built one from the download is used.
+The installer also puts in two small programs: one tells the Mac's own sound from your voice, the other is the icon
+in the menu bar and the shortcuts that work from any app (Control+Option with J, T, D or Delete). Each is built on your
+Mac when Apple's command line tools are installed; otherwise the ready-built one from the download is used.
 
 **The Mac installer is new.** Its script is run on a real Mac at GitHub for every change, into a temporary folder. The
 double-click path through Finder, and macOS's own permission questions, have not been tried by its authors. If it

@@ -24,6 +24,8 @@ ROLE, SUBROLE, TITLE, DESCRIPTION, POSITION, SIZE, ENABLED, CHILDREN, PLACEHOLDE
 # Controls whose insides only repeat their name (the picture and the words on a button).
 LEAVES = frozenset({"AXButton", "AXLink", "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXMenuButton", "AXStaticText", "AXImage", "AXTextField",
                     "AXSlider", "AXIncrementor", "AXDisclosureTriangle", "AXComboBox", "AXScrollBar", "AXValueIndicator"})
+# The modifier keys: (the mark each puts on what is pressed while it is down, the key's own number). Command, Shift, Option, Control.
+MODIFIER_KEYS = ((1 << 20, 55), (1 << 17, 56), (1 << 19, 58), (1 << 18, 59))
 NOT_ALLOWED = -25211             # kAXErrorAPIDisabled: Accessibility has not been allowed
 ACCESSIBILITY = ("macOS has not yet allowed JARVIS to control other apps. Open System Settings, Privacy & Security, Accessibility, "
                  "and switch on JARVIS (or Terminal, if you started it from there). Then try again.")
@@ -131,7 +133,7 @@ class _Libraries:
         declare(app, "CGEventSetFlags", None, v, ctypes.c_uint64)
         declare(app, "CGEventKeyboardSetUnicodeString", None, v, ctypes.c_ulong, ctypes.POINTER(ctypes.c_uint16))
         declare(app, "CGEventPost", None, u32, v)
-        declare(app, "CGEventSourceFlagsState", ctypes.c_uint64, i32)
+        declare(app, "CGEventSourceKeyState", u8, i32, ctypes.c_uint16)
         for name in ("CGPreflightScreenCaptureAccess", "CGRequestScreenCaptureAccess", "CGPreflightPostEventAccess", "CGRequestPostEventAccess"):
             declare(app, name, u8, needed=False)
         self.kinds = {"string": self.CFStringGetTypeID(), "array": self.CFArrayGetTypeID(), "boolean": self.CFBooleanGetTypeID(),
@@ -588,8 +590,9 @@ class Mac:
             lib.CFRelease(event)
 
     def modifiers_held(self) -> bool:
-        """Is Control, Option, Shift or Command being held down on the real keyboard right now?"""
-        return bool(self.lib.CGEventSourceFlagsState(1) & ((1 << 17) | (1 << 18) | (1 << 19) | (1 << 20)))
+        """Is Control, Option, Shift or Command (either one of each) down right now? The keys themselves are asked, not
+        the marks that events carry: a mark can outlast the key that set it."""
+        return any(self.lib.CGEventSourceKeyState(1, key) for key in (55, 54, 56, 60, 58, 61, 59, 62))
 
     def _send(self, event) -> None:
         if not event:
@@ -624,15 +627,30 @@ class Mac:
         self.need_trust()
         self._send(self.lib.CGEventCreateScrollWheelEvent2(None, 1, 1, int(lines), 0, 0))
 
+    def _key_event(self, code: int, down: bool, flags: int) -> None:
+        event = self.lib.CGEventCreateKeyboardEvent(None, int(code), 1 if down else 0)
+        if event:
+            self.lib.CGEventSetFlags(event, int(flags))
+        self._send(event)
+        time.sleep(0.01)
+
     def key(self, code: int, flags: int = 0) -> None:
-        """Press and let go of one key (macOS's number for it), with the modifier keys in `flags` held."""
+        """Press and let go of one key (macOS's number for it), with the modifier keys in `flags` held: as a keyboard
+        does it. The modifier keys go down one by one, then the key goes down and up, then the modifier keys come up
+        again. (Sent as the key alone with only a mark saying "Command is held", macOS went on counting Command as
+        held afterwards.)"""
         self.need_trust()
-        for down in (1, 0):
-            event = self.lib.CGEventCreateKeyboardEvent(None, int(code), down)
-            if event:
-                self.lib.CGEventSetFlags(event, int(flags))
-            self._send(event)
-            time.sleep(0.01)
+        flags = int(flags)
+        modifiers = [(mark, own) for mark, own in MODIFIER_KEYS if flags & mark]
+        held = 0
+        for mark, own in modifiers:
+            held |= mark
+            self._key_event(own, True, held)
+        self._key_event(code, True, flags)
+        self._key_event(code, False, flags)
+        for mark, own in reversed(modifiers):
+            held &= ~mark
+            self._key_event(own, False, held)
 
     def type_character(self, character: str) -> None:
         """Type one character exactly as given, whatever the keyboard layout."""
