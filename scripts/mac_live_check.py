@@ -207,29 +207,44 @@ def main() -> int:
         run("the control at a point", under_pointer)
 
         def pressed():
+            # TextEdit's own Settings window has tick boxes: one is ticked by its name, and unticked again.
             needs_trust()
-            box = next((i for i in state.get("items", []) if i["t"] == "CheckBox" and i["n"] and i["on"]), None)
-            if not box:
-                raise Skip("this window has no named tick box to try: " + "; ".join(sorted({i["t"] for i in state.get("items", [])})))
+            windows.focus(handle)
+            m.key(43, 1 << 20)                                                       # Command-comma opens an app's settings
+            other = wait_for(lambda: next((r["handle"] for r in m.rows() if r["app"] == "TextEdit" and r["handle"] != handle), 0), 10)
+            if not other:
+                raise Skip("TextEdit's Settings window did not open")
+            try:
+                got = controls.call({"op": "list", "h": other, "max": 200}, 20.0)
+                box = next((i for i in got.get("items", []) if i["t"] == "CheckBox" and i["n"] and i["on"]), None)
+                if not box:
+                    raise OSError("no named tick box among: " + "; ".join(f"{i['t']}:{i['n'] or '-'}" for i in got.get("items", [])[:30]))
 
-            def value():
-                walked = m.walk(handle)
-                try:
-                    for n in walked["nodes"]:
-                        item = macdesk.describe(n, walked["frame"])
-                        if item and item["t"] == "CheckBox" and item["n"] == box["n"]:
-                            return m._plain(n["el"], "AXValue")
-                finally:
-                    m.done(walked)
-                return None
-            before = value()
-            how = controls.call({"op": "press", "h": handle, "name": box["n"]}, 10.0).get("how")
-            time.sleep(0.4)
-            after = value()
-            if how == "click" or before == after:
-                raise OSError(f"pressing {box['n']!r}: how={how!r}, its value was {before!r} and is {after!r}")
-            controls.call({"op": "press", "h": handle, "name": box["n"]}, 10.0)       # (and back again)
-            return f'"{box["n"]}" was {how} by name: {before!r} -> {after!r}'
+                def value():
+                    walked = m.walk(other)
+                    try:
+                        for n in walked["nodes"]:
+                            item = macdesk.describe(n, walked["frame"])
+                            if item and item["t"] == "CheckBox" and item["n"] == box["n"]:
+                                return m._plain(n["el"], "AXValue")
+                    finally:
+                        m.done(walked)
+                    return None
+                before = value()
+                how = controls.call({"op": "press", "h": other, "name": box["n"]}, 10.0).get("how")
+                time.sleep(0.4)
+                after = value()
+                controls.call({"op": "press", "h": other, "name": box["n"]}, 10.0)   # (and back again, as it was)
+                time.sleep(0.3)
+                back = value()
+                if how == "click" or before == after or back != before:
+                    raise OSError(f"pressing {box['n']!r}: how={how!r}, its value was {before!r}, then {after!r}, then {back!r}")
+                return (f'"{box["n"]}" in TextEdit\'s Settings was {how} by name ({before!r} -> {after!r}) and put back; '
+                        f'that window listed {len(got["items"])} controls: ' + "; ".join(f"{i['t']}:{i['n'] or '-'}" for i in got["items"][:12]))
+            finally:
+                windows.focus(other)
+                m.key(13, 1 << 20)                                                   # Command-W closes the Settings window
+                time.sleep(0.3)
         run("a control is pressed by name", pressed)
 
         def scrolled():

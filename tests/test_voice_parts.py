@@ -16,6 +16,13 @@ C = policy.Context
 
 
 class TestPolicy(unittest.TestCase):
+    def setUp(self):
+        from unittest import mock
+        from jcc import system
+        rules = mock.patch.object(system, "PLATFORM", "win32")      # (these are Windows' rules; a Mac's shortcuts are in tests/test_macdesk.py)
+        rules.start()
+        self.addCleanup(rules.stop)
+
     def verdict(self, tool, args=None, **ctx):
         return policy.decide(tool, args or {}, C(**ctx)).verdict
 

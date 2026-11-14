@@ -77,29 +77,33 @@ final class Meter: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 }
 
+@available(macOS 13.0, *)
+func listen() -> Never {
+    let meter = Meter()
+    let ticks = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "jarvis.sound-level.ticks"))
+    Task {
+        do {
+            try await meter.start()
+        } catch {
+            fail("could not start: \(error.localizedDescription)", 4)
+        }
+        print("ready")
+        ticks.schedule(deadline: .now() + .milliseconds(20), repeating: .milliseconds(20))
+        ticks.setEventHandler { print(String(format: "%.4f", meter.take())) }
+        ticks.resume()
+    }
+    DispatchQueue.global().async {                            // stop when the input is closed
+        while let _ = readLine(strippingNewline: true) {}
+        exit(0)
+    }
+    dispatchMain()
+}
+
 setvbuf(stdout, nil, _IOLBF, 0)
 signal(SIGPIPE, SIG_DFL)                                      // whoever was reading has gone: stop
 
-guard #available(macOS 13.0, *) else { fail("macOS 13 or newer is needed", 2) }
-
-let meter = Meter()
-let ticks = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "jarvis.sound-level.ticks"))
-
-Task {
-    do {
-        try await meter.start()
-    } catch {
-        fail("could not start: \(error.localizedDescription)", 4)
-    }
-    print("ready")
-    ticks.schedule(deadline: .now() + .milliseconds(20), repeating: .milliseconds(20))
-    ticks.setEventHandler { print(String(format: "%.4f", meter.take())) }
-    ticks.resume()
+if #available(macOS 13.0, *) {
+    listen()
+} else {
+    fail("macOS 13 or newer is needed", 2)
 }
-
-DispatchQueue.global().async {                                // stop when the input is closed
-    while let _ = readLine(strippingNewline: true) {}
-    exit(0)
-}
-
-dispatchMain()

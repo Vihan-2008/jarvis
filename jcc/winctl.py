@@ -346,7 +346,7 @@ def set_volume(percent) -> int:
 
 # ---------------------------------------------------------------------- screen brightness
 def brightness(percent=None, run=_powershell) -> int:
-    if _mac():
+    if run is _powershell and _mac():
         from jcc import macax
         return macax.mac().brightness(percent)
     if percent is None:

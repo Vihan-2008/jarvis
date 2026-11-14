@@ -49,6 +49,11 @@ class TestComputerControl(EngineTestCase):
     def setUp(self):
         super().setUp()
         self.cfg = config.load()
+        from unittest import mock
+        from jcc import system
+        rules = mock.patch.object(system, "PLATFORM", "win32")      # (these are Windows' shortcuts; a Mac's are in tests/test_macdesk.py)
+        rules.start()
+        self.addCleanup(rules.stop)
         self._sleep = computer.time.sleep
         computer.time.sleep = lambda seconds: self._sleep(min(seconds, 0.01))
 

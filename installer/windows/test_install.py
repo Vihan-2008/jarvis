@@ -66,7 +66,8 @@ def main() -> int:
     if os.name != "nt":
         print("This test is for Windows.")
         return 1
-    tmp = Path(tempfile.mkdtemp(prefix="jarvis-install-test-"))
+    # (Its full name: Windows also knows a folder by a short name, C:\\Users\\RUNNER~1, and the two must compare as equal.)
+    tmp = Path(os.path.realpath(tempfile.mkdtemp(prefix="jarvis-install-test-")))
     try:
         test(tmp)
     except Failed as problem:

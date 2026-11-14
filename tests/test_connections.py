@@ -40,7 +40,8 @@ class TestConnections(SpeechMixin, EngineTestCase):
         self.assertEqual((found["groq"]["state"], found["groq"]["key"], found["groq"]["check"]), ("needed", "groq", False), "listening needs one of the two keys")
         self.assertEqual([found[name]["state"] for name in ("openai", "elevenlabs", "mail", "connectors", "chatgpt", "claude-web", "github", "cloud")], ["off"] * 8)
         self.assertEqual((found["pc"]["state"], found["sound"]["status"]), ("ok", "Windows default microphone · Windows default speakers"))
-        self.assertEqual(found["helper"]["state"], "problem", "the background helper is not running in this test")
+        from jcc import system
+        self.assertEqual(found["helper"]["state"], "off" if system.kind() == "linux" else "problem", "the background helper is not running in this test")
         for item in found.values():
             self.assertTrue(item["name"] and item["about"] and item["status"] and item["group"] in dict(connections.GROUPS), item)
             if item["state"] in ("needed", "problem") or item.get("key"):
@@ -84,7 +85,8 @@ class TestConnections(SpeechMixin, EngineTestCase):
         for name in ("quota-claude.json", "connectors.json", "github-status.json", "cloud-memory-status.json", "tray-status.json", "mail.json", "speech.json", "assistant.json"):
             (self.cfg.state_dir / name).write_text("{", "utf-8")
         (self.cfg.state_dir / "capture-chatgpt-status.json").write_text('["odd"]', "utf-8")
-        self.assertEqual(len(self.by_id()), 17)
+        from jcc import system
+        self.assertEqual(len(self.by_id()), 17 + (2 if system.kind() == "mac" else 0))
 
     def test_each_connection_can_really_be_checked(self):
         self.assertEqual(connections.check(self.cfg, "groq"), {"ok": False, "status": "No key is saved."})
