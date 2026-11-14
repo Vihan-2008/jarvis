@@ -564,6 +564,26 @@ class GuiState:
                 "answer": answer, "error": problem,
                 "obsidian": self.obsidian_link(receipts.receipt_rel(rid))}
 
+    def update_action(self, body: dict) -> dict:
+        """Check for an update, fetch it, choose how updates happen, or install now. Raises ValueError with a sentence."""
+        from jcc import updates
+        action = body.get("action")
+        if action == "mode":
+            return updates.set_mode(self.cfg, body.get("mode"))
+        if action == "check":
+            found = updates.check(self.cfg)
+            if found.get("available") and found.get("signed") and not updates.ready(self.cfg):
+                threading.Thread(target=lambda: _quietly(updates.download, self.cfg), name="update-download", daemon=True).start()
+            return updates.status(self.cfg)
+        if action == "install":
+            running, _ = self.jobs()
+            if any(job.get("status") in ("running", "queued") for job in running):
+                raise ValueError("A coding job is running. Install the update when it has finished.")
+            if not updates.ready(self.cfg):
+                updates.download(self.cfg)                        # (a signed update that was not fetched yet)
+            return updates.start_install(self.cfg, start="background")
+        raise ValueError("Unknown update action.")
+
     def jobs(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         running, approvals = [], []
         d = self.cfg.vault / "Jobs"
@@ -860,6 +880,9 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                         result = helper.assistants(state.cfg)
                     self._json(HTTPStatus.OK, result)
                 except (ValueError, OSError) as e:self._json(HTTPStatus.BAD_REQUEST,{'error':redact(str(e))[:300]})
+            elif url.path == '/api/updates':                        # what the window shows about updates (jcc/updates.py)
+                from jcc import updates
+                self._json(HTTPStatus.OK, updates.status(state.cfg))
             elif url.path == '/api/voice/image':
                 try:
                     from jcc import pictures
@@ -1075,7 +1098,7 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                 system.open_path(Path(__file__).resolve().parents[1] / "browser-sync")
                 self._json(HTTPStatus.OK, {"opened": True})
                 return
-            if self.path not in ("/api/ask", "/api/mods", "/api/chats", "/api/chat/send", "/api/chat/update", "/api/projects", "/api/terminal", "/api/browser/open", "/api/routing", "/api/prompt-master", "/api/cloud", "/api/efficiency", "/api/job/control", '/api/assistant/settings','/api/feedback','/api/project/browse','/api/project/inspect','/api/project/connect','/api/job/review','/api/maintenance','/api/ui/activity','/api/context/inspect','/api/memory/resolve','/api/delivery/settings','/api/delivery/plan','/api/task-queue','/api/project/preferences','/api/dry-run','/api/evaluations','/api/handoff','/api/library','/api/provenance','/api/controls','/api/restorepoints','/api/diagnostics/export','/api/attachments/extract','/api/memory/search','/api/files/save','/api/pty','/api/web','/api/computer','/api/voice','/api/speech','/api/speech/tts','/api/mail','/api/assistants','/api/preview','/api/screenshot','/api/connections','/api/window','/api/providers','/api/usage','/api/skills','/api/pairs','/api/court','/api/agents','/api/artifacts','/api/security','/api/permissions','/api/routines'):
+            if self.path not in ("/api/updates", "/api/ask", "/api/mods", "/api/chats", "/api/chat/send", "/api/chat/update", "/api/projects", "/api/terminal", "/api/browser/open", "/api/routing", "/api/prompt-master", "/api/cloud", "/api/efficiency", "/api/job/control", '/api/assistant/settings','/api/feedback','/api/project/browse','/api/project/inspect','/api/project/connect','/api/job/review','/api/maintenance','/api/ui/activity','/api/context/inspect','/api/memory/resolve','/api/delivery/settings','/api/delivery/plan','/api/task-queue','/api/project/preferences','/api/dry-run','/api/evaluations','/api/handoff','/api/library','/api/provenance','/api/controls','/api/restorepoints','/api/diagnostics/export','/api/attachments/extract','/api/memory/search','/api/files/save','/api/pty','/api/web','/api/computer','/api/voice','/api/speech','/api/speech/tts','/api/mail','/api/assistants','/api/preview','/api/screenshot','/api/connections','/api/window','/api/providers','/api/usage','/api/skills','/api/pairs','/api/court','/api/agents','/api/artifacts','/api/security','/api/permissions','/api/routines'):
                 self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
             if not self.headers.get("Content-Type", "").startswith("application/json"):
@@ -1100,6 +1123,8 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                         self._stream('audio/L16;rate=' + str(speech.PCM_RATE), (piece for piece in (made,)));return
                     kind, pieces = speech.tts_stream(state.cfg, str(body.get('text', '')), str(body.get('voice') or '') or None, None, str(body.get('previous', '')))
                     self._stream('audio/mpeg' if kind == 'mp3' else 'audio/L16;rate=' + str(speech.PCM_RATE), pieces);return
+                if self.path == '/api/updates':
+                    self._json(HTTPStatus.OK, state.update_action(body));return
                 if self.path == '/api/speech':
                     from jcc import mailer, speech
                     action = body.get('action')
@@ -1645,6 +1670,13 @@ def listener(port: int, handler, wait: float = 8.0, pause: float = 0.4) -> Liste
             time.sleep(pause)
 
 
+def _quietly(work, *args) -> None:
+    try:
+        work(*args)
+    except Exception:  # noqa: BLE001 - a background step; its own status file says what went wrong
+        pass
+
+
 def serve(port: int = 8765, open_browser: bool = True, watch: bool = True,
           cfg: config.Config | None = None) -> int:
     cfg = cfg or config.load()
@@ -1693,6 +1725,13 @@ def serve(port: int = 8765, open_browser: bool = True, watch: bool = True,
             except Exception as problem:  # noqa: BLE001 - the next tick tries again
                 state.add_log("Routines: " + str(problem)[:200])
     threading.Thread(target=routine_loop, name="routines", daemon=True).start()
+
+    def update_loop():
+        # Updates (jcc/updates.py): asks GitHub once a day which version is newest and, set to automatic, fetches a
+        # signed one in the background. Installing happens when JARVIS next starts, or when the owner presses Install.
+        from jcc import updates
+        updates.background(state.cfg, state.stop)
+    threading.Thread(target=update_loop, name="updates", daemon=True).start()
     watcher_thread = None
     if watch:
         def _run() -> None:

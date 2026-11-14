@@ -27,7 +27,9 @@ The AI comes from the accounts you already have.
   second brain, readable and editable by you.
 
 Every feature is described in [the guide](docs/GUIDE.md). How JARVIS compares with T3 Code and Cursor, feature by
-feature, is in [docs/PARITY.md](docs/PARITY.md).
+feature, is in [docs/PARITY.md](docs/PARITY.md). From version 0.1.4 on, JARVIS updates itself: it installs only
+releases signed by its maker, and goes back to the version you had if a new one does not start (see
+[docs/INSTALL.md](docs/INSTALL.md#updates)).
 
 ## Install
 

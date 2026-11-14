@@ -134,3 +134,38 @@ python installer/windows/test_install.py   # builds, installs, upgrades and unin
 
 The version comes from the `VERSION` file. Pushing a tag `v<VERSION>` makes the release workflow build all four
 packages and attach them to that tag's GitHub release.
+
+## Updates
+
+From version 0.1.4 on, JARVIS keeps itself up to date (Settings, Updates):
+
+- **Automatically** (the usual setting): once a day JARVIS asks GitHub, where its releases are published, which version
+  is the newest. Nothing about you is sent. A newer version is fetched in the background and installed the next time
+  JARVIS starts, or at once with **Install and restart**.
+- **Tell me, and I choose when**: JARVIS says a version is out and installs it when you press Install.
+- **Never look for updates.**
+
+What makes it safe:
+
+- Every release carries a list of its packages with their fingerprints, signed with a private key that never leaves its
+  maker's computer. JARVIS has the matching public key built in, and installs a package only when the list's signature
+  checks out and the download matches its fingerprint exactly. Someone who took over the GitHub account or the download
+  could not make such a signature, so every copy of JARVIS would refuse what they put there.
+- Installing runs the same installer you used, quietly, as an upgrade: your settings (`config/local.toml`), notes,
+  chats, keys and choices (starting at sign-in, "Hey JARVIS") are kept, and files of your own in the app's folder are
+  never touched.
+- A copy of the app as it was is kept first (the last three are kept). If the installer fails, or the new version does
+  not answer within two minutes, the copy is put back and the version you had starts again. That version is then not
+  tried again by itself.
+- No update is installed while a coding job is running.
+- What happened is written to `update.log` in JARVIS's data folder, and Settings, Updates says it in a sentence.
+
+Versions before 0.1.4 cannot update themselves: install 0.1.4 once over them (your settings are kept), and from then on
+updates come by themselves. A copy of JARVIS run from its source code (a git checkout) is updated with git, and Linux
+has no ready-made package, so neither is updated this way.
+
+For the maker: after the release workflow has built a version's packages, `python scripts/sign_release.py vX.Y.Z` (on the
+computer that holds the signing key) adds the signed list to the release. Until it has, copies of JARVIS show the
+version but do not install it. Keep a copy of the signing key (`python scripts/sign_release.py --export-key`) somewhere
+safe, such as a password manager: without it no further release can be signed, and every copy would need to be
+installed again by hand with a new key.

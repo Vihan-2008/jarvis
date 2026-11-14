@@ -146,3 +146,41 @@ jobs:
           bash "$RUNNER_TEMP/JARVIS3/uninstall.sh" --quiet
           rm -rf "$vault"
           [ "$ok" = True ] || { echo "JARVIS opened from its icon could not reach the notes in Documents"; exit 1; }
+      - name: An update installed by JARVIS's own helper and started again, and one that fails, rolled back
+        if: ${{ !cancelled() }}
+        run: |
+          python installer/mac/build.py --out "$RUNNER_TEMP/upd"
+          bash installer/mac/install.sh --quiet --no-obsidian --no-wake-word --no-login --install-dir "$RUNNER_TEMP/JARVIS5" \
+            --bundle-dir "$RUNNER_TEMP/Apps5" --vault "$RUNNER_TEMP/Vault5"
+          app="$RUNNER_TEMP/JARVIS5"; state="$HOME/Library/Application Support/JarvisCommand"; py="$(head -n 1 "$app/.python")"
+          open -g -j -a "$RUNNER_TEMP/Apps5/JARVIS.app" --args --background
+          for i in $(seq 1 90); do curl -fsS -o /dev/null http://127.0.0.1:8765/ && break; sleep 1; done
+          curl -fsS -o /dev/null http://127.0.0.1:8765/ && echo "JARVIS $(cat "$app/VERSION") answers"
+          python - "$RUNNER_TEMP/upd/JARVIS-mac.zip" "$RUNNER_TEMP/upd" <<'MAKE'
+          import hashlib, sys, zipfile
+          source, out = sys.argv[1], sys.argv[2]
+          for version, broken in (("9.9.9", False), ("9.9.10", True)):
+              target = f"{out}/{version}.zip"
+              with zipfile.ZipFile(source) as old, zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as new:
+                  for info in old.infolist():
+                      data = old.read(info)
+                      if info.filename.endswith(".jarvis-app/VERSION"):
+                          data = (version + "\n").encode()
+                      elif broken and info.filename.endswith(".jarvis-app/jcc/__main__.py"):
+                          data = b"raise SystemExit('this version never starts')\n"
+                      new.writestr(info, data)
+              open(target + ".sha256", "w").write(hashlib.sha256(open(target, "rb").read()).hexdigest())
+          MAKE
+          "$py" -I jcc/update_helper.py --package "$RUNNER_TEMP/upd/9.9.9.zip" --sha256 "$(cat "$RUNNER_TEMP/upd/9.9.9.zip.sha256")" \
+            --version 9.9.9 --app-dir "$app" --state "$state" --start background
+          [ "$(cat "$app/VERSION")" = 9.9.9 ] || { echo "the app is not the new version"; exit 1; }
+          curl -fsS -o /dev/null http://127.0.0.1:8765/ || { echo "the new version does not answer"; exit 1; }
+          echo "updated to 9.9.9 by the helper: stopped, installed, started again, and it answers"
+          if "$py" -I jcc/update_helper.py --package "$RUNNER_TEMP/upd/9.9.10.zip" --sha256 "$(cat "$RUNNER_TEMP/upd/9.9.10.zip.sha256")" \
+              --version 9.9.10 --app-dir "$app" --state "$state" --start background; then echo "a version that never starts was kept"; exit 1; fi
+          [ "$(cat "$app/VERSION")" = 9.9.9 ] || { echo "the version before was not put back"; exit 1; }
+          for i in $(seq 1 60); do curl -fsS -o /dev/null http://127.0.0.1:8765/ && break; sleep 1; done
+          curl -fsS -o /dev/null http://127.0.0.1:8765/ || { echo "the version put back does not answer"; exit 1; }
+          echo "a version that never started was rolled back to 9.9.9, which answers again"
+          echo "the update log:"; tail -n 25 "$state/update.log"
+          bash "$app/uninstall.sh" --quiet

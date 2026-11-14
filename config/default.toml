@@ -102,3 +102,10 @@ server_terms = []
 [desktop]
 tray = true
 hotkey = true
+
+[updates]
+# auto: fetch a signed update in the background and install it the next time JARVIS starts.
+# ask: say an update is there, and install it when you press Install in Settings. off: never ask GitHub.
+mode = "auto"
+repo = "https://github.com/Vihan-2008/jarvis"       # where releases are published (and signed by its maker: see jcc/updates.py)
+check_hours = 24

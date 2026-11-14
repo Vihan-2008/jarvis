@@ -16,6 +16,7 @@ Start it on a Mac or on Linux from the folder JARVIS is in, with Python 3.12: `p
 | Background helpers (local history, cloud memory, maintenance) | works | works | works |
 | Keys kept in the system's key store | works (Credential Manager) | works (the login Keychain) | works, with less: the Secret Service through `secret-tool` when it is installed; otherwise only the `JCC_<NAME>` environment variables |
 | Chats, notes, memory, projects | works | works | works |
+| Updates by themselves (signed releases, rolled back if the new version does not start) | works | works | not available: update from the source |
 | Coding jobs (Claude Code, Codex) in a copy of the project | works | works | works |
 | Pausing and cancelling a job (with everything it started) | works | works | works |
 | Terminal panel (interactive) | works (PowerShell) | works (your own shell, zsh by default) | works (your own shell, bash by default) |

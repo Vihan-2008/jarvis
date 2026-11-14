@@ -972,7 +972,7 @@ const pick = (id, entries) => '<select id="' + id + '">' + entries.map(([value, 
 async function openSettings(tab = 'voice') {
   await loadSpeech();
   const d = dialog('<div class="nv-set-head"><h2>Voice and assistant</h2><button class="nv-icon" data-close aria-label="Close">' + icon('x') + '</button></div>' +
-    '<nav class="nv-set-tabs"><button data-tab="connect">Connections</button><button data-tab="voice">Voice</button><button data-tab="models">AI models</button><button data-tab="skills">Skills</button><button data-tab="mods">Mods</button><button data-tab="usage">Usage</button><button data-tab="assistant">Assistant</button><button data-tab="people">Assistants</button><button data-tab="email">Email</button></nav><div class="nv-set-body"></div>', 'nv-settings');
+    '<nav class="nv-set-tabs"><button data-tab="connect">Connections</button><button data-tab="voice">Voice</button><button data-tab="models">AI models</button><button data-tab="skills">Skills</button><button data-tab="mods">Mods</button><button data-tab="usage">Usage</button><button data-tab="assistant">Assistant</button><button data-tab="people">Assistants</button><button data-tab="email">Email</button><button data-tab="updates">Updates</button></nav><div class="nv-set-body"></div>', 'nv-settings');
   const pane = d.querySelector('.nv-set-body'), saved = () => notify('Saved.');
   let showing = '';   // the tab on screen. A tab that was waiting for an answer checks this before it draws, so it never writes over another tab.
   d.querySelector('[data-close]').onclick = () => d.close();
@@ -1346,6 +1346,50 @@ async function openSettings(tab = 'voice') {
     pane.querySelectorAll('[data-item]').forEach(box => box.onchange = status);
   }
   /* What has been used: each account's allowance, the voice, the other AI services, and JARVIS's own answers. */
+  // Updates (jcc/updates.py): which version this is, whether a newer one is out, how updates happen, and installing now.
+  async function updatesTab() {
+    let u;
+    try { u = await api('/api/updates'); } catch (error) { if (showing === 'updates') pane.textContent = error.message; return; }
+    if (showing !== 'updates') return;
+    const when = at => at ? new Date(at * 1000).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+    const result = u.result || {};
+    let said;
+    if (u.managed) said = 'This copy of JARVIS is ' + esc(u.managed) + '.';
+    else if (u.installing) said = 'Installing JARVIS ' + esc(u.installing.version) + '… JARVIS restarts by itself in a minute or two.';
+    else if (u.available && u.ready) said = '<b>JARVIS ' + esc(u.latest) + ' is ready.</b> ' + (u.mode === 'auto' ? 'It is installed the next time JARVIS starts, or now:' : 'Install it when it suits you:');
+    else if (u.available && u.signed) said = '<b>JARVIS ' + esc(u.latest) + ' is out.</b> ' + (u.downloading ? 'It is being fetched…' : 'It is fetched when you install it.');
+    else if (u.available) said = '<b>JARVIS ' + esc(u.latest) + ' is out.</b> ' + esc(u.problem);
+    else if (u.problem) said = esc(u.problem);
+    else if (u.checked_at) said = 'This is the newest version.';
+    else said = 'JARVIS has not looked for updates yet.';
+    const outcome = result.version ? (result.ok ? 'Updated from ' + esc(result.from || '?') + ' to ' + esc(result.version) + ' on ' + esc(when(result.at)) + '.'
+      : 'The update to ' + esc(result.version) + ' did not work' + (result.rolled_back ? ', so JARVIS went back to ' + esc(result.from || 'the version before') : '') + ': ' + esc(result.problem)) : '';
+    pane.innerHTML = '<h3>Updates</h3><p>This is <b>JARVIS ' + esc(u.current) + '</b>.</p><p class="nv-update-said">' + said + '</p>' +
+      (outcome ? '<p class="small">' + outcome + '</p>' : '') +
+      (u.managed ? '' : '<div class="nv-sound"><button class="plain" type="button" data-update-check>' + icon('retry') + 'Check now</button>' +
+        (u.available && u.signed && !u.installing ? '<button type="button" data-update-install>' + icon('down') + 'Install and restart</button>' : '') + '</div>') +
+      (u.checked_at ? '<p class="small">Last looked: ' + esc(when(u.checked_at)) + (u.page ? ' · <a href="' + esc(u.page) + '" target="_blank" rel="noopener noreferrer">the release page</a>' : '') + '</p>' : '') +
+      (u.available && u.notes ? '<details class="nv-update-notes"><summary>What is new in ' + esc(u.latest) + '</summary><pre>' + esc(u.notes) + '</pre></details>' : '') +
+      (u.managed ? '' : row('How updates happen', pick('up-mode', [['auto', 'Automatically: fetch it, and install it the next time JARVIS starts'], ['ask', 'Tell me, and I choose when to install'], ['off', 'Never look for updates']]))) +
+      '<p class="small">JARVIS asks GitHub, where its releases are published, once a day. Nothing about you is sent. An update is installed only when ' +
+      'its signature from JARVIS’s maker checks out, and if the new version does not start, JARVIS goes back to the one you had.</p>';
+    const mode = pane.querySelector('#up-mode');
+    if (mode) { mode.value = u.mode; mode.onchange = async () => { try { await api('/api/updates', { action: 'mode', mode: mode.value }); notify('Saved.'); } catch (error) { toast(error.message); } }; }
+    const again = pane.querySelector('[data-update-check]');
+    if (again) again.onclick = async () => {
+      again.disabled = true; again.lastChild.textContent = 'Looking…';
+      try { await api('/api/updates', { action: 'check' }); } catch (error) { toast(error.message); }
+      if (showing === 'updates') updatesTab();
+    };
+    const install = pane.querySelector('[data-update-install]');
+    if (install) install.onclick = async () => {
+      if (!(await N.confirmBox({ title: 'Install JARVIS ' + u.latest + ' now?', text: 'JARVIS closes, installs the new version and starts again. Your chats, notes, settings and keys are kept. This window reconnects by itself.', ok: 'Install and restart' }))) return;
+      install.disabled = true; install.lastChild.textContent = 'Fetching and installing…';
+      try { await api('/api/updates', { action: 'install' }); notify('Installing JARVIS ' + u.latest + '. It restarts by itself in a minute or two.'); }
+      catch (error) { toast(error.message); install.disabled = false; install.lastChild.textContent = 'Install and restart'; }
+      if (showing === 'updates') updatesTab();
+    };
+  }
   async function usageTab(again) {
     let data;
     try { data = await api('/api/usage', { days: 7, refresh: again === true }); } catch (error) { if (showing === 'usage') pane.textContent = error.message; return; }
@@ -1456,7 +1500,8 @@ async function openSettings(tab = 'voice') {
     if (busy.size) { all.disabled = true; all.lastChild.textContent = 'Checking…'; }
     all.onclick = () => { for (const item of data.items) if (item.check && !busy.has(item.id)) run(item.id); };
   }
-  const tabs = { connect: connectTab, voice: voiceTab, models: modelsTab, skills: skillsTab, mods: modsTab, usage: usageTab, assistant: assistantTab, people: peopleTab, email: emailTab };
+  const tabs = { connect: connectTab, voice: voiceTab, models: modelsTab, skills: skillsTab, mods: modsTab, usage: usageTab, assistant: assistantTab, people: peopleTab, email: emailTab,
+    updates: updatesTab };
   // A tab that has to ask for something says so while it waits: no tab is ever simply empty.
   const show = name => {
     showing = name; d.querySelectorAll('.nv-set-tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === name)); pane.replaceChildren(); pane.scrollTop = 0; tabs[name]();
@@ -1487,6 +1532,20 @@ new MutationObserver(() => hydrate($('messages'))).observe($('messages'), { chil
 if (window.speechSynthesis) speechSynthesis.onvoiceschanged = () => {};
 setPhase('idle'); pump();
 loadSpeech().then(() => micSync());
+
+// Once per version: an update that is ready (or a version just installed) is mentioned, with where to find more.
+setTimeout(async () => {
+  let u; try { u = await api('/api/updates'); } catch { return; }
+  const told = store.get('nv-update-told', ''), result = u.result || {};
+  if (result.version && told !== 'done:' + result.version + ':' + result.at) {
+    store.set('nv-update-told', 'done:' + result.version + ':' + result.at);
+    if (result.ok) notify('JARVIS was updated to ' + result.version + '.');
+    else notify('The update to ' + result.version + ' did not work' + (result.rolled_back ? ', so JARVIS went back to the version you had' : '') + '. Settings, Updates says why.');
+  } else if (!u.managed && u.mode !== 'off' && u.available && u.signed && told !== 'ready:' + u.latest) {
+    store.set('nv-update-told', 'ready:' + u.latest);
+    notify('JARVIS ' + u.latest + ' is out. ' + (u.mode === 'auto' ? 'It is installed the next time JARVIS starts, or now from Settings, Updates.' : 'Install it from Settings, Updates.'));
+  }
+}, 8000);
 loadServices(false);
 // Opened by "Hey JARVIS" or the Talk shortcut. If something was already said, answer it; otherwise listen.
 if (DIRECT && new URLSearchParams(location.search).has('listen')) setTimeout(() => pickUp(true), 600);

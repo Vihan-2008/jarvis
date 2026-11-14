@@ -92,6 +92,15 @@ def main(background: bool = False, listen: bool = False) -> int:
         subprocess.Popen([python, "-m", "jcc.tray"], cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **_alone())
     if not ready():
+        # A signed update that was fetched in the background is installed now, before anything of JARVIS runs: the
+        # install helper (jcc/update_helper.py) installs it and starts JARVIS again the way it was asked to start.
+        try:
+            from jcc import updates
+            if updates.install_at_start(cfg):
+                updates.start_install(cfg, start="background" if background else "listen" if listen else "window")
+                return 0
+        except Exception:  # noqa: BLE001 - an update that cannot be started now must never keep JARVIS from starting
+            pass
         with (cfg.state_dir / "service.log").open("a", encoding="utf-8") as log:
             subprocess.Popen([python, "-m", "jcc", "gui", "--no-browser"], cwd=ROOT,
                              env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log, **_alone())

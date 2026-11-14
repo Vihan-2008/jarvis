@@ -19,6 +19,7 @@ to is pointed into the temporary folder.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
@@ -147,6 +148,42 @@ def test(tmp: Path) -> None:
     check((app / "my own notes.txt").read_text("utf-8") == "mine", "a file of the person's own survived the upgrade")
     check(not (app / "jcc" / "retired_module.py").exists(), "a file only the older version shipped was removed")
     check((links / "JARVIS.lnk").is_file(), "the shortcut is still there")
+
+    print("Updating it with JARVIS's own install helper, as an automatic update does")
+    sys.path.insert(0, str(build.REPO))
+    from jcc import update_helper
+
+    def repackaged(source: Path, target: Path, version: str, installer_text: str | None = None) -> str:
+        """The release package with another version number (and, to make it fail, another installer)."""
+        with zipfile.ZipFile(source) as old, zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as new:
+            for info in old.infolist():
+                data = old.read(info)
+                if info.filename == "VERSION":
+                    data = (version + "\n").encode()
+                elif info.filename == "install.ps1" and installer_text is not None:
+                    data = installer_text.encode()
+                new.writestr(info, data)
+        return hashlib.sha256(target.read_bytes()).hexdigest()
+
+    def helper_run(argv, **kw):                                      # (nothing of JARVIS runs in this test: none is listed)
+        if argv[:1] == ["powershell"] and "-Command" in argv:
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        return subprocess.run(argv, **kw)
+
+    next_zip, broken_zip = tmp / "next.zip", tmp / "broken.zip"
+    sha = repackaged(zip_path, next_zip, "9.9.9")
+    result = update_helper.run_update(next_zip, sha, "9.9.9", app, state, "none", run=helper_run, alive=lambda: False, pause=lambda s: None)
+    check(result["ok"], f"the update went through: {result.get('problem')}")
+    check((app / "VERSION").read_text("utf-8").strip() == "9.9.9", "the app is the new version")
+    local = tomllib.loads(settings.read_text("utf-8"))
+    check(local["safety"]["private_terms"] == ["kept-term"] and local["paths"]["vault"] == str(vault), "config/local.toml survived the update")
+    check((app / "my own notes.txt").read_text("utf-8") == "mine", "a file of the person's own survived the update")
+    check(len(list((state / "update-backups").glob("*.zip"))) == 1, "a copy of the version before was kept")
+    sha = repackaged(zip_path, broken_zip, "9.9.10", "throw 'this installer fails'")
+    result = update_helper.run_update(broken_zip, sha, "9.9.10", app, state, "none", run=helper_run, alive=lambda: False, pause=lambda s: None)
+    check(not result["ok"] and result["rolled_back"], "an update whose installer fails is undone")
+    check((app / "VERSION").read_text("utf-8").strip() == "9.9.9", "the version before it is back")
+    check((app / "my own notes.txt").read_text("utf-8") == "mine", "and the person's own file is still there")
 
     print("Uninstalling")
     print(run(POWERSHELL + ["-File", str(app / "uninstall.ps1"), "-Quiet"], env))
