@@ -1,7 +1,8 @@
 """Checks on a real Mac what the tests can only stand in for: the windows, a window's controls, typing, clicking, keys,
-pictures of the screen, the microphone, the wake word model and the measuring of the Mac's own sound.
+pictures of the screen, the microphone, the wake word model, the measuring of the Mac's own sound, the menu-bar icon,
+the shortcuts that work from any app, and dictation.
 
-    python3 scripts/mac_live_check.py [--sound-helper PATH] [--wake-models FOLDER]
+    python3 scripts/mac_live_check.py [--sound-helper PATH] [--menu-helper PATH] [--wake-models FOLDER]
 
 It opens TextEdit with a small file of its own in a temporary folder, types into it, presses things in it, and closes
 it again without saving. It will not start while TextEdit is already open, so it can never touch a document of yours.
@@ -254,6 +255,35 @@ def main() -> int:
             return "the wheel was turned over the window"
         run("scrolling", scrolled)
 
+        def dictated():
+            # What dictation heard is typed where the cursor is. The recording and the speech service are stood in for
+            # here (a real voice cannot be had on this machine); the waiting for the keys and the typing are real.
+            needs_trust()
+            from jcc import config, dictate
+            said: list = []
+
+            class Heard:
+                heard_speech = True
+
+                def start(self):
+                    pass
+
+                def finished_speaking(self):
+                    return False
+
+                def stop(self):
+                    return b"\x01\x00" * 16000
+            windows.focus(handle)
+            controls.call({"op": "set", "h": handle, "name": "", "text": ""}, 20.0)
+            one = dictate.Dictation(config.load(), said.append, recorder=Heard, hear=lambda sound: "dictated on a Mac", beep=lambda pitch: None)
+            if (one.toggle(), one.toggle()) != ("listening", "typing"):
+                raise OSError("dictation did not start and stop: " + "; ".join(said))
+            now = wait_for(lambda: (lambda t: t if "dictated on a Mac" in t else "")(text_now()), 8)
+            if not now:
+                raise OSError(f"the text is {text_now()[:80]!r}; JARVIS said {said}")
+            return "what dictation heard was typed where the cursor is"
+        run("dictation types into the app in front", dictated)
+
         def pictured():
             if not sees:
                 raise Skip("Screen Recording is not allowed for this process")
@@ -391,6 +421,103 @@ def main() -> int:
         finally:
             shutil.rmtree(home, ignore_errors=True)
     run("the background helper starts", helper)
+
+    def dictation_records():
+        from jcc import config, dictate
+        said: list = []
+        one = dictate.Dictation(config.load(), said.append, hear=lambda sound: "", beep=lambda pitch: None)
+        first = one.toggle()
+        if first != "listening":
+            raise Skip("dictation could not start listening: " + "; ".join(said))
+        time.sleep(1.2)
+        second = one.toggle()
+        wait_for(lambda: bool(said), 6)
+        if second != "typing":
+            raise OSError(f"the second press gave {second!r}")
+        return f"it listened with the real microphone and stopped; with nothing said, JARVIS says: {said[0] if said else '(nothing)'}"
+    run("dictation listens with the real microphone", dictation_records)
+
+    def menu_bar():
+        program = option("--menu-helper")
+        if not program:
+            raise Skip("no --menu-helper program was given")
+        if not Path(program).is_file():
+            raise OSError("the program was not built: " + program)
+        from jcc import tray
+        used: list = []
+        menu = tray.MacMenu({name: (lambda name=name: used.append(name)) for name in ("open", "talk", "dictate", "stop", "quit")}, program=program)
+        if not menu.open():
+            raise OSError("the menu-bar program did not start, or did not say what it set up")
+        state["menu"], state["used"] = menu, used
+        if not menu.icon:
+            raise OSError(f"no icon was added; shortcuts: {menu.keys}")
+        missing = [name for name in ("open", "talk", "dictate", "stop") if name not in menu.keys]
+        if missing:
+            raise OSError(f"shortcuts not set up: {missing}; set up: {menu.keys}")
+        return "the icon was added; shortcuts: " + ", ".join(f"{name} = {label}" for name, label in sorted(menu.keys.items()))
+    run("the menu-bar icon and the shortcuts are set up", menu_bar)
+
+    def shortcut_anywhere():
+        menu, used = state.get("menu"), state.get("used")
+        if not menu or not menu.running():
+            raise Skip("the menu-bar program is not running")
+        if not trusted:
+            raise Skip("Accessibility is not allowed, so no key can be pressed to try it")
+        codes = {"J": 38, "T": 17, "K": 40, "Space": 49, "D": 2, "Y": 16, "U": 32, "Delete": 51}
+        for name in ("open", "talk", "dictate", "stop"):
+            m.key(codes[menu.keys[name].rsplit("+", 1)[-1]], (1 << 18) | (1 << 19))          # Control and Option held
+            if not wait_for(lambda: name in used, 4, 0.05):
+                raise OSError(f"{menu.keys[name]} was pressed but \"{name}\" did not arrive; arrived: {used}")
+        return "each was pressed while another app was in front and reached JARVIS: " + ", ".join(used)
+    run("a shortcut pressed in any app reaches JARVIS", shortcut_anywhere)
+
+    def menu_entries():
+        import threading
+        menu, used = state.get("menu"), state.get("used")
+        if not menu or not menu.running():
+            raise Skip("the menu-bar program is not running")
+        if not trusted:
+            raise Skip("Accessibility is not allowed, so the menu cannot be opened to try it")
+        app, keep = m._app(menu.proc.pid), []
+        try:
+            error, bar = m._copy(app, "AXExtrasMenuBar")
+            if not bar:
+                raise Skip(f"macOS did not list the menu-bar icon through Accessibility (answer {error})")
+            keep.append(bar)
+            top = m.read(bar, keep)
+            icon = next((item for item in (m.read(child, keep) for child in (top or {}).get("children", [])) if item), None)
+            if not icon:
+                raise OSError("the program's part of the menu bar lists no icon")
+            label = icon["title"] or icon["description"] or "(no name)"
+            before = len(used)
+            opener = threading.Thread(target=lambda: m.press(icon["el"]), daemon=True)      # (it may only answer once the menu closes)
+            opener.start()
+            opener.join(3)
+            time.sleep(0.6)
+            entries = []
+            for child in (m.read(icon["el"], keep) or {}).get("children", []):
+                for entry in (m.read(child, keep) or {}).get("children", []):
+                    one = m.read(entry, keep)
+                    if one:
+                        entries.append(one)
+            names = [entry["title"] for entry in entries if entry["title"]]
+            talk = next((entry for entry in entries if entry["title"].startswith("Talk to JARVIS")), None)
+            if not talk:
+                m.key(53)                                                            # Escape closes a menu
+                raise Skip(f'the icon is listed as "{label}", but its menu could not be read through Accessibility; entries seen: {names}')
+            chooser = threading.Thread(target=lambda: m.press(talk["el"]), daemon=True)
+            chooser.start()
+            chooser.join(3)
+            if not wait_for(lambda: "talk" in used[before:], 4, 0.05):
+                m.key(53)
+                raise OSError(f'"Talk to JARVIS" was chosen in the menu but did not arrive; menu: {names}')
+            return f'the icon is listed as "{label}"; its menu: {"; ".join(names)}; "Talk to JARVIS" was chosen and reached JARVIS'
+        finally:
+            m.release(keep)
+            m.lib.CFRelease(app)
+    run("the menu on the menu-bar icon", menu_entries)
+    if state.get("menu"):
+        state["menu"].close()
 
     failed = [row for row in rows if row[1] == "FAILED"]
     print(f"\n{sum(1 for r in rows if r[1] == 'ok')} ok, {len(failed)} failed, {sum(1 for r in rows if r[1] == 'skipped')} skipped")

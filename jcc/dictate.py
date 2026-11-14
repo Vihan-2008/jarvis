@@ -59,9 +59,23 @@ class Recorder:
 
 
 def keys_released(timeout: float = 2.0) -> bool:
-    """Wait until Ctrl, Alt, Shift and the Windows key are up, so typed letters are not taken as shortcuts."""
+    """Wait until Ctrl, Alt, Shift and the Windows key are up, so typed letters are not taken as shortcuts. (On a Mac:
+    Control, Option, Shift and Command.)"""
     if os.name != "nt":
-        return True
+        from jcc import system
+        if system.kind() != "mac":
+            return True
+        try:
+            from jcc import macax
+            held = macax.mac().modifiers_held
+        except OSError:
+            return True                                # (the Mac cannot be asked: type anyway, as before)
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if not held():
+                return True
+            time.sleep(0.03)
+        return False
     user32, deadline = ctypes.windll.user32, time.time() + timeout
     while time.time() < deadline:
         if not any(user32.GetAsyncKeyState(code) & 0x8000 for code in (0x10, 0x11, 0x12, 0x5B, 0x5C)):
@@ -157,8 +171,10 @@ class Dictation:
             desktop.perform({"action": "type", "text": text + " "})
         except ValueError as problem:
             self.notify(str(problem))
-        except OSError:
-            self.notify("Dictation could not reach the speech service. Check your internet connection.")
+        except OSError as problem:
+            # (On a Mac the typing itself can be refused: macOS has not allowed JARVIS to type yet. Its message says where.)
+            self.notify(str(problem) if type(problem).__name__ == "NotAllowed" else
+                        "Dictation could not reach the speech service. Check your internet connection.")
 
 
 def _beep(pitch: int) -> None:

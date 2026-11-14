@@ -40,7 +40,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Build the helper that measures the Mac's own sound (for both kinds of Mac)
+      - name: Build JARVIS's two small Mac programs (for both kinds of Mac)
         run: bash installer/mac/build_helper.sh dist
       - name: Build JARVIS-mac.zip
         run: python3 installer/mac/build.py

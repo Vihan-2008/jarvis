@@ -12,8 +12,9 @@
 #   3. Writes ".python" in the install folder: one line, the full path of the python3 it found.
 #   4. Optionally sets up "Hey JARVIS": a Python environment of JARVIS's own inside the install folder with the two
 #      packages the wake word needs (numpy, onnxruntime), and the wake word's small model, fetched and checked.
-#   5. Installs the helper that tells the Mac's own sound from your voice: built here when Apple's command line
-#      tools are installed, otherwise the ready-built one from the download.
+#   5. Installs JARVIS's two small Mac programs (the one that tells the Mac's own sound from your voice, and the
+#      menu-bar icon with its shortcuts): built here when Apple's command line tools are installed, otherwise the
+#      ready-built ones from the download.
 #   6. Runs "python3 -m jcc.firstrun" to set up the notes vault (an Obsidian vault) and remember where it is.
 #   7. Makes ~/Applications/JARVIS.app (or in --bundle-dir), a plain app that starts "python3 -m jcc.desktop".
 #   8. Optionally installs Obsidian (Homebrew, or opens its download page).
@@ -119,7 +120,7 @@ trap 'rm -rf "$work"' EXIT
     ! -path './website/*' ! -path './dist/*' ! -path '*/__pycache__/*' ! -name '*.pyc' ! -name '.DS_Store' \
     ! -path './LEDGER.md' ! -path './scripts/deploy.py' ! -path './config/local.toml' ! -path './.python' \
     ! -path './.jarvis-files' ! -path './.app-bundle' ! -path './install.sh' ! -path './uninstall.sh' \
-    ! -path './Install JARVIS.command' ! -path './sound_level.swift' ! -path './.venv/*' | sed 's|^\./||' | LC_ALL=C sort ) > "$work/files"
+    ! -path './Install JARVIS.command' ! -path './sound_level.swift' ! -path './menu_bar.swift' ! -path './.venv/*' | sed 's|^\./||' | LC_ALL=C sort ) > "$work/files"
 
 if [ "$SOURCE" != "$INSTALL_DIR" ]; then
   # A plain copy loop: newer macOS versions ship a different rsync, and cp behaves the same everywhere.
@@ -181,31 +182,38 @@ if [ "$want_wake" = 1 ]; then
   fi
 fi
 
-# -------------------------------------------------------------------------------- telling the Mac's own sound apart
-# A small program that reports how loud the Mac's own sound is (and nothing else), so a film is not taken for you.
-# Built here when Apple's command line tools are installed; otherwise the ready-built one from the download is used.
-helper="$INSTALL_DIR/bin/jarvis-sound-level"
-swift_source=""
-for candidate in "$here/sound_level.swift" "$SOURCE/installer/mac/sound_level.swift"; do
-  if [ -f "$candidate" ]; then swift_source="$candidate"; break; fi
-done
-if [ -n "$swift_source" ] && xcode-select -p >/dev/null 2>&1 && xcrun -f swiftc >/dev/null 2>&1; then
-  mkdir -p "$INSTALL_DIR/bin"
-  if xcrun swiftc -O -o "$helper.new" "$swift_source" >/dev/null 2>&1; then
-    mv -f "$helper.new" "$helper"
-  else
-    rm -f "$helper.new"
+# ------------------------------------------------------------------------------- JARVIS's two small Mac programs
+# jarvis-sound-level reports how loud the Mac's own sound is (and nothing else), so a film is not taken for you.
+# jarvis-menu is the icon in the menu bar and the keyboard shortcuts that work from any app.
+# Each is built here when Apple's command line tools are installed; otherwise the ready-built one from the download
+# is used.
+can_build=0
+if xcode-select -p >/dev/null 2>&1 && xcrun -f swiftc >/dev/null 2>&1; then can_build=1; fi
+install_program() {   # install_program <program> <source file> <what it is for>
+  local program="$INSTALL_DIR/bin/$1" swift_source="" candidate
+  for candidate in "$here/$2" "$SOURCE/installer/mac/$2"; do
+    if [ -f "$candidate" ]; then swift_source="$candidate"; break; fi
+  done
+  if [ "$can_build" = 1 ] && [ -n "$swift_source" ]; then
+    mkdir -p "$INSTALL_DIR/bin"
+    if xcrun swiftc -O -o "$program.new" "$swift_source" >/dev/null 2>&1; then
+      mv -f "$program.new" "$program"
+    else
+      rm -f "$program.new"
+    fi
   fi
-fi
-if [ -f "$helper" ]; then
-  chmod 755 "$helper"
-  # A program that arrived in a download is marked by macOS and refused when another program starts it. This one
-  # is part of what you are installing, so the mark is taken off this one file.
-  xattr -d com.apple.quarantine "$helper" 2>/dev/null || true
-  say "Installed the helper that tells the Mac's own sound from your voice."
-else
-  say "The helper that tells the Mac's own sound from your voice was not installed (it needs Apple's command line tools). JARVIS works without it."
-fi
+  if [ -f "$program" ]; then
+    chmod 755 "$program"
+    # A program that arrived in a download is marked by macOS and refused when another program starts it. This one
+    # is part of what you are installing, so the mark is taken off this one file.
+    xattr -d com.apple.quarantine "$program" 2>/dev/null || true
+    say "Installed $3."
+  else
+    say "Not installed: $3 (it needs Apple's command line tools). JARVIS works without it."
+  fi
+}
+install_program jarvis-sound-level sound_level.swift "the helper that tells the Mac's own sound from your voice"
+install_program jarvis-menu menu_bar.swift "the menu-bar icon and the keyboard shortcuts that work from any app"
 
 # ---------------------------------------------------------------------------------------------------------- vault
 firstrun=(-m jcc.firstrun --app-dir "$INSTALL_DIR" --yes)

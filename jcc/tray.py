@@ -1,11 +1,16 @@
-"""Tray icon and keyboard shortcuts for JARVIS (Windows). Runs as a small background helper.
+"""Tray icon and keyboard shortcuts for JARVIS. Runs as a small background helper.
 
+Windows:
 - Tray icon: left-click opens JARVIS; right-click shows a short menu.
 - Ctrl+Alt+J from anywhere opens JARVIS.
 - Ctrl+Alt+Space from anywhere starts talking to JARVIS (the window does not need to be in front).
 - Ctrl+Alt+D from anywhere dictates: speak, and the words are typed where your cursor is.
 - Ctrl+Alt+Backspace is the emergency stop for computer control.
-Standard library only. Start with:  pythonw -m jcc.tray
+
+A Mac: the same menu on an icon in the menu bar, and the same shortcuts with Control+Option (J, T, D, Delete). A small
+program shows the icon and hears the shortcuts (installer/mac/menu_bar.swift); this helper does what they ask for.
+On both, the helper also listens for "Hey JARVIS".
+Standard library only. Start with:  pythonw -m jcc.tray   (python3 -m jcc.tray on a Mac)
 """
 from __future__ import annotations
 
@@ -153,6 +158,18 @@ def _say_so(text: str) -> None:
 
 
 def open_jarvis() -> None:
+    if os.name != "nt":
+        # A Mac: bring JARVIS's own window to the front if it is open and macOS lets it be; otherwise open one.
+        try:
+            from jcc import winctl
+            from jcc.policy import MAIN_WINDOW
+            row = next((r for r in winctl.windows() if MAIN_WINDOW.search(r["title"])), None)
+            if row and winctl.focus(row["handle"]):
+                return
+        except Exception:  # noqa: BLE001 - whatever macOS would not say, opening a window still works
+            pass
+        start_window(listen=False)
+        return
     user32 = ctypes.windll.user32
     found = []
 
@@ -175,10 +192,102 @@ def open_jarvis() -> None:
                      stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
 
 
-def listen_only(cfg, once: bool = False, pause: float = 4.0, make_ears=None) -> int:
-    """The helper on a Mac. It has no icon and no keyboard shortcuts yet: it listens for "Hey JARVIS" (on the Mac itself,
-    with the on-device model) and hands what was said after the name to JARVIS, opening its window if it is closed.
-    once: start, write down what it is doing, and stop (for checking). make_ears: tests give a stand-in for the listener."""
+class MacMenu:
+    """The icon in the Mac's menu bar and the shortcuts that work from any app. A small program shows them
+    (installer/mac/menu_bar.swift, built when JARVIS is installed) and says on a line which one was used; this starts
+    it, reads those lines and does the thing. Without that program there is simply no icon and no shortcut."""
+
+    NAME = "jarvis-menu"
+
+    def __init__(self, actions: dict, icon: bool = True, keys: bool = True, program: str | None = None, start=None):
+        self.actions, self.want_icon, self.want_keys = actions, icon, keys
+        self.program, self.start = program, start or subprocess.Popen
+        self.proc, self.icon, self.keys, self.ready = None, False, {}, threading.Event()
+
+    @classmethod
+    def where(cls) -> str | None:
+        named = os.environ.get("JCC_MENU_HELPER")
+        for place in ([Path(named)] if named else []) + [ROOT / "bin" / cls.NAME]:
+            if place.is_file() and os.access(place, os.X_OK):
+                return str(place)
+        return None
+
+    def open(self) -> bool:
+        """Show the icon and claim the shortcuts. True once the program has said what it could set up."""
+        program = self.program or self.where()
+        if not program or not (self.want_icon or self.want_keys):
+            return False
+        argv = [program] + ([] if self.want_icon else ["--no-icon"]) + ([] if self.want_keys else ["--no-keys"])
+        try:
+            self.proc = self.start(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
+        except OSError:
+            return False
+        threading.Thread(target=self._read, args=(self.proc,), daemon=True, name="mac-menu").start()
+        self.ready.wait(8.0)
+        return self.ready.is_set()
+
+    def _read(self, proc) -> None:
+        import json
+        try:
+            for line in proc.stdout:
+                line = line.strip()
+                if line.startswith("{"):
+                    try:
+                        told = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(told, dict):
+                        self.icon = told.get("icon") is True
+                        self.keys = {str(name): str(label)[:40] for name, label in (told.get("keys") or {}).items() if str(name) in NAMES.values()}
+                        self.ready.set()
+                    continue
+                action = self.actions.get(line)
+                if action:                               # (each on a thread of its own: a slow one must not hold up the next)
+                    threading.Thread(target=self._do, args=(action,), daemon=True, name="mac-menu-" + line).start()
+        except (OSError, ValueError):
+            pass
+        finally:
+            try:
+                proc.stdout.close()
+            except (OSError, ValueError):
+                pass
+
+    @staticmethod
+    def _do(action) -> None:
+        try:
+            action()
+        except Exception:  # noqa: BLE001 - one thing that failed must not end the menu
+            pass
+
+    def running(self) -> bool:
+        return bool(self.proc) and self.proc.poll() is None
+
+    def dictating(self, on: bool) -> None:
+        """Tell the menu whether dictation is listening, so it offers "Finish dictating"."""
+        try:
+            if self.running():
+                self.proc.stdin.write("dictating 1\n" if on else "dictating 0\n")
+                self.proc.stdin.flush()
+        except (OSError, ValueError):
+            pass
+
+    def close(self) -> None:
+        proc, self.proc = self.proc, None
+        if not proc:
+            return
+        try:
+            if proc.stdin:
+                proc.stdin.close()                       # the program stops by itself when nobody is listening to it any more
+            proc.terminate()
+        except OSError:
+            pass
+
+
+def listen_only(cfg, once: bool = False, pause: float = 4.0, make_ears=None, make_menu=None, make_dictation=None) -> int:
+    """The helper on a Mac: the icon in the menu bar, the shortcuts that work from any app, dictation, and listening for
+    "Hey JARVIS" (on the Mac itself, with the on-device model), handing what was said after the name to JARVIS.
+    once: start, write down what it is doing, and stop (for checking). make_ears, make_menu, make_dictation: tests give
+    stand-ins for the listener, the menu and dictation."""
     import json
     import signal
     import time
@@ -195,34 +304,54 @@ def listen_only(cfg, once: bool = False, pause: float = 4.0, make_ears=None) -> 
             told.add(text)
             _say_so(text)
 
-    ears = (make_ears or Ears)(cfg, lambda text: say(cfg, text), notice, beep=lambda pitch: sound.beep(cfg, pitch),
+    def beep(pitch: int) -> None:
+        sound.beep(cfg, pitch)
+
+    ears = (make_ears or Ears)(cfg, lambda text: say(cfg, text), notice, beep=beep,
                                busy=lambda: (ask_service(cfg, "status") or {}).get("voice") is True, control=lambda word: ask_service(cfg, "control", word),
                                attend=lambda: attend(cfg), listen=lambda: nudge(cfg), sound=pcsound.shared,
                                name_said=lambda at: ask_service(cfg, "name", str(at)))
     if make_ears is None:
         restore_volume(cfg)
-    state: dict = {"wake": None, "seen": None}
+    if make_dictation is None:
+        from jcc.dictate import Dictation
+        make_dictation = Dictation
+    dictation = make_dictation(cfg, _say_so, beep=beep)
     stop = threading.Event()
+    options = hotkeys(cfg)
+    menu = (make_menu or MacMenu)({"open": open_jarvis, "talk": lambda: talk(cfg), "dictate": dictation.toggle,
+                                   "stop": lambda: (cfg.state_dir / "computer-stop").write_text("stop", "utf-8"), "quit": stop.set},
+                                  icon=options["tray"], keys=options["hotkey"])
+    menu.open()
+    state: dict = {"wake": None, "seen": None, "dictating": False}
     try:
         signal.signal(signal.SIGTERM, lambda *_: stop.set())
     except (ValueError, OSError):                      # (not the main thread: whoever started it stops it another way)
         pass
+    checked = 0.0
     try:
         while not stop.is_set():
-            try:
-                listening = ears.sync()
-            except Exception:  # noqa: BLE001 - the wake word is optional; the helper must keep running
-                listening = False
-            seen = (ears.problem or ears.note, ears.engine)
-            if listening != state["wake"] or seen != state["seen"]:
-                state["wake"], state["seen"] = listening, seen
-                (cfg.state_dir / "tray-status.json").write_text(json.dumps({
-                    "tray": False, "keys": {}, "wake": bool(listening), "wake_problem": ears.problem or ears.note, "wake_mic": "",
-                    "wake_engine": ears.engine, "at": time.time()}), "utf-8")
+            if time.monotonic() - checked >= pause or not checked:
+                checked = time.monotonic()
+                try:
+                    listening = ears.sync()
+                except Exception:  # noqa: BLE001 - the wake word is optional; the helper must keep running
+                    listening = False
+                seen = (ears.problem or ears.note, ears.engine, menu.icon, tuple(sorted(menu.keys.items())))
+                if listening != state["wake"] or seen != state["seen"]:
+                    state["wake"], state["seen"] = listening, seen
+                    (cfg.state_dir / "tray-status.json").write_text(json.dumps({
+                        "tray": bool(menu.icon), **{name + "_hotkey": name in menu.keys for name in NAMES.values()}, "keys": dict(menu.keys),
+                        "wake": bool(listening), "wake_problem": ears.problem or ears.note, "wake_mic": "", "wake_engine": ears.engine,
+                        "at": time.time()}), "utf-8")
+            if dictation.listening != state["dictating"]:
+                state["dictating"] = dictation.listening
+                menu.dictating(state["dictating"])
             if once:
                 break
-            stop.wait(pause)
+            stop.wait(0.4)
     finally:
+        menu.close()
         ears.stop()
         lock.release()
     return 0

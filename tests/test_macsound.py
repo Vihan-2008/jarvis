@@ -185,6 +185,212 @@ class TestHowLoudTheMacsOwnSoundIs(unittest.TestCase):
         self.assertGreater(len(monitor.samples), 5)
 
 
+class NoMenu:
+    """Stands in for the menu-bar program where a test does not need one: no icon, no shortcuts."""
+    icon, keys = False, {}
+
+    def __init__(self, actions, icon=True, keys=True):
+        self.actions, self.told = actions, []
+
+    def open(self):
+        return False
+
+    def dictating(self, on):
+        self.told.append(on)
+
+    def close(self):
+        self.closed = True
+
+
+class NoDictation:
+    """Stands in for dictation: no test ever opens the real microphone."""
+    listening = False
+
+    def __init__(self, cfg, notify, beep=None):
+        self.presses = 0
+
+    def toggle(self):
+        self.presses += 1
+        self.listening = not self.listening
+        return "listening" if self.listening else "typing"
+
+
+MENU = """import json, sys
+print(json.dumps({"icon": "--no-icon" not in sys.argv, "keys": {} if "--no-keys" in sys.argv else
+                  {"open": "Control+Option+J", "talk": "Control+Option+T", "made up": "x"}}), flush=True)
+print("talk", flush=True)
+print("nonsense", flush=True)
+print("open", flush=True)
+for line in sys.stdin:
+    if line.strip() == "dictating 1":
+        print("dictate", flush=True)
+"""
+
+
+class TestTheMenuBarAndTheShortcuts(EngineTestCase):
+    def setUp(self):
+        super().setUp()
+        self.cfg = config.load()
+        self.script = self.tmp / "menu.py"
+        self.script.write_text(MENU, "utf-8")
+        patch = mock.patch.object(system, "PLATFORM", "darwin")
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def menu(self, actions, **ways):
+        started = []
+
+        def start(argv, **kw):
+            started.append(argv)
+            return subprocess.Popen([sys.executable, str(self.script), *argv[1:]], **kw)
+        made = tray.MacMenu(actions, program="jarvis-menu", start=start, **ways)
+        self.addCleanup(made.close)
+        return made, started
+
+    def wait(self, check, seconds=5.0):
+        until = time.time() + seconds
+        while time.time() < until and not check():
+            time.sleep(0.02)
+        return check()
+
+    def test_what_the_menu_or_a_shortcut_asks_for_is_done(self):
+        done = []
+
+        def broken():
+            raise RuntimeError("this one fails")
+        menu, started = self.menu({"talk": broken, "open": lambda: done.append("open"), "dictate": lambda: done.append("dictate")})
+        self.assertTrue(menu.open())
+        self.assertEqual((menu.icon, menu.keys), (True, {"open": "Control+Option+J", "talk": "Control+Option+T"}), "only shortcuts JARVIS knows are taken")
+        self.assertEqual(started, [["jarvis-menu"]])
+        self.assertTrue(self.wait(lambda: done == ["open"]), "the one that failed did not stop the next; a word it does not know is ignored")
+        menu.dictating(True)
+        self.assertTrue(self.wait(lambda: done == ["open", "dictate"]), "the menu is told when dictation is listening")
+        proc = menu.proc
+        self.assertTrue(menu.running())
+        menu.close()
+        proc.wait(timeout=5)
+        self.assertFalse(menu.running())
+
+    def test_the_icon_or_the_shortcuts_can_be_left_out_and_without_the_program_there_are_none(self):
+        menu, started = self.menu({}, icon=False)
+        self.assertTrue(menu.open())
+        self.assertEqual((menu.icon, started), (False, [["jarvis-menu", "--no-icon"]]))
+        neither, started = self.menu({}, icon=False, keys=False)
+        self.assertEqual((neither.open(), started), (False, []), "nothing to show and nothing to hear: it is not started")
+        with mock.patch.dict(os.environ, {"JCC_MENU_HELPER": str(self.tmp / "missing")}):
+            if not (config.ROOT / "bin" / tray.MacMenu.NAME).is_file():
+                self.assertFalse(tray.MacMenu({}).open(), "the program is not installed")
+
+    def test_the_helper_does_what_the_menu_asks_and_says_which_shortcuts_work(self):
+        made = {}
+
+        class Menu(NoMenu):
+            icon, keys = True, {"open": "Control+Option+J", "dictate": "Control+Option+D"}
+
+            def __init__(self, actions, icon=True, keys=True):
+                super().__init__(actions)
+                made["menu"], made["wanted"] = self, (icon, keys)
+
+        class Dictation(NoDictation):
+            def __init__(self, cfg, notify, beep=None):
+                super().__init__(cfg, notify, beep)
+                made["dictation"] = self
+
+        class Ears:
+            problem, note, engine = "", "", ""
+
+            def __init__(self, *a, **k):
+                pass
+
+            def sync(self):
+                return False
+
+            def stop(self):
+                made["ears stopped"] = True
+        opened, talked = [], []
+        with mock.patch.object(tray, "open_jarvis", lambda: opened.append(1)), mock.patch.object(tray, "talk", lambda cfg: talked.append(1)):
+            import threading
+            helper = threading.Thread(target=lambda: made.setdefault("exit", tray.listen_only(self.cfg, pause=0.1, make_ears=Ears, make_menu=Menu, make_dictation=Dictation)), daemon=True)
+            helper.start()
+            self.assertTrue(self.wait(lambda: (self.cfg.state_dir / "tray-status.json").exists() and "menu" in made))
+            status = json.loads((self.cfg.state_dir / "tray-status.json").read_text("utf-8"))
+            self.assertEqual((status["tray"], status["keys"]), (True, {"open": "Control+Option+J", "dictate": "Control+Option+D"}))
+            self.assertEqual((status["open_hotkey"], status["dictate_hotkey"], status["talk_hotkey"], status["stop_hotkey"]), (True, True, False, False))
+            actions = made["menu"].actions
+            self.assertEqual(sorted(actions), ["dictate", "open", "quit", "stop", "talk"])
+            actions["open"]()
+            actions["talk"]()
+            actions["stop"]()
+            self.assertEqual((opened, talked, (self.cfg.state_dir / "computer-stop").read_text("utf-8")), ([1], [1], "stop"), "the emergency stop is the same file as on Windows")
+            actions["dictate"]()
+            self.assertTrue(self.wait(lambda: made["menu"].told == [True]), 'the menu then offers "Finish dictating"')
+            actions["dictate"]()
+            self.assertTrue(self.wait(lambda: made["menu"].told == [True, False]))
+            actions["quit"]()
+            helper.join(timeout=5)
+        self.assertFalse(helper.is_alive(), '"Hide this icon" ends the helper')
+        self.assertEqual((made["exit"], made.get("ears stopped"), getattr(made["menu"], "closed", False), made["wanted"]), (0, True, True, (True, True)))
+
+    def test_typing_waits_until_the_shortcuts_keys_are_let_go(self):
+        from jcc import dictate, macax
+        held = iter([True, True, False])
+        with mock.patch.object(macax, "mac", lambda: type("Mac", (), {"modifiers_held": staticmethod(lambda: next(held))})()):
+            if os.name != "nt":                         # (on Windows itself, Windows' own keys are asked)
+                self.assertTrue(dictate.keys_released(2.0))
+        with mock.patch.object(macax, "mac", lambda: type("Mac", (), {"modifiers_held": staticmethod(lambda: True)})()):
+            if os.name != "nt":
+                self.assertFalse(dictate.keys_released(0.15), "still held: nothing is typed")
+
+    def test_dictation_types_with_the_macs_keys_and_says_so_when_macos_has_not_allowed_it(self):
+        from jcc import dictate
+
+        class NotAllowed(OSError):
+            pass
+
+        class Recorder:
+            heard_speech = True
+
+            def start(self):
+                pass
+
+            def finished_speaking(self):
+                return False
+
+            def stop(self):
+                return b"\x01\x00" * 16000
+        typed, said = [], []
+
+        class Desk:
+            def perform(self, step):
+                typed.append(step)
+        with mock.patch.object(dictate, "keys_released", lambda timeout=2.0: True):
+            one = dictate.Dictation(self.cfg, said.append, recorder=Recorder, desktop=Desk(), hear=lambda sound: "hello  there", beep=lambda pitch: None)
+            self.assertEqual((one.toggle(), one.toggle()), ("listening", "typing"))
+            self.assertTrue(self.wait(lambda: typed == [{"action": "type", "text": "hello there "}]))
+
+            class Refusing:
+                def perform(self, step):
+                    raise NotAllowed("macOS has not yet allowed JARVIS to control other apps. Open System Settings, Privacy & Security, Accessibility.")
+            two = dictate.Dictation(self.cfg, said.append, recorder=Recorder, desktop=Refusing(), hear=lambda sound: "hello", beep=lambda pitch: None)
+            two.toggle()
+            two.toggle()
+            self.assertTrue(self.wait(lambda: bool(said)))
+            self.assertIn("Privacy & Security, Accessibility", said[0], "the owner is told what to switch on, not that the internet is down")
+
+    @unittest.skipIf(os.name == "nt", "on Windows itself the Windows way of finding the window is used")
+    def test_open_brings_jarviss_window_forward_or_opens_one(self):
+        from jcc import winctl
+        started, focused = [], []
+        rows = [{"handle": 5, "title": "Notes - TextEdit"}, {"handle": 7, "title": "JARVIS · Workspace - Google Chrome"}]
+        with mock.patch.object(tray, "start_window", lambda listen=True: started.append(listen)), mock.patch.object(winctl, "windows", lambda: rows), \
+                mock.patch.object(winctl, "focus", lambda handle: focused.append(handle) or True):
+            tray.open_jarvis()
+            self.assertEqual((focused, started), ([7], []), "its own window, brought to the front")
+            rows.pop()
+            tray.open_jarvis()
+            self.assertEqual(started, [False], "no window is open: one is opened (not listening)")
+
+
 class TestTheWakeWordOnAMac(EngineTestCase):
     def setUp(self):
         super().setUp()
@@ -219,7 +425,7 @@ class TestTheWakeWordOnAMac(EngineTestCase):
 
             def stop(self):
                 self.stopped = True
-        self.assertEqual(tray.listen_only(self.cfg, once=True, make_ears=Ears), 0)
+        self.assertEqual(tray.listen_only(self.cfg, once=True, make_ears=Ears, make_menu=NoMenu, make_dictation=NoDictation), 0)
         status = json.loads((self.cfg.state_dir / "tray-status.json").read_text("utf-8"))
         self.assertEqual((status["tray"], status["keys"], status["wake"], status["wake_engine"], status["wake_problem"]), (False, {}, True, "neural", ""))
         self.assertTrue(made[0].stopped, "the listener is stopped when the helper stops")
@@ -228,7 +434,7 @@ class TestTheWakeWordOnAMac(EngineTestCase):
         self.assertTrue(again.acquire(), "it let go of its lock when it stopped")
         try:
             (self.cfg.state_dir / "tray-status.json").unlink()
-            self.assertEqual(tray.listen_only(self.cfg, once=True, make_ears=Ears), 0)
+            self.assertEqual(tray.listen_only(self.cfg, once=True, make_ears=Ears, make_menu=NoMenu, make_dictation=NoDictation), 0)
             self.assertEqual(len(made), 1, "a second helper does nothing while one is running")
         finally:
             again.release()

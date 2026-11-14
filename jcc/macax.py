@@ -131,6 +131,7 @@ class _Libraries:
         declare(app, "CGEventSetFlags", None, v, ctypes.c_uint64)
         declare(app, "CGEventKeyboardSetUnicodeString", None, v, ctypes.c_ulong, ctypes.POINTER(ctypes.c_uint16))
         declare(app, "CGEventPost", None, u32, v)
+        declare(app, "CGEventSourceFlagsState", ctypes.c_uint64, i32)
         for name in ("CGPreflightScreenCaptureAccess", "CGRequestScreenCaptureAccess", "CGPreflightPostEventAccess", "CGRequestPostEventAccess"):
             declare(app, name, u8, needed=False)
         self.kinds = {"string": self.CFStringGetTypeID(), "array": self.CFArrayGetTypeID(), "boolean": self.CFBooleanGetTypeID(),
@@ -585,6 +586,10 @@ class Mac:
             return place.x, place.y
         finally:
             lib.CFRelease(event)
+
+    def modifiers_held(self) -> bool:
+        """Is Control, Option, Shift or Command being held down on the real keyboard right now?"""
+        return bool(self.lib.CGEventSourceFlagsState(1) & ((1 << 17) | (1 << 18) | (1 << 19) | (1 << 20)))
 
     def _send(self, event) -> None:
         if not event:

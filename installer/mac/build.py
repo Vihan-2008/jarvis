@@ -25,10 +25,11 @@ sys.path.insert(0, str(HERE.parent))
 from payload import REPO, app_files, version  # noqa: E402
 
 TOP = "JARVIS Installer"
-INSTALLER_FILES = ("install.sh", "uninstall.sh", "Install JARVIS.command", "sound_level.swift")
-# The helper that measures the Mac's own sound, when it was built just before on a Mac (build_helper.sh, in the release
-# workflow). install.sh builds it on the person's own Mac when it can, and uses this one otherwise.
-HELPER = ("dist/jarvis-sound-level", "bin/jarvis-sound-level")
+INSTALLER_FILES = ("install.sh", "uninstall.sh", "Install JARVIS.command", "sound_level.swift", "menu_bar.swift")
+# JARVIS's two small Mac programs (the one that measures the Mac's own sound, and the menu-bar icon with its shortcuts),
+# when they were built just before on a Mac (build_helper.sh, in the release workflow). install.sh builds them on the
+# person's own Mac when it can, and uses these otherwise.
+HELPERS = (("dist/jarvis-sound-level", "bin/jarvis-sound-level"), ("dist/jarvis-menu", "bin/jarvis-menu"))
 EXECUTABLE = 0o755
 PLAIN = 0o644
 
@@ -45,8 +46,9 @@ def contents(repo: Path = REPO) -> list[tuple[str, bytes, int]]:
         items.append((name, data.replace(b"\r\n", b"\n") if is_script(name) else data, EXECUTABLE if is_script(name) else PLAIN))
     for name in INSTALLER_FILES:
         items.append((name, (HERE / name).read_bytes().replace(b"\r\n", b"\n"), EXECUTABLE if is_script(name) else PLAIN))
-    if (repo / HELPER[0]).is_file():
-        items.append((HELPER[1], (repo / HELPER[0]).read_bytes(), EXECUTABLE))
+    for built, placed in HELPERS:
+        if (repo / built).is_file():
+            items.append((placed, (repo / built).read_bytes(), EXECUTABLE))
     return items
 
 

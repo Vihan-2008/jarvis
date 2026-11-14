@@ -1,7 +1,8 @@
 # Runs the whole test suite on Windows, macOS and Linux for every push and pull request, and on Windows also
 # builds the installer and installs, upgrades and uninstalls it in a temporary folder. On a real Mac it then checks
 # what tests can only stand in for: the windows, pressing and typing in another app, pictures of the screen, the
-# wake word model and the helper that measures the Mac's own sound (scripts/mac_live_check.py).
+# wake word model, the helper that measures the Mac's own sound, the menu-bar icon, the shortcuts and dictation
+# (scripts/mac_live_check.py).
 name: tests
 
 on:
@@ -52,7 +53,7 @@ jobs:
         run: |
           python -m pip install --quiet --disable-pip-version-check numpy onnxruntime
           python scripts/get_wake_word.py "$RUNNER_TEMP/wake-models"
-      - name: Build the helper that measures the Mac's own sound
+      - name: Build JARVIS's two small Mac programs (the sound helper and the menu-bar icon)
         if: ${{ !cancelled() }}
         run: bash installer/mac/build_helper.sh "$RUNNER_TEMP/helper"
       - name: The Mac installer installs into a temporary folder
@@ -62,7 +63,10 @@ jobs:
             --bundle-dir "$RUNNER_TEMP/Apps" --vault "$RUNNER_TEMP/Vault"
           test -x "$RUNNER_TEMP/Apps/JARVIS.app/Contents/MacOS/JARVIS"
           test -x "$RUNNER_TEMP/JARVIS/bin/jarvis-sound-level"
+          test -x "$RUNNER_TEMP/JARVIS/bin/jarvis-menu"
           plutil -lint "$RUNNER_TEMP/Apps/JARVIS.app/Contents/Info.plist"
       - name: Check JARVIS's hands, eyes and ears on this Mac
         if: ${{ !cancelled() }}
-        run: python scripts/mac_live_check.py --sound-helper "$RUNNER_TEMP/helper/jarvis-sound-level" --wake-models "$RUNNER_TEMP/wake-models"
+        run: >
+          python scripts/mac_live_check.py --sound-helper "$RUNNER_TEMP/helper/jarvis-sound-level"
+          --menu-helper "$RUNNER_TEMP/helper/jarvis-menu" --wake-models "$RUNNER_TEMP/wake-models"
