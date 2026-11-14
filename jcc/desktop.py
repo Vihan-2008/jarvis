@@ -64,10 +64,17 @@ def tell(text: str, run=None) -> None:
             pass
 
 
+# Every part JARVIS starts here runs on its own (in a session of its own, off Windows). On a Mac, JARVIS.app's launcher
+# is a job of macOS's own, and when the launcher has done its work and ends, macOS ends everything still in the
+# launcher's group with it: opened from its icon, JARVIS's service stopped a moment after it had started, and the
+# window could not connect (opened from Terminal it kept running). Windows needs nothing: its programs run on.
+def _alone() -> dict:
+    return {"creationflags": system.no_window(), **system.own_group()}
+
+
 def _helper(python: str, module: str, cfg, log_name: str, env: dict) -> None:
     with (cfg.state_dir / log_name).open("a", encoding="utf-8") as log:
-        subprocess.Popen([python, "-m", module], cwd=ROOT, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                         creationflags=system.no_window())
+        subprocess.Popen([python, "-m", module], cwd=ROOT, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log, **_alone())
 
 
 def main(background: bool = False, listen: bool = False) -> int:
@@ -83,13 +90,13 @@ def main(background: bool = False, listen: bool = False) -> int:
         # Windows: the tray icon and the Ctrl+Alt+J shortcut. A Mac: the helper that listens for "Hey JARVIS".
         # Either exits at once if another copy is already running.
         subprocess.Popen([python, "-m", "jcc.tray"], cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=system.no_window(), **system.own_group())
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **_alone())
     if not ready():
         with (cfg.state_dir / "service.log").open("a", encoding="utf-8") as log:
             subprocess.Popen([python, "-m", "jcc", "gui", "--no-browser"], cwd=ROOT,
-                             env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                             creationflags=system.no_window())
-        for _ in range(80):
+                             env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log, **_alone())
+        # (Its first start on a new computer takes longest: Python prepares every file of the app once.)
+        for _ in range(240):
             if ready():
                 break
             time.sleep(0.25)
@@ -103,7 +110,7 @@ def main(background: bool = False, listen: bool = False) -> int:
     if browser:
         from jcc import placement                # the size and place it had last time, made to fit this screen
         subprocess.Popen([str(browser), "--app=" + URL + ("?listen" if listen else ""), *placement.profile(cfg, URL), *placement.arguments(cfg, full=not listen)],
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **system.own_group())
     else:
         import webbrowser
         webbrowser.open(URL)

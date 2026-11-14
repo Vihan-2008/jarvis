@@ -3,9 +3,11 @@
     python installer/mac/build.py [--out FOLDER]
     python installer/mac/build.py --stage FOLDER      (the same content as a folder; build_dmg.sh uses this)
 
-The package is one folder, "JARVIS Installer", holding the app's files (exactly those git lists, less tests,
-installers, website, CI, the ledger and the owner's deployment tool), install.sh, uninstall.sh and
-"Install JARVIS.command", which a person double-clicks in Finder.
+The package is one folder, "JARVIS Installer". Opened, it shows two things: "Install JARVIS.command", which a person
+double-clicks in Finder, and "Read me first.txt". Everything else (the app's files: exactly those git lists, less tests,
+installers, website, CI, the ledger and the owner's deployment tool; install.sh, uninstall.sh, the sources and the
+ready-built copies of JARVIS's two small Mac programs) is in a hidden folder beside them, ".jarvis-app". Before, all of
+it lay in the package's own folder, and the installer was one name among some twenty.
 
 A zip made on Windows has no Unix permissions unless they are written into it, and without the executable bit Finder
 will not run the .command file. So each entry's mode is set by hand (ZipInfo.external_attr), and the zip is read back
@@ -25,7 +27,9 @@ sys.path.insert(0, str(HERE.parent))
 from payload import REPO, app_files, version  # noqa: E402
 
 TOP = "JARVIS Installer"
-INSTALLER_FILES = ("install.sh", "uninstall.sh", "Install JARVIS.command", "sound_level.swift", "menu_bar.swift")
+PAYLOAD = ".jarvis-app"                 # (hidden in Finder: a person sees only the installer and the note)
+INSTALLER_FILES = ("install.sh", "uninstall.sh", "sound_level.swift", "menu_bar.swift")      # (in PAYLOAD)
+SHOWN_FILES = ("Install JARVIS.command", "Read me first.txt")                                # (at the top)
 # JARVIS's two small Mac programs (the one that measures the Mac's own sound, and the menu-bar icon with its shortcuts),
 # when they were built just before on a Mac (build_helper.sh, in the release workflow). install.sh builds them on the
 # person's own Mac when it can, and uses these otherwise.
@@ -43,12 +47,14 @@ def contents(repo: Path = REPO) -> list[tuple[str, bytes, int]]:
     items = []
     for name in app_files(repo):
         data = (repo / name).read_bytes()
-        items.append((name, data.replace(b"\r\n", b"\n") if is_script(name) else data, EXECUTABLE if is_script(name) else PLAIN))
+        items.append((f"{PAYLOAD}/{name}", data.replace(b"\r\n", b"\n") if is_script(name) else data, EXECUTABLE if is_script(name) else PLAIN))
     for name in INSTALLER_FILES:
-        items.append((name, (HERE / name).read_bytes().replace(b"\r\n", b"\n"), EXECUTABLE if is_script(name) else PLAIN))
+        items.append((f"{PAYLOAD}/{name}", (HERE / name).read_bytes().replace(b"\r\n", b"\n"), EXECUTABLE if is_script(name) else PLAIN))
     for built, placed in HELPERS:
         if (repo / built).is_file():
-            items.append((placed, (repo / built).read_bytes(), EXECUTABLE))
+            items.append((f"{PAYLOAD}/{placed}", (repo / built).read_bytes(), EXECUTABLE))
+    for name in SHOWN_FILES:
+        items.append((name, (HERE / name).read_bytes().replace(b"\r\n", b"\n"), EXECUTABLE if is_script(name) else PLAIN))
     return items
 
 
@@ -70,7 +76,7 @@ def check_zip(target: Path) -> None:
     """Read the zip back and fail if a script is not executable or has Windows line endings."""
     with zipfile.ZipFile(target) as z:
         names = {i.filename: i for i in z.infolist()}
-        for name in INSTALLER_FILES:
+        for name in [f"{PAYLOAD}/{n}" for n in INSTALLER_FILES] + list(SHOWN_FILES):
             info = names.get(f"{TOP}/{name}")
             if info is None:
                 raise SystemExit(f"{name} is missing from {target}")
@@ -78,6 +84,9 @@ def check_zip(target: Path) -> None:
                 raise SystemExit(f"{name} is not executable in {target}")
             if b"\r" in z.read(info):
                 raise SystemExit(f"{name} has Windows line endings in {target}")
+        shown = sorted({n[len(TOP) + 1:].split("/")[0] for n in names if n.startswith(TOP + "/")})
+        if shown != sorted([PAYLOAD, *SHOWN_FILES]):
+            raise SystemExit(f"the package's folder should show only the installer and the note, not {shown}")
 
 
 def stage(folder: Path, repo: Path = REPO) -> Path:

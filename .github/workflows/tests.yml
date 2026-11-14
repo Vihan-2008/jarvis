@@ -80,6 +80,7 @@ jobs:
           ditto -x -k "$RUNNER_TEMP/package/JARVIS-mac.zip" "$RUNNER_TEMP/package/unpacked"
           setup="$RUNNER_TEMP/package/unpacked/JARVIS Installer/Install JARVIS.command"
           test -x "$setup"
+          echo "what the unpacked package shows:"; ls "$RUNNER_TEMP/package/unpacked/JARVIS Installer"
           # The questions, in order: start at login? yes. Open JARVIS now? no. Then Return closes the window.
           printf 'y\nn\n\n' | "$setup" --no-wake-word --no-obsidian --install-dir "$RUNNER_TEMP/JARVIS2" \
             --bundle-dir "$RUNNER_TEMP/Apps2" --vault "$RUNNER_TEMP/Vault2"
@@ -89,10 +90,29 @@ jobs:
           test -s "$app/Contents/Resources/AppIcon.icns"
           plutil -p "$agent"
           test -f "$RUNNER_TEMP/Vault2/Start here.md"
+          # Does macOS end what an app started once the app's own process has ended? (A JARVIS.app that opened a
+          # window which could not connect, while the same command typed in Terminal worked, pointed that way.)
+          probe="$RUNNER_TEMP/Probe.app"; mkdir -p "$probe/Contents/MacOS"
+          plutil -create xml1 "$probe/Contents/Info.plist"
+          plutil -insert CFBundleExecutable -string probe "$probe/Contents/Info.plist"
+          plutil -insert CFBundleIdentifier -string local.jarvis.probe "$probe/Contents/Info.plist"
+          plutil -insert CFBundlePackageType -string APPL "$probe/Contents/Info.plist"
+          plutil -insert LSUIElement -bool true "$probe/Contents/Info.plist"
+          printf '#!/bin/bash\nsleep 300 &\necho $! > "%s/probe-same"\n/usr/bin/python3 -c "import subprocess; print(subprocess.Popen([\\"sleep\\", \\"301\\"], start_new_session=True).pid)" > "%s/probe-own"\nsleep 2\n' \
+            "$RUNNER_TEMP" "$RUNNER_TEMP" > "$probe/Contents/MacOS/probe"
+          chmod 755 "$probe/Contents/MacOS/probe"
+          open -W "$probe"; sleep 3
+          if kill -0 "$(cat "$RUNNER_TEMP/probe-same")" 2>/dev/null; then echo "probe: what an app starts in its own group outlives it"; else echo "probe: what an app starts in its own group ENDS with it"; fi
+          if kill -0 "$(cat "$RUNNER_TEMP/probe-own")" 2>/dev/null; then echo "probe: what it starts in a session of its own outlives it"; else echo "probe: even a session of its own ends with it"; fi
           # Opened the way the login item opens it (through macOS's own "open", in the background).
           open -g -j -a "$app" --args --background
-          for i in $(seq 1 60); do curl -fsS -o /dev/null http://127.0.0.1:8765/ && break; sleep 1; done
+          for i in $(seq 1 90); do curl -fsS -o /dev/null http://127.0.0.1:8765/ && break; sleep 1; done
           curl -fsS -o /dev/null http://127.0.0.1:8765/ && echo "JARVIS answers at 127.0.0.1:8765"
+          # Still there well after the app's launcher has done its work and ended.
+          sleep 20
+          if pgrep -f "Apps2/JARVIS.app/Contents/MacOS/JARVIS" >/dev/null; then echo "(the launcher is still running)"; fi
+          curl -fsS -o /dev/null http://127.0.0.1:8765/ || { echo "JARVIS stopped once the app's launcher ended"; exit 1; }
+          echo "JARVIS still answers 20 seconds after the app's launcher ended"
           for i in $(seq 1 20); do pgrep -f "JARVIS2/bin/jarvis-menu" >/dev/null && break; sleep 1; done
           pgrep -fl "JARVIS2/bin/jarvis-menu" && echo "the menu-bar icon is running"
           bash "$RUNNER_TEMP/JARVIS2/uninstall.sh" --quiet

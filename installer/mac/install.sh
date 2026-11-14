@@ -16,8 +16,9 @@
 #      menu-bar icon with its shortcuts): built here when Apple's command line tools are installed, otherwise the
 #      ready-built ones from the download.
 #   6. Runs "python3 -m jcc.firstrun" to set up the notes vault (an Obsidian vault) and remember where it is.
-#   7. Makes ~/Applications/JARVIS.app (or in --bundle-dir), a plain app with JARVIS's icon that starts
-#      "python3 -m jcc.desktop".
+#   7. Makes JARVIS.app, a plain app with JARVIS's icon that starts "python3 -m jcc.desktop": in the Applications
+#      folder (/Applications) when this account may write there, as most can without a password, otherwise in
+#      ~/Applications; or in --bundle-dir. An upgrade keeps it where it was.
 #   8. Optionally starts JARVIS in the background when you log in, as on Windows, so "Hey JARVIS", the menu-bar icon and
 #      the shortcuts work without opening it first (a LaunchAgent in ~/Library/LaunchAgents; the uninstaller removes it).
 #   9. Optionally installs Obsidian (Homebrew, or opens its download page).
@@ -29,7 +30,7 @@
 set -euo pipefail
 
 INSTALL_DIR="$HOME/Applications/JARVIS"
-BUNDLE_DIR="$HOME/Applications"
+BUNDLE_DIR=""
 VAULT=""
 MAKE_APP=1
 OBSIDIAN="ask"
@@ -134,7 +135,7 @@ trap 'rm -rf "$work"' EXIT
     ! -path './LEDGER.md' ! -path './scripts/deploy.py' ! -path './config/local.toml' ! -path './.python' \
     ! -path './.jarvis-files' ! -path './.app-bundle' ! -path './install.sh' ! -path './uninstall.sh' \
     ! -path './Install JARVIS.command' ! -path './sound_level.swift' ! -path './menu_bar.swift' ! -path './.venv/*' \
-    ! -path './.login-agent' | sed 's|^\./||' | LC_ALL=C sort ) > "$work/files"
+    ! -path './.login-agent' ! -path './Read me first.txt' | sed 's|^\./||' | LC_ALL=C sort ) > "$work/files"
 
 if [ "$SOURCE" != "$INSTALL_DIR" ]; then
   # A plain copy loop: newer macOS versions ship a different rsync, and cp behaves the same everywhere.
@@ -246,6 +247,13 @@ fi
 
 # -------------------------------------------------------------------------------------------------------- the app
 if [ "$MAKE_APP" = 1 ]; then
+  if [ -z "$BUNDLE_DIR" ]; then
+    earlier="$(head -n 1 "$INSTALL_DIR/.app-bundle" 2>/dev/null || true)"
+    if [ -n "$earlier" ] && [ -f "$earlier/Contents/MacOS/JARVIS" ]; then BUNDLE_DIR="$(dirname "$earlier")"     # (an upgrade: where it was)
+    elif [ -d /Applications ] && [ -w /Applications ]; then BUNDLE_DIR="/Applications"
+    else BUNDLE_DIR="$HOME/Applications"; fi
+  fi
+  mkdir -p "$BUNDLE_DIR"
   bundle="$BUNDLE_DIR/JARVIS.app"
   version="$(head -n 1 "$INSTALL_DIR/VERSION" 2>/dev/null || echo 0.0.0)"
   mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"

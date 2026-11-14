@@ -57,14 +57,19 @@ class Packages(unittest.TestCase):
         target = mac.build_zip(self.tmp)
         with zipfile.ZipFile(target) as z:
             infos = {i.filename: i for i in z.infolist()}
-            for name in ("install.sh", "uninstall.sh", "Install JARVIS.command"):
+            for name in (".jarvis-app/install.sh", ".jarvis-app/uninstall.sh", "Install JARVIS.command"):
                 info = infos[f"JARVIS Installer/{name}"]
                 self.assertEqual(info.create_system, 3)
                 self.assertTrue((info.external_attr >> 16) & stat.S_IXUSR, name)
                 self.assertNotIn(b"\r", z.read(info))
-            plain = infos["JARVIS Installer/jcc/__init__.py"]
+            plain = infos["JARVIS Installer/.jarvis-app/jcc/__init__.py"]
             self.assertFalse((plain.external_attr >> 16) & stat.S_IXUSR)
-            self.assertFalse(any(n.startswith("JARVIS Installer/" + p) for n in infos for p in LEFT_OUT))
+            self.assertFalse(any(n.startswith("JARVIS Installer/.jarvis-app/" + p) for n in infos for p in LEFT_OUT))
+            shown = sorted({n.split("/")[1] for n in infos if n.count("/") >= 1})
+            self.assertEqual(shown, [".jarvis-app", "Install JARVIS.command", "Read me first.txt"],
+                             "opened, the package shows the installer and a note; the app's files are tucked away")
+            note = z.read("JARVIS Installer/Read me first.txt").decode("utf-8")
+            self.assertIn("Open Anyway", note, "it says what to do when macOS blocks the installer")
 
     def test_the_version_is_one_plain_version(self):
         payload = load("installer/payload.py", "jarvis_payload")
@@ -75,7 +80,8 @@ class Packages(unittest.TestCase):
             self.skipTest("Windows does not keep Unix permissions on files")
         mac = load("installer/mac/build.py", "jarvis_mac_build_stage")
         folder = mac.stage(self.tmp / "stage")
-        self.assertTrue((folder / "install.sh").stat().st_mode & stat.S_IXUSR)
+        self.assertTrue((folder / ".jarvis-app" / "install.sh").stat().st_mode & stat.S_IXUSR)
+        self.assertTrue((folder / "Install JARVIS.command").stat().st_mode & stat.S_IXUSR)
 
 
 if __name__ == "__main__":
