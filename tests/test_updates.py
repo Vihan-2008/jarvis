@@ -194,7 +194,7 @@ class TestFetchingAndInstalling(UpdateCase):
         self.assertEqual(argv[argv.index("--sha256") + 1], hashlib.sha256(b"PK the new version").hexdigest())
         self.assertEqual(argv[argv.index("--app-dir") + 1], str(self.app))
         self.assertEqual(argv[argv.index("--start") + 1], "window")
-        self.assertTrue(options.get("creationflags") or options.get("start_new_session"))
+        self.assertTrue("creationflags" in options or options.get("start_new_session"), "a program of its own, not tied to JARVIS's window")
         self.assertEqual(updates.status(self.cfg)["installing"]["version"], "0.1.4")
 
     def test_jarvis_installs_a_ready_update_before_it_starts(self):
