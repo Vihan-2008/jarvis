@@ -94,10 +94,10 @@ def talk(cfg) -> None:
 
 
 def start_window(listen: bool = True) -> None:
-    python = Path(sys.executable).with_name("pythonw.exe")
-    subprocess.Popen([str(python if python.exists() else sys.executable), "-m", "jcc.desktop", *(["--listen"] if listen else [])], cwd=ROOT,
+    from jcc import system
+    subprocess.Popen([system.background_python(), "-m", "jcc.desktop", *(["--listen"] if listen else [])], cwd=ROOT,
                      env={**os.environ, "PYTHONPATH": str(ROOT)}, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
+                     stderr=subprocess.DEVNULL, creationflags=system.no_window(), **system.own_group())
 
 
 def nudge(cfg) -> None:
@@ -175,9 +175,63 @@ def open_jarvis() -> None:
                      stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
 
 
+def listen_only(cfg, once: bool = False, pause: float = 4.0, make_ears=None) -> int:
+    """The helper on a Mac. It has no icon and no keyboard shortcuts yet: it listens for "Hey JARVIS" (on the Mac itself,
+    with the on-device model) and hands what was said after the name to JARVIS, opening its window if it is closed.
+    once: start, write down what it is doing, and stop (for checking). make_ears: tests give a stand-in for the listener."""
+    import json
+    import signal
+    import time
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    lock = InstanceLock(cfg.state_dir / "tray.lock")
+    if not lock.acquire():
+        return 0
+    from jcc import pcsound, sound
+    from jcc.wake import Ears, restore_volume
+    told: set[str] = set()
+
+    def notice(text: str) -> None:
+        if text and text not in told:                  # each thing is said once, not again every time it is tried anew
+            told.add(text)
+            _say_so(text)
+
+    ears = (make_ears or Ears)(cfg, lambda text: say(cfg, text), notice, beep=lambda pitch: sound.beep(cfg, pitch),
+                               busy=lambda: (ask_service(cfg, "status") or {}).get("voice") is True, control=lambda word: ask_service(cfg, "control", word),
+                               attend=lambda: attend(cfg), listen=lambda: nudge(cfg), sound=pcsound.shared,
+                               name_said=lambda at: ask_service(cfg, "name", str(at)))
+    if make_ears is None:
+        restore_volume(cfg)
+    state: dict = {"wake": None, "seen": None}
+    stop = threading.Event()
+    try:
+        signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    except (ValueError, OSError):                      # (not the main thread: whoever started it stops it another way)
+        pass
+    try:
+        while not stop.is_set():
+            try:
+                listening = ears.sync()
+            except Exception:  # noqa: BLE001 - the wake word is optional; the helper must keep running
+                listening = False
+            seen = (ears.problem or ears.note, ears.engine)
+            if listening != state["wake"] or seen != state["seen"]:
+                state["wake"], state["seen"] = listening, seen
+                (cfg.state_dir / "tray-status.json").write_text(json.dumps({
+                    "tray": False, "keys": {}, "wake": bool(listening), "wake_problem": ears.problem or ears.note, "wake_mic": "",
+                    "wake_engine": ears.engine, "at": time.time()}), "utf-8")
+            if once:
+                break
+            stop.wait(pause)
+    finally:
+        ears.stop()
+        lock.release()
+    return 0
+
+
 def main() -> int:
     if os.name != "nt":
-        return 0
+        from jcc import system
+        return listen_only(load(), once="--check" in sys.argv) if system.kind() == "mac" else 0
     cfg = load()
     options = hotkeys(cfg)
     if not options["tray"] and not options["hotkey"]:

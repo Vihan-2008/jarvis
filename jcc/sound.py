@@ -103,13 +103,21 @@ class Microphone:
     `device` is Windows' number for it; None is the Windows default. A chosen device that cannot be opened
     (unplugged a moment ago, or held by another program) falls back to the Windows default."""
 
+    def __new__(cls, device: int | None = None, piece: int = 3200):
+        if os.name != "nt":
+            from jcc import system
+            if system.kind() == "mac":
+                from jcc import macsound
+                return macsound.Microphone(device, piece)       # the same calls, recorded by macOS itself (jcc/macsound.py)
+        return super().__new__(cls)
+
     def __init__(self, device: int | None = None, piece: int = 3200):
         self.device, self.piece = device, piece
         self.running, self.thread, self.used_default = False, None, device is None
 
     def start(self, each, limit: float | None = None) -> None:
         if os.name != "nt":
-            raise ValueError("The microphone can be recorded on Windows only.")
+            raise ValueError("The microphone can be recorded on Windows and on a Mac only.")
         winmm, handle = ctypes.windll.winmm, wintypes.HANDLE()
         wanted = _Format(1, 1, RATE, RATE * 2, 2, 16, 0)
         opened = self.device is not None and not winmm.waveInOpen(ctypes.byref(handle), ctypes.c_uint(self.device), ctypes.byref(wanted), 0, 0, 0)
@@ -166,7 +174,11 @@ class Microphone:
 def tone(pitch: int, milliseconds: int = 70, device: int | None = None, volume: float = 0.25) -> bool:
     """A short soft tone on one particular set of speakers (or the Windows default). False if it could not be played."""
     if os.name != "nt":
-        return False
+        from jcc import system
+        if system.kind() != "mac":
+            return False
+        from jcc import macsound
+        return macsound.tone(pitch, milliseconds, volume)        # (on the speakers chosen in System Settings)
     rate, count = 22050, int(22050 * milliseconds / 1000)
     fade = max(1, rate // 200)
     samples = [int(32767 * volume * math.sin(2 * math.pi * pitch * i / rate) * min(1.0, i / fade, (count - i) / fade)) for i in range(count)]
@@ -195,6 +207,9 @@ def beep(cfg, pitch: int) -> None:
     try:
         device = chosen_output(cfg)
         if device is not None and tone(pitch, 70, device):
+            return
+        if os.name != "nt":
+            tone(pitch, 70)
             return
         import winsound
         winsound.Beep(pitch, 70)

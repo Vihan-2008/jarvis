@@ -138,15 +138,15 @@ BRIEF = {"find_files": "find_files(name): find files on this PC by part of their
          "create, change or delete something, or connect an account. To send an email use send_email"}
 
 
-# What only Windows can do for now. Working inside other apps' windows uses Windows UI Automation and synthetic input;
-# off Windows these tools are not offered to the model at all, and if one is called anyway it answers with this sentence.
+# Working inside other apps' windows: Windows UI Automation and synthetic input on Windows (jcc/winctl.py, jcc/uia.py), the
+# Accessibility interface and Quartz events on a Mac (jcc/macdesk.py). Linux has neither yet: there these tools are not
+# offered to the model at all, and if one is called anyway it answers with this sentence.
 WINDOW_TOOLS = frozenset({"list_windows", "focus_window", "list_controls", "click_control", "type_into", "see_screen", "move_window", "click",
                           "type_text", "press_keys", "scroll"})
-WINDOWS_ONLY = "Controlling other apps' windows is only available on Windows for now."
-NOT_ON_MAC = {**{name: WINDOWS_ONLY for name in WINDOW_TOOLS},
-              "play_show": "Pressing Play on a streaming site is only available on Windows for now. Open the title with open_website instead.",
-              "set_brightness": "Changing the screen brightness is only available on Windows for now."}
-NOT_ON_LINUX = {**NOT_ON_MAC,
+WINDOWS_ONLY = "Controlling other apps' windows is only available on Windows and macOS for now."
+NOT_ON_MAC = {"play_show": "Pressing Play on a streaming site is only available on Windows for now. Open the title with open_website instead."}
+NOT_ON_LINUX = {**NOT_ON_MAC, **{name: WINDOWS_ONLY for name in WINDOW_TOOLS},
+                "set_brightness": "Changing the screen brightness is only available on Windows and macOS for now.",
                 "open_app": "Opening apps by name is not available on Linux yet. Use run_command to start a program.",
                 "read_clipboard": "The clipboard is not available on Linux yet.", "write_clipboard": "The clipboard is not available on Linux yet.",
                 "media": "Media keys are not available on Linux yet.", "set_volume": "The volume is not available on Linux yet."}
@@ -161,7 +161,12 @@ def missing(name: str) -> str:
 
 
 def _here(tool: dict) -> dict:
-    """A tool as this system has it: run_command names the shell that really runs the command."""
+    """A tool as this system has it: run_command names the shell that really runs the command, and on a Mac the keys are
+    the Mac's own."""
+    if tool["name"] == "press_keys" and system.kind() == "mac":
+        return {**tool, "description": "Press a key or shortcut, e.g. enter, tab, esc, cmd+s, cmd+tab, cmd+shift+n. Command is cmd, Option is alt."}
+    if tool["name"] == "set_brightness" and system.kind() == "mac":
+        return {**tool, "description": "Set the screen brightness from 0 to 100 (a Mac's own screen), or leave level out to read it."}
     if tool["name"] == "run_command" and system.kind() != "windows":
         return {**tool, "description": f"Run a {system.shell_name()} command on this computer and get its output. Good for files, folders, system "
                                        "info and starting programs."}
@@ -304,14 +309,27 @@ class _NoWindows:
 SWITCHING_KEYS = ({"alt", "tab"}, {"alt", "shift", "tab"}, {"alt", "esc"}, {"win"}, {"win", "d"}, {"win", "tab"}, {"ctrl", "alt", "tab"}, {"alt", "f4"})
 
 
+def _switches(parts) -> bool:
+    """Is this a shortcut after which another window is in front on purpose?"""
+    if system.kind() == "mac":
+        from jcc import macdesk
+        return macdesk.plain_keys(parts) in macdesk.SWITCHING_KEYS
+    return set(parts) in SWITCHING_KEYS
+
+
 class Toolbox:
     def __init__(self, desktop=None, service=None, runner=None, uia=None, handle=None, windows=None):
         self._desktop, self.service, self.runner = desktop, service or call_service, runner or run_shell
         if uia is None:
-            from jcc.uia import Uia
-            uia = Uia()
+            if system.kind() == "mac":
+                from jcc.macdesk import Controls
+                uia = Controls()                       # (the same requests and answers, asked of the Mac's Accessibility interface)
+            else:
+                from jcc.uia import Uia
+                uia = Uia()
         self.uia = uia
-        self.win = windows or (_OneWindow(self, handle) if handle else _Windows() if system.kind() == "windows" else _NoWindows())
+        # (_Windows asks jcc/winctl.py, which answers for Windows and, through jcc/macdesk.py, for a Mac.)
+        self.win = windows or (_OneWindow(self, handle) if handle else _Windows() if system.kind() in ("windows", "mac") else _NoWindows())
         # The window being worked in during this request: the last one the assistant opened, switched to or clicked in.
         self.working, self._turn, self._turn_at = 0, "", 0.0
         self.written: set[str] = set()                 # files JARVIS itself wrote in this conversation (they may be rewritten without asking)
@@ -321,8 +339,8 @@ class Toolbox:
     @property
     def desktop(self):
         if self._desktop is None:
-            from jcc.computer import Desktop
-            self._desktop = Desktop()
+            from jcc import computer
+            self._desktop = computer.real_desktop()
         return self._desktop
 
     # ------------------------------------------------------------------ permission
@@ -447,7 +465,8 @@ class Toolbox:
         except (TimeoutError, OSError, ValueError):
             raise Refused("The controls of this window could not be read. Use see_screen instead.") from None
         if data.get("error"):
-            raise Refused("The controls of this window could not be read. Use see_screen instead.")
+            # (say: the reason is one for the owner, in plain words: macOS has not allowed JARVIS to do this yet)
+            raise Refused(str(data["error"])[:400] if data.get("say") else "The controls of this window could not be read. Use see_screen instead.")
         return data
 
     def log(self, row: dict) -> None:
@@ -904,7 +923,7 @@ class Toolbox:
         from jcc import winctl
         from jcc.policy import PRIVATE_WINDOW
         self.gate("list_windows", {})
-        rows = [row["title"][:90] for row in winctl.windows() if not PRIVATE_WINDOW.search(row["title"])]
+        rows = [row["title"][:90] for row in self.win.all() if not PRIVATE_WINDOW.search(row["title"])]
         return "\n".join(rows[:40]) or "No windows are open."
 
     def focus_window(self, title: str) -> str:
@@ -921,7 +940,7 @@ class Toolbox:
         time.sleep(0.25)
         if self.win.foreground() == found["handle"]:
             return f'The window in front is now "{found["title"][:80]}".'
-        return (f'Working in "{found["title"][:80]}" from now on. Windows did not bring it to the front just now; click_control and type_into '
+        return (f'Working in "{found["title"][:80]}" from now on. It could not be brought to the front just now; click_control and type_into '
                 "work on it anyway, and it is brought forward before anything is typed.")
 
     def move_window(self, screen, title: str = "") -> str:
@@ -948,7 +967,7 @@ class Toolbox:
         if target["number"] == here["number"]:
             return f'"{name[:60]}" is already on {place}.'
         if not self.move_to(handle, target, all_):
-            raise Refused(f'Windows would not move "{name[:60]}".')
+            raise Refused(f'"{name[:60]}" would not move.')
         return f'Moved "{name[:60]}" to {place}.'
 
     # (The three below are the real thing; tests put stand-ins in their place.)
@@ -1103,14 +1122,15 @@ class Toolbox:
         from jcc.computer import KEYS
         parts = [p.strip().lower() for p in str(keys).split("+") if p.strip()]
         if not parts or len(parts) > 4 or any(p not in KEYS and not re.fullmatch(r"[a-z0-9]", p) for p in parts):
-            raise Refused("Unknown key. Use names like enter, tab, esc, ctrl+s, alt+tab, win.")
+            raise Refused("Unknown key. Use names like enter, tab, esc, cmd+s, cmd+tab." if system.kind() == "mac" else
+                          "Unknown key. Use names like enter, tab, esc, ctrl+s, alt+tab, win.")
         handle, title = self._target()
         self.gate("press_keys", {"keys": "+".join(parts)}, title)
         before = self._open()
         self._bring(handle, title)
         self.desktop.perform({"action": "key", "keys": "+".join(parts)})
         time.sleep(0.3)
-        moved = self._follow(handle, before, switched=set(parts) in SWITCHING_KEYS)
+        moved = self._follow(handle, before, switched=_switches(parts))
         return "Pressed " + "+".join(parts) + f' in "{title[:60]}".' + moved
 
     def scroll(self, amount) -> str:
@@ -1118,7 +1138,10 @@ class Toolbox:
         self.gate("scroll", {}, title)
         self._bring(handle, title)
         spot = self.win.middle(handle)
-        if spot and os.name == "nt":
+        if spot and hasattr(self.desktop, "move_pointer"):
+            self.desktop.move_pointer(spot[0], spot[1])                          # (a Mac: the wheel turns whatever is under the pointer)
+            time.sleep(0.05)
+        elif spot and os.name == "nt":
             import ctypes
             from jcc import screens
             with screens.physical():                   # (a true position: the window may be on any screen)

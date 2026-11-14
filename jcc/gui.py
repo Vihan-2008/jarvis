@@ -499,8 +499,9 @@ class GuiState:
         from jcc import winctl
         from jcc.image_inputs import store
         from jcc.policy import PRIVATE_WINDOW
-        if os.name != "nt":
-            raise ValueError("Screenshots work on Windows only.")
+        from jcc import system
+        if system.kind() not in ("windows", "mac"):
+            raise ValueError("Screenshots work on Windows and on a Mac.")
         rows = winctl.windows()
         mine = next((r["handle"] for r in rows if r["title"].startswith("JARVIS") and "Workspace" in r["title"]), 0)   # JARVIS's own window
         from jcc import screens

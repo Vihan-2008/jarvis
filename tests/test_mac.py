@@ -57,11 +57,14 @@ class OnAMac(unittest.TestCase):
 
 
 class TestTheToolsOffered(OnAMac):
-    def test_tools_that_need_windows_are_not_offered_on_a_mac(self):
+    def test_the_tools_that_work_in_other_apps_windows_are_offered_on_a_mac_with_its_own_keys(self):
         names = {tool["name"] for tool in voice_tools.offered(full=True)}
-        self.assertFalse(names & voice_tools.WINDOW_TOOLS, "no tool that works inside other apps' windows")
+        self.assertTrue(voice_tools.WINDOW_TOOLS <= names, "working inside other apps' windows (the Mac's Accessibility interface)")
+        self.assertIn("set_brightness", names)
         self.assertNotIn("play_show", names)
-        self.assertNotIn("set_brightness", names)
+        keys = next(tool for tool in voice_tools.offered(full=True) if tool["name"] == "press_keys")
+        self.assertIn("cmd+s", keys["description"])
+        self.assertNotIn("win", keys["description"].replace("window", ""))
         for kept in ("open_app", "open_website", "open_file", "find_files", "run_command", "read_clipboard", "write_clipboard", "set_volume", "lock_pc", "media"):
             self.assertIn(kept, names)
         command = next(tool for tool in voice_tools.offered(full=True) if tool["name"] == "run_command")
@@ -69,15 +72,25 @@ class TestTheToolsOffered(OnAMac):
         everyday = voice_tools.offered()
         more = next(tool for tool in everyday if tool["name"] == "more")
         self.assertNotIn("PowerShell", more["description"])
-        self.assertFalse({tool["name"] for tool in everyday} & voice_tools.WINDOW_TOOLS)
 
-    def test_a_windows_only_tool_called_anyway_answers_with_one_sentence(self):
+    def test_on_linux_a_window_tool_called_anyway_answers_with_one_sentence(self):
+        with mock.patch.object(system, "PLATFORM", "linux"):
+            names = {tool["name"] for tool in voice_tools.offered(full=True)}
+            self.assertFalse(names & voice_tools.WINDOW_TOOLS, "no tool that works inside other apps' windows")
+            self.assertNotIn("set_brightness", names)
+            box = self.toolbox()
+            for name, args in (("click", {"x": 1, "y": 2}), ("type_text", {"text": "hi"}), ("list_controls", {})):
+                reply = voice_tools.handle(box, {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}})
+                self.assertTrue(reply["result"]["isError"])
+                self.assertEqual(reply["result"]["content"][0]["text"], "Controlling other apps' windows is only available on Windows and macOS for now.")
+            self.assertEqual(self.asked, [], "nothing was asked for or done")
+
+    def test_on_a_mac_with_no_window_open_a_window_tool_says_so(self):
+        """(In tests there is no real Mac to ask, which is what a Mac with nothing open looks like.)"""
         box = self.toolbox()
-        for name, args in (("click", {"x": 1, "y": 2}), ("type_text", {"text": "hi"}), ("list_controls", {})):
-            reply = voice_tools.handle(box, {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}})
-            self.assertTrue(reply["result"]["isError"])
-            self.assertEqual(reply["result"]["content"][0]["text"], "Controlling other apps' windows is only available on Windows for now.")
-        self.assertEqual(self.asked, [], "nothing was asked for or done")
+        reply = voice_tools.handle(box, {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "list_controls", "arguments": {}}})
+        self.assertTrue(reply["result"]["isError"])
+        self.assertEqual(reply["result"]["content"][0]["text"], "No app window is open to work in. Use open_app or open_website first.")
 
     def test_on_windows_every_tool_is_still_offered(self):
         with mock.patch.object(system, "PLATFORM", "win32"):
@@ -232,13 +245,13 @@ class TestTheWindowOnAMac(OnAMac, EngineTestCase):
         OnAMac.tearDown(self)
         EngineTestCase.tearDown(self)
 
-    def test_the_app_opens_in_a_chromium_window_of_its_own_with_no_tray(self):
+    def test_the_app_opens_in_a_chromium_window_of_its_own_and_starts_the_helper_that_listens(self):
         chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         with mock.patch.object(desktop, "ready", lambda: True), mock.patch.object(system, "browsers", lambda: [chrome]), \
                 mock.patch("jcc.placement.screens", lambda: []):
             self.assertEqual(desktop.main(), 0)
         started = self.run.argvs
-        self.assertFalse(any("jcc.tray" in argv for argv in started), "the tray is Windows-only")
+        self.assertEqual(sum("jcc.tray" in argv for argv in started), 1, 'the helper that listens for "Hey JARVIS" (on a Mac it has no icon)')
         helpers = [argv for argv in started if argv[1:2] == ["-m"]]
         self.assertTrue(helpers and all(argv[0] == system.background_python() for argv in helpers))
         window = next(argv for argv in started if Path(argv[0]) == Path(chrome))

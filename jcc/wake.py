@@ -127,9 +127,17 @@ def first_sentence(text: str) -> str:
 
 
 def _speakers():
-    """(read, write) for Windows' own speaker volume, 0 to 100."""
+    """(read, write) for this computer's own speaker volume, 0 to 100."""
+    from jcc import system
+    if system.kind() == "mac":
+        from jcc import mac
+        return mac.volume, mac.set_volume
     from jcc import winctl
     return winctl.volume, winctl.set_volume
+
+
+NEEDS_MODEL = ('On a Mac, "Hey JARVIS" is heard by a small model that runs on the Mac itself, and it is not installed yet. '
+               "Run the JARVIS installer again and say yes to the wake word (or see docs/PLATFORMS.md). Talking to JARVIS in its window works without it.")
 
 
 def restore_volume(cfg, volume=None) -> bool:
@@ -168,7 +176,10 @@ class Listener:
 
     def start(self) -> None:
         if os.name != "nt":
-            raise ValueError("The wake word works on Windows only.")
+            # Windows' own recogniser is what this class starts. Elsewhere the name is heard by the on-device model alone
+            # (jcc/wakeword.py), which Ears starts beside this; this sentence is only shown when that is missing too.
+            from jcc import system
+            raise ValueError(NEEDS_MODEL if system.kind() == "mac" else "The wake word works on Windows and on a Mac only.")
         encoded = base64.b64encode(SCRIPT.encode("utf-16-le")).decode()
         theirs, startup = None, None
         if self.device is not None and not self.wave_file:

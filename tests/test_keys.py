@@ -2,6 +2,7 @@
 by a fake subprocess.run, so these run anywhere; the Windows Credential Manager is used only by the app itself."""
 import json
 import os
+import sys
 import subprocess
 import unittest
 from unittest import mock
@@ -135,7 +136,7 @@ class TestSecretService(KeyStoreCase):
 
 class TestEverySystem(KeyStoreCase):
     def test_the_environment_variable_works_everywhere_without_a_key_store(self):
-        for platform in ("darwin", "linux", "win32"):
+        for platform in ("darwin", "linux") + (("win32",) if sys.platform == "win32" else ()):
             with mock.patch.object(system, "PLATFORM", platform), mock.patch.dict(os.environ, {"JCC_GEMINI_API_KEY": KEY}):
                 self.assertEqual(secrets.get("gemini"), KEY)
                 self.assertEqual(self.run.calls, [], "the variable is used without asking any key store")

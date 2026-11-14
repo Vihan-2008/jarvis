@@ -148,14 +148,22 @@ def number(found: list[dict]) -> list[dict]:
 
 
 def screens(lister=None) -> list[dict]:
-    """Every connected screen (see number()). Empty when Windows will not say."""
+    """Every connected screen (see number()). Empty when the system will not say."""
     if os.name != "nt" and lister is None:
-        return []
+        if not _on_mac():
+            return []
+        from jcc import macdesk
+        lister = macdesk.raw_screens           # (a Mac: the same description, in its own points)
     try:
         with physical():
             return number((lister or _raw)())
     except Exception:  # noqa: BLE001 - whatever Windows did, the caller carries on with what it knew before
         return []
+
+
+def _on_mac() -> bool:
+    from jcc import system
+    return system.kind() == "mac"
 
 
 def holding_point(found: list[dict], x: int, y: int) -> dict | None:
@@ -188,6 +196,9 @@ def holding_box(found: list[dict], box: tuple[int, int, int, int]) -> dict | Non
 
 def window_box(handle: int) -> tuple[int, int, int, int] | None:
     """Where a window is, in true pixels (as it is drawn, without the invisible edge Windows adds for resizing)."""
+    if handle and os.name != "nt" and _on_mac():
+        from jcc import macdesk
+        return macdesk.window_box(handle)
     if os.name != "nt" or not handle:
         return None
     from ctypes import wintypes
@@ -287,6 +298,9 @@ def fit(box: tuple[int, int, int, int], here: dict, there: dict) -> tuple[int, i
 
 def move_window(handle: int, target: dict, found: list[dict] | None = None) -> bool:
     """Put a window on another screen, keeping how it sits (maximised stays maximised; otherwise the same share of the screen)."""
+    if handle and target and os.name != "nt" and _on_mac():
+        from jcc import macdesk
+        return macdesk.move_window(handle, target, screens() if found is None else found)
     if os.name != "nt" or not handle or not target:
         return False
     found = screens() if found is None else found

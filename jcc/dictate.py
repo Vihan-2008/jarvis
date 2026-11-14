@@ -152,8 +152,8 @@ class Dictation:
                 return
             desktop = self.desktop
             if desktop is None:
-                from jcc.computer import Desktop
-                desktop = Desktop()
+                from jcc import computer
+                desktop = computer.real_desktop()
             desktop.perform({"action": "type", "text": text + " "})
         except ValueError as problem:
             self.notify(str(problem))

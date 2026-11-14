@@ -423,15 +423,15 @@ class Quick:
             if not target:
                 raise ValueError("I could not tell which screen you mean. There are " + screens.describe(found)[:-1].replace(" screens: ", ": ", 1) + ".")
             if here and target["number"] != here["number"] and not screens.move_window(row["handle"], target, found):
-                raise ValueError("Windows would not move that window.")
+                raise ValueError("That window would not move.")
             return row["title"], target, bool(here and target["number"] == here["number"])
         elif kind == "weather":
             from jcc import memory
             return memory.weather(value)
         elif kind == "screenshot":
-            from jcc.computer import Desktop
+            from jcc import computer
             from jcc.policy import PRIVATE_WINDOW
-            desktop = Desktop()
+            desktop = computer.real_desktop()
             if PRIVATE_WINDOW.search(desktop.window_title()):
                 raise ValueError("A private window is in front, so I did not take a picture of it.")
             folder = Path.home() / "Pictures" / "JARVIS"

@@ -93,9 +93,15 @@ def overview(cfg) -> list[dict]:
                               f"speaking with {'ElevenLabs' if speaking == 'eleven' else 'the built-in voice'}.", open="voice"))
     tray = read_json(cfg.state_dir / "tray-status.json", {})
     helper_running = _held(cfg.state_dir / "tray.lock")
-    if not helper_running:
+    from jcc import system
+    if not helper_running and system.kind() == "linux":
         items.append(_item("helper", "voice", "\"Hey JARVIS\" and shortcuts", "Listens for its name and for the keyboard shortcuts, with or without a window open.",
-                           "problem", "The background helper is not running", how="It starts when you sign in to Windows. Open JARVIS from the Start menu to start it now."))
+                           "off", "Not available on Linux yet"))
+    elif not helper_running:
+        items.append(_item("helper", "voice", "\"Hey JARVIS\" and shortcuts", "Listens for its name and for the keyboard shortcuts, with or without a window open.",
+                           "problem", "The background helper is not running",
+                           how="It starts with JARVIS. Open JARVIS to start it now." if system.kind() == "mac" else
+                           "It starts when you sign in to Windows. Open JARVIS from the Start menu to start it now."))
     else:
         wake = "listening for \"Hey JARVIS\"" if tray.get("wake") else ("\"Hey JARVIS\" is off" if not chosen.get("wake") else "\"Hey JARVIS\" is not listening")
         items.append(_item("helper", "voice", "\"Hey JARVIS\" and shortcuts", "Listens for its name and for the keyboard shortcuts, with or without a window open.",
@@ -106,6 +112,19 @@ def overview(cfg) -> list[dict]:
                        "ok" if options["pc_control"] else "off", "Allowed" if options["pc_control"] else "Switched off",
                        detail={"sending": "JARVIS asks first only before sending, deleting or paying.", "risky": "JARVIS asks first before anything risky.",
                                "all": "JARVIS asks first before every action."}[options["ask"]], open="assistant"))
+    if system.kind() == "mac":
+        # What macOS itself must allow before JARVIS can work in other apps or see the screen. It is switched on by the
+        # owner in System Settings and nowhere else.
+        from jcc import macdesk
+        allowed = macdesk.permissions()
+        for ident, which, title, about, where in (
+                ("mac-accessibility", "accessibility", "Accessibility (macOS)", "Lets JARVIS press buttons, type and click in other apps.", "Accessibility"),
+                ("mac-screen", "screen", "Screen Recording (macOS)", "Lets JARVIS see the screen, and tell the Mac's own sound from your voice.",
+                 "Screen & System Audio Recording")):
+            yes = allowed[which]
+            items.append(_item(ident, "hands", title, about, "ok" if yes else "needed" if yes is False else "off",
+                               "Allowed" if yes else "Not allowed yet" if yes is False else "Could not be checked",
+                               how=f"Open System Settings, Privacy & Security, {where}, and switch on JARVIS (or Terminal, if you started it from there)."))
     mail = mailer.status(cfg)
     items.append(_item("mail", "hands", "Email", "Sending email for you, after you have said yes to each one.",
                        "ok" if mail["connected"] else "off", ("Connected as " + mail["address"]) if mail["connected"] else "Not connected",
@@ -154,7 +173,17 @@ def summary(items: list[dict]) -> dict:
 def _held(lock_path) -> bool:
     """Is another program (the tray helper) holding this lock right now?"""
     if os.name != "nt":
-        return False
+        try:
+            import fcntl
+            with open(lock_path, "r+b") as handle:
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError:
+                    return True
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                return False
+        except (OSError, ImportError):
+            return False
     try:
         import msvcrt
         with open(lock_path, "r+b") as handle:       # looked at, never written: the helper's own note in it stays as it is

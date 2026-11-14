@@ -84,7 +84,7 @@ class WorkbenchTests(EngineTestCase):
                     break
                 time.sleep(.1)
             self.assertIn("JCC_TERMINAL_OK", snap["output"])
-            self.assertEqual(Path(snap["cwd"]), self.repo / "src")
+            self.assertTrue(os.path.samefile(snap["cwd"], self.repo / "src"), snap["cwd"])
         finally:
             session.stop()
 

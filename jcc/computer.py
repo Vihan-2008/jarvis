@@ -49,8 +49,36 @@ Rules:
 KEYS = {"enter": 0x0D, "return": 0x0D, "tab": 0x09, "esc": 0x1B, "escape": 0x1B, "space": 0x20, "backspace": 0x08,
         "delete": 0x2E, "del": 0x2E, "home": 0x24, "end": 0x23, "pageup": 0x21, "pagedown": 0x22, "up": 0x26,
         "down": 0x28, "left": 0x25, "right": 0x27, "ctrl": 0x11, "control": 0x11, "alt": 0x12, "shift": 0x10,
-        "win": 0x5B, "windows": 0x5B, **{f"f{i}": 0x6F + i for i in range(1, 13)}}
+        "win": 0x5B, "windows": 0x5B, **{f"f{i}": 0x6F + i for i in range(1, 13)},
+        # A Mac's names for the same keys (Command sits where the Windows key does, Option where Alt does).
+        "cmd": 0x5B, "command": 0x5B, "option": 0x12, "opt": 0x12}
 BLOCKED_COMBOS = ({"win", "r"}, {"win", "x"}, {"ctrl", "alt", "delete"}, {"ctrl", "alt", "del"}, {"win", "l"}, {"alt", "f4"})
+
+
+def system_prompt() -> str:
+    """What the AI that chooses each step is told: the same on every system, with this system's name and its own keys."""
+    from jcc import system
+    if system.kind() != "mac":
+        return SYSTEM
+    return SYSTEM.replace("a Windows computer", "a Mac").replace("ctrl+s, alt+tab, win", "cmd+s, cmd+tab, cmd+w (Command is cmd, Option is alt)")
+
+
+def real_desktop():
+    """This computer's real screen, pointer and keyboard: Windows' own, or the Mac's (jcc/macdesk.py)."""
+    from jcc import system
+    if system.kind() == "mac":
+        from jcc import macdesk
+        return macdesk.Desktop()
+    return Desktop()
+
+
+def blocked_shortcut(parts) -> bool:
+    """A shortcut the step-by-step panel does not press on this system."""
+    from jcc import system
+    if system.kind() == "mac":
+        from jcc import macdesk
+        return macdesk.blocked(parts)
+    return any(combo <= set(parts) for combo in BLOCKED_COMBOS)
 
 
 def settings(cfg) -> dict:
@@ -118,7 +146,7 @@ def parse_action(text: str, width: int, height: int) -> dict:
         parts = [p.strip().lower() for p in str(data.get("keys", "")).split("+") if p.strip()]
         if not parts or len(parts) > 4 or any(p not in KEYS and not re.fullmatch(r"[a-z0-9]", p) for p in parts):
             return {"action": "need_user", "reason": "The AI asked for a key JARVIS does not press."}
-        if any(combo <= set(parts) for combo in BLOCKED_COMBOS):
+        if blocked_shortcut(parts):
             return {"action": "need_user", "reason": "That shortcut is not allowed for computer control."}
         return {"action": "key", "keys": "+".join(parts), "reason": reason}
     if action == "scroll":
@@ -152,7 +180,7 @@ class Desktop:
 
     def __init__(self):
         if os.name != "nt":
-            raise ValueError("Computer control works on Windows only.")
+            raise ValueError("Computer control works on Windows and on a Mac.")
         self.user32, self.gdi32 = ctypes.windll.user32, ctypes.windll.gdi32
         # The screen that pictures and positions refer to (jcc/screens.py): where its corner is on the whole desktop, how
         # many real pixels one picture pixel stands for, its number, and how many screens there are.
@@ -355,7 +383,7 @@ class Computer:
                     last = str(error)
                     continue
                 body = {"model": self.cfg.models[slot], "max_tokens": 300, "temperature": 0.1,
-                        "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}]}
+                        "messages": [{"role": "system", "content": system_prompt()}, {"role": "user", "content": user}]}
                 headers = {"Authorization": f"Bearer {secrets.get('gemini')}", "Content-Type": "application/json"}
                 try:
                     code, data = self.transport(ENDPOINTS["gemini"], headers, body)
@@ -380,7 +408,7 @@ class Computer:
     def _run(self) -> None:
         started = time.time()
         try:
-            desktop = self.desktop or Desktop()
+            desktop = self.desktop or real_desktop()
             while not self._stopped():
                 if self.step_no >= MAX_STEPS or time.time() - started > MAX_SECONDS:
                     self.stop("Reached the limit of steps or time for one task.")

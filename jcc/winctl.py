@@ -1,4 +1,8 @@
-"""Small Windows helpers for the assistant: windows, sound volume, screen brightness, finding files."""
+"""Small helpers for the assistant: windows, sound volume, screen brightness, finding files.
+
+Written for Windows. On a Mac the questions about windows, the screen brightness and pictures of the screen are answered
+by jcc/macdesk.py instead (see _mac below), so everything that asks here works on both.
+"""
 from __future__ import annotations
 
 import ctypes
@@ -16,6 +20,21 @@ _NOISE = re.compile(r"\\(__pycache__|node_modules|\.git|\$recycle\.bin|appdata\\
 _SKIP_TITLES = {"Program Manager", "Windows Input Experience", "Microsoft Text Input Application", "Settings ", "Default IME", "MSCTFIME UI"}
 
 
+_MAC_WINDOWS = None
+
+
+def _mac():
+    """On a Mac: the windows as jcc/macdesk.py knows them (one set for the whole process). None on every other system."""
+    global _MAC_WINDOWS
+    from jcc import system
+    if system.kind() != "mac":
+        return None
+    if _MAC_WINDOWS is None:
+        from jcc import macdesk
+        _MAC_WINDOWS = macdesk.Windows()
+    return _MAC_WINDOWS
+
+
 def _powershell(script: str, timeout: int = 25) -> str:
     done = subprocess.run(["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=timeout, stdin=subprocess.DEVNULL,
@@ -25,6 +44,8 @@ def _powershell(script: str, timeout: int = 25) -> str:
 
 # ---------------------------------------------------------------------- windows
 def foreground() -> int:
+    if _mac():
+        return _mac().foreground()
     if os.name != "nt":
         return 0
     user32 = ctypes.windll.user32
@@ -33,6 +54,10 @@ def foreground() -> int:
 
 
 def title_of(handle: int) -> str:
+    if _mac():
+        return _mac().title(handle)
+    if os.name != "nt":
+        return ""
     buffer = ctypes.create_unicode_buffer(300)
     ctypes.windll.user32.GetWindowTextW(ctypes.c_void_p(handle), buffer, 300)
     return buffer.value
@@ -40,6 +65,8 @@ def title_of(handle: int) -> str:
 
 def windows() -> list[dict]:
     """The windows the user could switch to, front to back."""
+    if _mac():
+        return [{"handle": row["handle"], "title": row["title"]} for row in _mac().all()]
     if os.name != "nt":
         return []
     user32, rows = ctypes.windll.user32, []
@@ -64,11 +91,15 @@ def windows() -> list[dict]:
 
 
 def exists(handle: int) -> bool:
+    if _mac():
+        return _mac().exists(handle)
     return bool(handle) and os.name == "nt" and bool(ctypes.windll.user32.IsWindow(ctypes.c_void_p(handle)))
 
 
 def process_of(handle: int) -> int:
     """The number of the program a window belongs to."""
+    if _mac():
+        return _mac().process(handle)
     if os.name != "nt" or not handle:
         return 0
     found = ctypes.c_ulong(0)
@@ -78,6 +109,8 @@ def process_of(handle: int) -> int:
 
 def app_of(handle: int) -> str:
     """The program a window belongs to, by its file name without ".exe" ("comet", "Spotify"). "" when that cannot be told."""
+    if _mac():
+        return _mac().app(handle)
     pid = process_of(handle)
     if not pid:
         return ""
@@ -127,6 +160,8 @@ def default_browser() -> str:
 
 def window_at(x: int, y: int) -> int:
     """The top-level window showing at this point of the screen (in real screen dots)."""
+    if _mac():
+        return _mac().at(int(x), int(y))
     if os.name != "nt":
         return 0
     from ctypes import wintypes
@@ -141,6 +176,8 @@ def window_at(x: int, y: int) -> int:
 
 def middle(handle: int) -> tuple[int, int] | None:
     """The middle of a window, in real screen dots."""
+    if _mac():
+        return _mac().middle(handle)
     if os.name != "nt" or not handle:
         return None
     from jcc import screens
@@ -163,6 +200,10 @@ def find_window(words: str, rows: list[dict] | None = None) -> dict | None:
 
 def focus(handle: int) -> bool:
     """Bring a window to the front. Windows resists this from background programs, so three ways are tried."""
+    if _mac():
+        return _mac().focus(handle)
+    if os.name != "nt":
+        return False
     user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
     pointer = ctypes.c_void_p(handle)
     if user32.IsIconic(pointer):
@@ -305,6 +346,9 @@ def set_volume(percent) -> int:
 
 # ---------------------------------------------------------------------- screen brightness
 def brightness(percent=None, run=_powershell) -> int:
+    if _mac():
+        from jcc import macax
+        return macax.mac().brightness(percent)
     if percent is None:
         out = run("(Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness -ErrorAction Stop | Select-Object -First 1).CurrentBrightness")
     else:
@@ -384,6 +428,9 @@ def _grab(source, left: int, top: int, width: int, height: int, window: int = 0,
 
 def capture_window(handle: int) -> tuple[int, int, bytes]:
     """A picture of one window, even when other windows cover it."""
+    if _mac():
+        from jcc import macdesk
+        return macdesk.picture_of_window(handle)
     from ctypes import wintypes
     from jcc import screens
     user32 = ctypes.windll.user32
@@ -403,6 +450,9 @@ def capture_screen(hide: int = 0, screen: int = 0) -> tuple[int, int, bytes]:
     """A picture of one whole screen: the one with this number, or the one `hide` is on (the main one if neither is
     known). `hide` is a window to move out of the way first (JARVIS itself)."""
     from jcc import screens
+    if _mac():
+        from jcc import macdesk
+        return macdesk.picture_of_screen(screen, hide)
     user32 = ctypes.windll.user32
     found = screens.screens()
     chosen = next((s for s in found if s["number"] == screen), None) or (screens.of_window(hide, found) if hide and found else None) or \

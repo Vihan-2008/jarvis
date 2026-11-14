@@ -177,9 +177,12 @@ class TestWhatItNeverDoes(SecurityTestCase):
         outside = self.tmp / "outside"
         write(outside, {"leak.py": ["result = eval(user_text)"]})
         write(self.project, {"main.py": ["x = 1"]})
-        made = subprocess.run(["cmd", "/c", "mklink", "/J", str(self.project / "elsewhere"), str(outside)], capture_output=True)
-        if made.returncode != 0 or not (self.project / "elsewhere").exists():
-            self.skipTest("A junction could not be made here.")
+        if os.name == "nt":
+            made = subprocess.run(["cmd", "/c", "mklink", "/J", str(self.project / "elsewhere"), str(outside)], capture_output=True)
+            if made.returncode != 0 or not (self.project / "elsewhere").exists():
+                self.skipTest("A junction could not be made here.")
+        else:
+            os.symlink(outside, self.project / "elsewhere", target_is_directory=True)    # (what a junction is elsewhere: a link to a folder)
         try:
             os.symlink(outside / "leak.py", self.project / "leak-link.py")
             links = 2
@@ -189,7 +192,7 @@ class TestWhatItNeverDoes(SecurityTestCase):
         self.assertEqual(got["findings"], [])
         self.assertEqual(got["skipped"]["links"], links)
         self.assertEqual(got["files"], 1)
-        os.rmdir(self.project / "elsewhere")                         # (removes the junction, not what it points to)
+        (os.rmdir if os.name == "nt" else os.unlink)(self.project / "elsewhere")    # (removes the junction, not what it points to)
         self.assertTrue((outside / "leak.py").exists())
 
     def test_ignored_folders_large_and_binary_files_are_skipped_and_counted(self):
@@ -371,16 +374,18 @@ class TestBandit(SecurityTestCase):
         tools, scripts, good = self.tmp / "tools", self.tmp / "scripts", self.tmp / "good"
         for folder in (tools, scripts, good, self.project / "bin"):
             folder.mkdir()
-        for path in (self.project / "bandit.exe", self.project / "bandit.cmd", self.project / "bin" / "bandit.exe", scripts / "bandit.cmd", scripts / "bandit.bat",
-                     good / "bandit.exe"):
+        program = "bandit.exe" if os.name == "nt" else "bandit"             # (what the program itself is called on this system)
+        for path in (self.project / program, self.project / "bandit.cmd", self.project / "bin" / program, scripts / "bandit.cmd", scripts / "bandit.bat",
+                     good / program):
             path.write_bytes(b"MZ")
+            path.chmod(0o755)
         old_path, old_cwd = os.environ.get("PATH", ""), os.getcwd()
         try:
             os.chdir(self.project)                                          # (Windows also looks in the current folder)
             os.environ["PATH"] = os.pathsep.join([str(self.project), str(self.project / "bin"), str(scripts), str(tools)])
             self.assertIsNone(sec.find_bandit(self.project, self.project))
             os.environ["PATH"] = os.pathsep.join([str(self.project), str(scripts), str(good)])
-            self.assertEqual(sec.find_bandit(self.project, self.project), os.path.realpath(good / "bandit.exe"))
+            self.assertEqual(sec.find_bandit(self.project, self.project), os.path.realpath(good / program))
             os.environ["PATH"] = str(good)
             self.assertIsNone(sec.find_bandit(good, self.project), "nor from the folder being scanned")
         finally:

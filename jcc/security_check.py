@@ -427,6 +427,13 @@ def find_bandit(*folders) -> str | None:
     # Each kept entry is asked by the program's full name. (Given a bare name, shutil.which on Windows looks in the current
     # folder first whatever path it is given, and would find a .cmd or .bat there as readily as an .exe.)
     for entry in kept:
+        if os.name != "nt":
+            # Off Windows the program is a file named bandit that may be run. (It is started by itself, never through a
+            # shell, so nothing reads its command line a second time.)
+            found = os.path.realpath(os.path.join(entry, "bandit"))
+            if os.path.isfile(found) and os.access(found, os.X_OK) and not any(_inside(found, f) for f in away):
+                return found
+            continue
         found = shutil.which(os.path.join(entry, "bandit.exe"))
         if not found:
             continue
@@ -526,6 +533,8 @@ def bandit_findings(output, folder: str) -> list[dict]:
         name, number, test = item.get("filename"), item.get("line_number"), item.get("test_id")
         if not isinstance(name, str) or not name or len(name) > 1000 or "\x00" in name:
             continue
+        if os.sep != "\\" and ("\\" in name or re.match(r"[A-Za-z]:", name)):
+            continue                                  # a Windows path in a report made here: not a file of this folder
         if not isinstance(number, int) or isinstance(number, bool) or not 0 < number < 10_000_000:
             continue
         full = os.path.realpath(os.path.join(root, name))

@@ -15,3 +15,32 @@ if "JCC_VOICE_STATE" not in os.environ:
     _folder = tempfile.mkdtemp(prefix="jcc-test-voice-")
     os.environ["JCC_VOICE_STATE"] = _folder
     atexit.register(shutil.rmtree, _folder, ignore_errors=True)
+
+
+def _agents_present() -> None:
+    """Tests that start a job stand in for the coding agent itself, so they must not depend on whether Claude Code or
+    Codex happens to be installed on the machine running them. Where one is missing, it still counts as installed."""
+    from jcc import agents
+    real = agents.available
+
+    def available(agent):
+        return real(agent) or bool(agent.enabled and str(agent.command[0]) in ("claude", "codex"))
+
+    agents.available = available
+
+
+_agents_present()
+
+
+def _no_real_mac() -> None:
+    """On a Mac, JARVIS can look at the real windows, press real keys and move the real pointer (jcc/macax.py). No test may:
+    asked for the real Mac, a test is told there is none. Tests of that code bring a stand-in of their own."""
+    from jcc import macax
+
+    def mac():
+        raise OSError("tests never touch the real Mac")
+
+    macax.mac = mac
+
+
+_no_real_mac()

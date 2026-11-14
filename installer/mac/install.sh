@@ -2,17 +2,22 @@
 # Installs JARVIS for the current Mac user. No administrator password is needed.
 #
 #   bash install.sh [--install-dir DIR] [--vault DIR] [--bundle-dir DIR] [--no-app]
-#                   [--install-obsidian | --no-obsidian] [--quiet] [--source DIR] [--python PATH]
+#                   [--install-obsidian | --no-obsidian] [--wake-word | --no-wake-word]
+#                   [--quiet] [--source DIR] [--python PATH]
 #
 # What it does, in order:
 #   1. Finds python3, version 3.11 or newer. If there is none it says how to get one and stops.
 #   2. Copies the app's files into --install-dir (default ~/Applications/JARVIS). Run again over an existing install
 #      it upgrades it: config/local.toml and every other file the installer did not put there are kept.
 #   3. Writes ".python" in the install folder: one line, the full path of the python3 it found.
-#   4. Runs "python3 -m jcc.firstrun" to set up the notes vault (an Obsidian vault) and remember where it is.
-#   5. Makes ~/Applications/JARVIS.app (or in --bundle-dir), a plain app that starts "python3 -m jcc.desktop".
-#   6. Optionally installs Obsidian (Homebrew, or opens its download page).
-#   7. Writes uninstall.sh into the install folder.
+#   4. Optionally sets up "Hey JARVIS": a Python environment of JARVIS's own inside the install folder with the two
+#      packages the wake word needs (numpy, onnxruntime), and the wake word's small model, fetched and checked.
+#   5. Installs the helper that tells the Mac's own sound from your voice: built here when Apple's command line
+#      tools are installed, otherwise the ready-built one from the download.
+#   6. Runs "python3 -m jcc.firstrun" to set up the notes vault (an Obsidian vault) and remember where it is.
+#   7. Makes ~/Applications/JARVIS.app (or in --bundle-dir), a plain app that starts "python3 -m jcc.desktop".
+#   8. Optionally installs Obsidian (Homebrew, or opens its download page).
+#   9. Writes uninstall.sh into the install folder.
 #
 # This script is new and was not run on a real Mac by its authors. Bash 3.2 (the one macOS ships) is enough.
 set -euo pipefail
@@ -22,6 +27,7 @@ BUNDLE_DIR="$HOME/Applications"
 VAULT=""
 MAKE_APP=1
 OBSIDIAN="ask"
+WAKE="ask"
 QUIET=0
 SOURCE=""
 PYTHON=""
@@ -37,10 +43,12 @@ while [ $# -gt 0 ]; do
     --no-app) MAKE_APP=0; shift ;;
     --install-obsidian) OBSIDIAN="yes"; shift ;;
     --no-obsidian) OBSIDIAN="no"; shift ;;
+    --wake-word) WAKE="yes"; shift ;;
+    --no-wake-word) WAKE="no"; shift ;;
     --quiet) QUIET=1; shift ;;
     --source) SOURCE="${2:?--source needs a folder}"; shift 2 ;;
     --python) PYTHON="${2:?--python needs a path}"; shift 2 ;;
-    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
     *) fail "unknown option: $1 (try --help)" ;;
   esac
 done
@@ -110,7 +118,7 @@ trap 'rm -rf "$work"' EXIT
     ! -path './website/*' ! -path './dist/*' ! -path '*/__pycache__/*' ! -name '*.pyc' ! -name '.DS_Store' \
     ! -path './LEDGER.md' ! -path './scripts/deploy.py' ! -path './config/local.toml' ! -path './.python' \
     ! -path './.jarvis-files' ! -path './.app-bundle' ! -path './install.sh' ! -path './uninstall.sh' \
-    ! -path './Install JARVIS.command' | sed 's|^\./||' | LC_ALL=C sort ) > "$work/files"
+    ! -path './Install JARVIS.command' ! -path './sound_level.swift' ! -path './.venv/*' | sed 's|^\./||' | LC_ALL=C sort ) > "$work/files"
 
 if [ "$SOURCE" != "$INSTALL_DIR" ]; then
   # A plain copy loop: newer macOS versions ship a different rsync, and cp behaves the same everywhere.
@@ -139,6 +147,64 @@ fi
 if [ "$upgrade" = 1 ]; then say "Upgraded the app in $INSTALL_DIR (your settings and your own files there were kept)."
 else say "Copied the app to $INSTALL_DIR."; fi
 printf '%s\n' "$PY" > "$INSTALL_DIR/.python"
+
+# ------------------------------------------------------------------------------------------- "Hey JARVIS" (optional)
+# The wake word is heard by a small model that runs on this Mac. It needs two Python packages (numpy, onnxruntime) and
+# three model files (about 4 MB), fetched from where their makers publish them and checked before they are kept. The
+# packages go into a Python environment of JARVIS's own inside the install folder, so nothing else on the Mac changes.
+venv="$INSTALL_DIR/.venv"
+has_wake() { [ -x "$venv/bin/python" ] && "$venv/bin/python" -c 'import numpy, onnxruntime' >/dev/null 2>&1; }
+want_wake=0
+if has_wake; then want_wake=1                     # set up by an earlier install: kept, and brought up to date below
+elif [ "$WAKE" = yes ]; then want_wake=1
+elif [ "$WAKE" = ask ] && [ "$QUIET" = 0 ]; then
+  say ""
+  say 'JARVIS can listen for "Hey JARVIS" with a small model that runs on this Mac. Setting it up downloads two Python'
+  say "packages (about 60 MB) and the model (4 MB; its makers allow non-commercial use)."
+  ask_yes 'Set up "Hey JARVIS"?' y && want_wake=1
+fi
+if [ "$want_wake" = 1 ]; then
+  if { has_wake || "$PY" -m venv "$venv" >/dev/null 2>&1; } && \
+     "$venv/bin/python" -m pip install --quiet --disable-pip-version-check numpy onnxruntime; then
+    PY="$venv/bin/python"
+    printf '%s\n' "$PY" > "$INSTALL_DIR/.python"
+    if ( cd "$INSTALL_DIR" && "$PY" scripts/get_wake_word.py ); then
+      say '"Hey JARVIS" is set up. Switch it on in JARVIS under Settings, Voice.'
+    else
+      say 'The wake word model could not be fetched, so "Hey JARVIS" stays off. To try again later, run in the install folder:'
+      say "  \"$PY\" scripts/get_wake_word.py"
+    fi
+  else
+    say 'The Python packages for the wake word could not be installed, so "Hey JARVIS" stays off. Everything else works.'
+    has_wake || rm -rf "$venv"
+  fi
+fi
+
+# -------------------------------------------------------------------------------- telling the Mac's own sound apart
+# A small program that reports how loud the Mac's own sound is (and nothing else), so a film is not taken for you.
+# Built here when Apple's command line tools are installed; otherwise the ready-built one from the download is used.
+helper="$INSTALL_DIR/bin/jarvis-sound-level"
+swift_source=""
+for candidate in "$here/sound_level.swift" "$SOURCE/installer/mac/sound_level.swift"; do
+  if [ -f "$candidate" ]; then swift_source="$candidate"; break; fi
+done
+if [ -n "$swift_source" ] && xcode-select -p >/dev/null 2>&1 && xcrun -f swiftc >/dev/null 2>&1; then
+  mkdir -p "$INSTALL_DIR/bin"
+  if xcrun swiftc -O -o "$helper.new" "$swift_source" >/dev/null 2>&1; then
+    mv -f "$helper.new" "$helper"
+  else
+    rm -f "$helper.new"
+  fi
+fi
+if [ -f "$helper" ]; then
+  chmod 755 "$helper"
+  # A program that arrived in a download is marked by macOS and refused when another program starts it. This one
+  # is part of what you are installing, so the mark is taken off this one file.
+  xattr -d com.apple.quarantine "$helper" 2>/dev/null || true
+  say "Installed the helper that tells the Mac's own sound from your voice."
+else
+  say "The helper that tells the Mac's own sound from your voice was not installed (it needs Apple's command line tools). JARVIS works without it."
+fi
 
 # ---------------------------------------------------------------------------------------------------------- vault
 firstrun=(-m jcc.firstrun --app-dir "$INSTALL_DIR" --yes)
@@ -173,7 +239,8 @@ if [ "$MAKE_APP" = 1 ]; then
   <key>CFBundleShortVersionString</key><string>${version}</string>
   <key>CFBundleVersion</key><string>${version}</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
-  <key>NSMicrophoneUsageDescription</key><string>JARVIS listens when you talk to it.</string>
+  <key>NSMicrophoneUsageDescription</key><string>JARVIS listens when you talk to it, and for "Hey JARVIS" when you have switched that on.</string>
+  <key>NSAppleEventsUsageDescription</key><string>JARVIS opens and works in other apps when you ask it to.</string>
   <key>NSHighResolutionCapable</key><true/>
 </dict>
 </plist>
@@ -213,3 +280,7 @@ say "  App:          $INSTALL_DIR"
 [ "$MAKE_APP" = 1 ] && say "  Open it:      $BUNDLE_DIR/JARVIS.app"
 say "  Uninstaller:  $INSTALL_DIR/uninstall.sh"
 say "  Or run:       cd \"$INSTALL_DIR\" && \"$PY\" -m jcc.desktop"
+say ""
+say "The first time JARVIS presses a button in another app, looks at the screen or listens, macOS asks you to allow it."
+say "You can also switch these on beforehand: System Settings, Privacy & Security, then Accessibility, Screen & System"
+say "Audio Recording, and Microphone. JARVIS's Connections page shows which are allowed."

@@ -211,6 +211,7 @@ class TestSystem(unittest.TestCase):
         with mock.patch("shutil.which", lambda name: "/usr/bin/" + name if name in ("chromium", "brave-browser") else None):
             self.assertEqual(system.browsers(), ["/usr/bin/chromium", "/usr/bin/brave-browser"])
 
+    @unittest.skipUnless(sys.platform == "win32", "Windows' own folder names")
     def test_browsers_on_windows_are_edge_then_chrome_then_brave(self):
         self.on("win32")
         root = Path(tempfile.mkdtemp(prefix="jcc-pf-"))

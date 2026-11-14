@@ -126,8 +126,10 @@ class TestConnectionsApi(GuiTestCase):
         status, data = self.req("GET", "/api/connections")
         self.assertEqual(status, 200)
         self.assertEqual([group[0] for group in data["groups"]], ["brain", "voice", "hands", "memory"])
-        self.assertEqual(len(data["items"]), 17)
-        self.assertEqual(data["summary"]["of"], 17)
+        from jcc import system
+        count = 17 + (2 if system.kind() == "mac" else 0)          # (a Mac also shows the two things macOS must allow)
+        self.assertEqual(len(data["items"]), count)
+        self.assertEqual(data["summary"]["of"], count)
         self.assertEqual(self.req("GET", "/api/connections", token=False)[0], 401)
         self.assertEqual(self.req("POST", "/api/connections", {"action": "check", "id": "nonsense"})[0], 400)
         self.assertEqual(self.req("POST", "/api/connections", {"action": "delete everything"})[0], 400)

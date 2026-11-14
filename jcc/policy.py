@@ -36,6 +36,11 @@ ALLOW, CONFIRM, DENY = "allow", "confirm", "deny"
 WITHOUT_PC = frozenset({"set_timer", "set_reminder", "list_reminders", "cancel_reminder", "weather", "where_to_watch", "remember", "forget", "add_note",
                         "read_web_page", "make_image", "list_projects", "create_project", "build_with_coding_agents", "connector", "use_accounts"})
 
+def _on_mac() -> bool:
+    from jcc import system
+    return system.kind() == "mac"
+
+
 OWN_WINDOW = re.compile(r"^JARVIS\b.*\b(?:Workspace|Listening)\b")   # JARVIS's own windows: looked at by their owner, never worked in by the assistant
 MAIN_WINDOW = re.compile(r"^JARVIS\b.*\bWorkspace\b")    # ... the app window itself (the other is the small "listening" window)
 PRIVATE_WINDOW = re.compile(
@@ -218,7 +223,10 @@ def reads_content(command: str) -> bool:
 def _norm(path: str) -> str:
     try:
         # Lower case on every system: a Mac's disk ignores case too, so "Vault/private" must count as "Vault/Private".
-        return os.path.normcase(os.path.realpath(os.path.expandvars(os.path.expanduser(str(path))))).replace("/", "\\").lower()
+        text = os.path.expandvars(os.path.expanduser(str(path)))
+        if os.sep != "\\":
+            text = text.replace("\\", "/")          # a path written the Windows way is still a path: "..\Private" must not slip past
+        return os.path.normcase(os.path.realpath(text)).replace("/", "\\").lower()
     except (OSError, ValueError):
         return str(path).lower().replace("/", "\\")
 
@@ -349,13 +357,27 @@ def _decide(tool: str, args: dict, ctx: Context) -> Decision:
 
     if tool == "press_keys":
         keys = set(str(args.get("keys", "")).lower().replace(" ", "").split("+"))
+        if _on_mac():
+            from jcc import macdesk
+            keys = macdesk.plain_keys(keys)            # ("command" and "win" are cmd, "option" is alt)
+            if macdesk.never(keys):
+                return _deny("That shortcut is reserved for macOS: it logs out, locks the Mac or force-quits.")
+            if keys == {"cmd", "space"}:
+                return _ask("risky", "Shall I open Spotlight?", "It can start any program.")
+            if {"cmd", "alt"} <= keys and ({"delete", "del", "backspace"} & keys):
+                return _ask("risky", "Shall I press " + "+".join(sorted(keys)) + "?", "This deletes for good, skipping the Trash.", core=True)
+            if keys in ({"cmd", "delete"}, {"cmd", "del"}, {"cmd", "backspace"}):
+                return _ask("careful" if careful else "risky", "Shall I press Command-Delete" + (f" in {ctx.window[:50]}?" if ctx.window else "?"),
+                            "This moves what is selected to the Trash.", core=True)
+            if careful and keys in ({"cmd", "q"}, {"cmd", "w"}, {"cmd", "shift", "w"}):
+                return _ask("careful", "Shall I press " + "+".join(sorted(keys)) + "?", "This closes something.")
         if {"ctrl", "alt"} <= keys and ({"delete", "del"} & keys):
             return _deny("That shortcut is reserved for Windows.")
         if "enter" in keys or "return" in keys:
             if TERMINAL_WINDOW.search(ctx.window or ""):
                 return _ask("risky", "Shall I press Enter in the command window?", "This runs whatever is typed there.")
             if MESSAGING_WINDOW.search(ctx.window or ""):
-                sends = "ctrl" in keys or bool(CHAT_WINDOW.search(ctx.window or ""))       # ctrl+enter sends mail; Enter sends a chat message
+                sends = "ctrl" in keys or "cmd" in keys or bool(CHAT_WINDOW.search(ctx.window or ""))   # ctrl+enter (cmd+enter on a Mac) sends mail; Enter sends a chat message
                 return _ask("send", f"Shall I send this in {ctx.window[:50]}?" if sends else f"Shall I press Enter in {ctx.window[:50]}?",
                             "This sends the message." if sends else "This may send a message.", core=sends)
         if keys in ({"win", "r"}, {"win", "x"}):

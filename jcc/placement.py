@@ -231,8 +231,8 @@ def press_full_screen(windows=None, press=None) -> bool:
         if not front or not MAIN_WINDOW.search(windows.title_of(front)):
             return False
         if press is None:
-            from jcc.computer import Desktop
-            press = Desktop().perform
+            from jcc import computer
+            press = computer.real_desktop().perform
         press({"action": "key", "keys": "f11"})
         return True
     except Exception:  # noqa: BLE001 - the page then uses its own full screen instead

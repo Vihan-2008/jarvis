@@ -79,10 +79,11 @@ def main(background: bool = False, listen: bool = False) -> int:
     _helper(python, "jcc.local_history", cfg, "local-history.log", env)
     _helper(python, "jcc.cloud_memory", cfg, "cloud-memory.log", env)
     _helper(python, "jcc.maintenance", cfg, "maintenance.log", env)
-    if system.kind() == "windows":
-        # Tray icon and the Ctrl+Alt+J shortcut. It exits at once if another copy is already running.
+    if system.kind() in ("windows", "mac"):
+        # Windows: the tray icon and the Ctrl+Alt+J shortcut. A Mac: the helper that listens for "Hey JARVIS".
+        # Either exits at once if another copy is already running.
         subprocess.Popen([python, "-m", "jcc.tray"], cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=system.no_window())
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=system.no_window(), **system.own_group())
     if not ready():
         with (cfg.state_dir / "service.log").open("a", encoding="utf-8") as log:
             subprocess.Popen([python, "-m", "jcc", "gui", "--no-browser"], cwd=ROOT,

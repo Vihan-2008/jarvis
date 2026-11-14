@@ -60,11 +60,7 @@ class Monitor:
 
     def _run(self) -> None:
         try:
-            if self.make_meter:
-                meter = self.make_meter()
-            else:
-                from jcc.winctl import OutputMeter
-                meter = OutputMeter()
+            meter = self.make_meter() if self.make_meter else system_meter()
             meter.open()
         except Exception:  # noqa: BLE001 - without a meter everything is simply treated as coming from the room
             self.failed_at = self.clock()
@@ -76,7 +72,7 @@ class Monitor:
                     self.add(self.clock(), meter.peak())
                 except Exception:  # noqa: BLE001 - the speakers were unplugged or changed: start again with the new ones
                     break
-                if self.clock() - opened > 8:               # follow a change of Windows' default speakers
+                if self.clock() - opened > 8 and getattr(meter, "reopen", True):     # follow a change of Windows' default speakers
                     meter.close()
                     meter.open()
                     opened = self.clock()
@@ -230,4 +226,17 @@ def levels_of(sound: bytes, piece: int = 640) -> list[float]:
     return [loudness(sound[at:at + piece]) for at in range(0, len(sound) - piece + 1, piece)]
 
 
-shared = Monitor() if os.name == "nt" else Monitor(meter=lambda: (_ for _ in ()).throw(OSError("Windows only")))
+def system_meter():
+    """What tells how loud this computer's own sound is: Windows' own meter, or on a Mac the small helper program that
+    listens to what the Mac plays (jcc/macsound.py). OSError where there is neither."""
+    from jcc import system
+    if system.kind() == "windows":
+        from jcc.winctl import OutputMeter
+        return OutputMeter()
+    if system.kind() == "mac":
+        from jcc.macsound import OutputMeter
+        return OutputMeter()
+    raise OSError("This system has no way to measure its own sound yet.")
+
+
+shared = Monitor()

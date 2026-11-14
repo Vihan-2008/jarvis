@@ -25,7 +25,10 @@ sys.path.insert(0, str(HERE.parent))
 from payload import REPO, app_files, version  # noqa: E402
 
 TOP = "JARVIS Installer"
-INSTALLER_FILES = ("install.sh", "uninstall.sh", "Install JARVIS.command")
+INSTALLER_FILES = ("install.sh", "uninstall.sh", "Install JARVIS.command", "sound_level.swift")
+# The helper that measures the Mac's own sound, when it was built just before on a Mac (build_helper.sh, in the release
+# workflow). install.sh builds it on the person's own Mac when it can, and uses this one otherwise.
+HELPER = ("dist/jarvis-sound-level", "bin/jarvis-sound-level")
 EXECUTABLE = 0o755
 PLAIN = 0o644
 
@@ -41,7 +44,9 @@ def contents(repo: Path = REPO) -> list[tuple[str, bytes, int]]:
         data = (repo / name).read_bytes()
         items.append((name, data.replace(b"\r\n", b"\n") if is_script(name) else data, EXECUTABLE if is_script(name) else PLAIN))
     for name in INSTALLER_FILES:
-        items.append((name, (HERE / name).read_bytes().replace(b"\r\n", b"\n"), EXECUTABLE))
+        items.append((name, (HERE / name).read_bytes().replace(b"\r\n", b"\n"), EXECUTABLE if is_script(name) else PLAIN))
+    if (repo / HELPER[0]).is_file():
+        items.append((HELPER[1], (repo / HELPER[0]).read_bytes(), EXECUTABLE))
     return items
 
 
@@ -67,7 +72,7 @@ def check_zip(target: Path) -> None:
             info = names.get(f"{TOP}/{name}")
             if info is None:
                 raise SystemExit(f"{name} is missing from {target}")
-            if info.create_system != 3 or not (info.external_attr >> 16) & stat.S_IXUSR:
+            if is_script(name) and (info.create_system != 3 or not (info.external_attr >> 16) & stat.S_IXUSR):
                 raise SystemExit(f"{name} is not executable in {target}")
             if b"\r" in z.read(info):
                 raise SystemExit(f"{name} has Windows line endings in {target}")
