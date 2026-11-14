@@ -75,7 +75,7 @@ jobs:
       - name: From the downloaded package, as a person would (its questions answered), then opened and uninstalled
         if: ${{ !cancelled() }}
         run: |
-          mkdir -p dist && cp "$RUNNER_TEMP/helper/jarvis-menu" "$RUNNER_TEMP/helper/jarvis-sound-level" dist/
+          mkdir -p dist && cp "$RUNNER_TEMP/helper/jarvis-menu" "$RUNNER_TEMP/helper/jarvis-sound-level" "$RUNNER_TEMP/helper/jarvis-launcher" dist/
           python installer/mac/build.py --out "$RUNNER_TEMP/package"
           ditto -x -k "$RUNNER_TEMP/package/JARVIS-mac.zip" "$RUNNER_TEMP/package/unpacked"
           setup="$RUNNER_TEMP/package/unpacked/JARVIS Installer/Install JARVIS.command"
@@ -88,6 +88,8 @@ jobs:
           agent="$HOME/Library/LaunchAgents/local.jarvis.background.plist"
           plutil -lint "$app/Contents/Info.plist" "$agent"
           test -s "$app/Contents/Resources/AppIcon.icns"
+          file "$app/Contents/MacOS/JARVIS" | grep -q "Mach-O" && echo "JARVIS.app holds a real program"
+          codesign --verify --verbose=1 "$app" && echo "JARVIS.app is signed on this Mac"
           plutil -p "$agent"
           test -f "$RUNNER_TEMP/Vault2/Start here.md"
           # Does macOS end what an app started once the app's own process has ended? (A JARVIS.app that opened a
@@ -113,6 +115,7 @@ jobs:
           if pgrep -f "Apps2/JARVIS.app/Contents/MacOS/JARVIS" >/dev/null; then echo "(the launcher is still running)"; fi
           curl -fsS -o /dev/null http://127.0.0.1:8765/ || { echo "JARVIS stopped once the app's launcher ended"; exit 1; }
           echo "JARVIS still answers 20 seconds after the app's launcher ended"
+          echo "the app's log:"; tail -n 5 "$HOME/Library/Logs/JARVIS/launcher.log" || true
           for i in $(seq 1 20); do pgrep -f "JARVIS2/bin/jarvis-menu" >/dev/null && break; sleep 1; done
           pgrep -fl "JARVIS2/bin/jarvis-menu" && echo "the menu-bar icon is running"
           bash "$RUNNER_TEMP/JARVIS2/uninstall.sh" --quiet
@@ -122,3 +125,23 @@ jobs:
           test ! -e "$RUNNER_TEMP/JARVIS2" && test ! -e "$app" && test ! -e "$agent"
           test -f "$RUNNER_TEMP/Vault2/Start here.md"
           echo "uninstalled: app, app bundle and login item gone; the notes vault kept"
+      - name: Opened from its icon with the notes in Documents (a folder macOS guards)
+        if: ${{ !cancelled() }}
+        run: |
+          vault="$HOME/Documents/JARVIS Vault (check)"
+          bash installer/mac/install.sh --quiet --no-obsidian --no-wake-word --no-login --install-dir "$RUNNER_TEMP/JARVIS3" \
+            --bundle-dir "$RUNNER_TEMP/Apps3" --vault "$vault"
+          app="$RUNNER_TEMP/Apps3/JARVIS.app"
+          open -g -j -a "$app" --args --background
+          for i in $(seq 1 90); do curl -fsS -o /dev/null http://127.0.0.1:8765/ && break; sleep 1; done
+          page="$(curl -fsS http://127.0.0.1:8765/ || true)"
+          token="$(printf '%s' "$page" | sed -n 's/.*const TOKEN="\([^"]*\)".*/\1/p' | head -n 1)"
+          echo "answers: $([ -n "$page" ] && echo yes || echo no)"
+          state="$(curl -fsS -H "X-JCC-Token: $token" http://127.0.0.1:8765/api/state || echo '{}')"
+          ok="$(printf '%s' "$state" | python3 -c 'import json, sys; print((json.load(sys.stdin).get("vault") or {}).get("ok"))' 2>/dev/null || echo unknown)"
+          echo "JARVIS, opened from its icon, can reach the notes vault in Documents: $ok"
+          echo "the app's log:"; tail -n 8 "$HOME/Library/Logs/JARVIS/launcher.log" || true
+          echo "the service's log:"; tail -n 8 "$HOME/Library/Application Support/JarvisCommand/service.log" || true
+          bash "$RUNNER_TEMP/JARVIS3/uninstall.sh" --quiet
+          rm -rf "$vault"
+          [ "$ok" = True ] || { echo "JARVIS opened from its icon could not reach the notes in Documents"; exit 1; }

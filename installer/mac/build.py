@@ -28,12 +28,13 @@ from payload import REPO, app_files, version  # noqa: E402
 
 TOP = "JARVIS Installer"
 PAYLOAD = ".jarvis-app"                 # (hidden in Finder: a person sees only the installer and the note)
-INSTALLER_FILES = ("install.sh", "uninstall.sh", "sound_level.swift", "menu_bar.swift")      # (in PAYLOAD)
+INSTALLER_FILES = ("install.sh", "uninstall.sh", "sound_level.swift", "menu_bar.swift", "launcher.swift")      # (in PAYLOAD)
 SHOWN_FILES = ("Install JARVIS.command", "Read me first.txt")                                # (at the top)
 # JARVIS's two small Mac programs (the one that measures the Mac's own sound, and the menu-bar icon with its shortcuts),
 # when they were built just before on a Mac (build_helper.sh, in the release workflow). install.sh builds them on the
 # person's own Mac when it can, and uses these otherwise.
-HELPERS = (("dist/jarvis-sound-level", "bin/jarvis-sound-level"), ("dist/jarvis-menu", "bin/jarvis-menu"))
+HELPERS = (("dist/jarvis-sound-level", "bin/jarvis-sound-level"), ("dist/jarvis-menu", "bin/jarvis-menu"),
+           ("dist/jarvis-launcher", "bin/jarvis-launcher"))
 EXECUTABLE = 0o755
 PLAIN = 0o644
 

@@ -3,6 +3,7 @@
 #
 #   jarvis-sound-level   measures the Mac's own sound                      (sound_level.swift)
 #   jarvis-menu          the menu-bar icon and the shortcuts from any app  (menu_bar.swift)
+#   jarvis-launcher      the program inside JARVIS.app                     (launcher.swift)
 #
 #   bash installer/mac/build_helper.sh [OUT_FOLDER]        (default: dist, beside the app)
 #
@@ -29,3 +30,4 @@ build() {   # build <program> <source>
 
 build jarvis-sound-level sound_level.swift
 build jarvis-menu menu_bar.swift
+build jarvis-launcher launcher.swift

@@ -134,7 +134,7 @@ trap 'rm -rf "$work"' EXIT
     ! -path './website/*' ! -path './dist/*' ! -path '*/__pycache__/*' ! -name '*.pyc' ! -name '.DS_Store' \
     ! -path './LEDGER.md' ! -path './scripts/deploy.py' ! -path './config/local.toml' ! -path './.python' \
     ! -path './.jarvis-files' ! -path './.app-bundle' ! -path './install.sh' ! -path './uninstall.sh' \
-    ! -path './Install JARVIS.command' ! -path './sound_level.swift' ! -path './menu_bar.swift' ! -path './.venv/*' \
+    ! -path './Install JARVIS.command' ! -path './sound_level.swift' ! -path './menu_bar.swift' ! -path './launcher.swift' ! -path './.venv/*' \
     ! -path './.login-agent' ! -path './Read me first.txt' | sed 's|^\./||' | LC_ALL=C sort ) > "$work/files"
 
 if [ "$SOURCE" != "$INSTALL_DIR" ]; then
@@ -229,6 +229,7 @@ install_program() {   # install_program <program> <source file> <what it is for>
 }
 install_program jarvis-sound-level sound_level.swift "the helper that tells the Mac's own sound from your voice"
 install_program jarvis-menu menu_bar.swift "the menu-bar icon and the keyboard shortcuts that work from any app"
+install_program jarvis-launcher launcher.swift "the program that starts JARVIS when you click its icon"
 
 # ---------------------------------------------------------------------------------------------------------- vault
 firstrun=(-m jcc.firstrun --app-dir "$INSTALL_DIR" --yes)
@@ -272,6 +273,9 @@ if [ "$MAKE_APP" = 1 ]; then
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSMicrophoneUsageDescription</key><string>JARVIS listens when you talk to it, and for "Hey JARVIS" when you have switched that on.</string>
   <key>NSAppleEventsUsageDescription</key><string>JARVIS opens and works in other apps when you ask it to.</string>
+  <key>NSDocumentsFolderUsageDescription</key><string>JARVIS keeps its memory as notes in a folder you chose, and reads and writes them there.</string>
+  <key>NSDesktopFolderUsageDescription</key><string>JARVIS opens and reads files on your Desktop when you ask it to.</string>
+  <key>NSDownloadsFolderUsageDescription</key><string>JARVIS opens and reads files in Downloads when you ask it to.</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSUIElement</key><true/>
@@ -296,16 +300,33 @@ PLIST
   else
     say "The app's icon could not be made, so JARVIS.app has the plain icon. $(head -n 1 "$work/icon.err" 2>/dev/null || true)"
   fi
-  # The launcher names the install folder; printf %q quotes it so any folder name is safe in the script.
-  {
-    printf '#!/bin/bash\n'
-    printf '# Starts JARVIS from its install folder. Written by the JARVIS installer.\n'
-    printf 'cd %q || exit 1\n' "$INSTALL_DIR"
-    printf 'PY="$(head -n 1 .python 2>/dev/null || true)"\n'
-    printf '[ -x "$PY" ] || PY="$(command -v python3)"\n'
-    printf 'exec "$PY" -m jcc.desktop "$@"\n'
-  } > "$bundle/Contents/MacOS/JARVIS"
+  # The program inside the app: a real one (launcher.swift), which macOS asks for by name when JARVIS needs the
+  # Documents folder or the microphone, and remembers. It reads the install folder from this file.
+  printf '%s\n' "$INSTALL_DIR" > "$bundle/Contents/Resources/install-dir"
+  rm -f "$bundle/Contents/MacOS/JARVIS"
+  if [ -x "$INSTALL_DIR/bin/jarvis-launcher" ]; then
+    cp "$INSTALL_DIR/bin/jarvis-launcher" "$bundle/Contents/MacOS/JARVIS"
+  else
+    # Without it (no Apple command line tools and no ready-built copy): the shell script JARVIS.app used to hold.
+    # printf %q quotes the install folder so any folder name is safe in the script.
+    {
+      printf '#!/bin/bash\n'
+      printf '# Starts JARVIS from its install folder. Written by the JARVIS installer.\n'
+      printf 'cd %q || exit 1\n' "$INSTALL_DIR"
+      printf 'PY="$(head -n 1 .python 2>/dev/null || true)"\n'
+      printf '[ -x "$PY" ] || PY="$(command -v python3)"\n'
+      printf 'mkdir -p "$HOME/Library/Logs/JARVIS"\n'
+      printf 'exec "$PY" -m jcc.desktop "$@" >>"$HOME/Library/Logs/JARVIS/launcher.log" 2>&1\n'
+    } > "$bundle/Contents/MacOS/JARVIS"
+    say "JARVIS.app holds a small script instead of its own program (Apple's command line tools would build the program)."
+  fi
   chmod 755 "$bundle/Contents/MacOS/JARVIS"
+  # Signed here, on this Mac ("ad hoc": no Apple certificate is involved), so macOS knows JARVIS as one and the same app
+  # from one opening to the next. What came in the download is not marked as downloaded any more: you chose to install it.
+  xattr -dr com.apple.quarantine "$bundle" 2>/dev/null || true
+  if ! codesign --force --deep -s - "$bundle" >/dev/null 2>&1; then
+    say "JARVIS.app could not be signed on this Mac; macOS may ask about it more often."
+  fi
   printf '%s\n' "$bundle" > "$INSTALL_DIR/.app-bundle"
   say "Made $bundle"
 fi
