@@ -14,6 +14,7 @@ Safety layers:
 from __future__ import annotations
 
 import json
+import time
 import os
 import subprocess
 import sys
@@ -108,7 +109,11 @@ class JobLauncher:
                agent: str | None = None, chat_id: str | None = None, context: str = "",
                manual_model: str = "auto", effort: str = "auto",image_ids=None) -> JobOutcome:
         lock = InstanceLock(self.cfg.state_dir / "launch.lock")
-        if not lock.acquire():
+        for _ in range(300):                      # another job is being scheduled at this moment: wait for it (up to a minute)
+            if lock.acquire():
+                break
+            time.sleep(0.2)
+        else:
             return JobOutcome("failed", "Another job is being scheduled. Please send again.", [])
         try:
             return self._launch(rid, kind, task, project, agent, chat_id, context, manual_model, effort,image_ids)
@@ -191,9 +196,9 @@ class JobLauncher:
         same_project = False
         for f in (self.vault.root / "Jobs").glob("*.md"):
             fm, _ = parse_frontmatter(f.read_text("utf-8"))
-            if f.stem != rid and fm.get("status") == "running" and (
-                    (proj and fm.get("project_key") == proj.key) or
-                    (chat_id and fm.get("chat_id") == chat_id)):
+            # Jobs on the same project take turns, so that their changes cannot collide. (Jobs of the same chat on
+            # different projects, or with no project, run at the same time.)
+            if f.stem != rid and fm.get("status") == "running" and proj and fm.get("project_key") == proj.key:
                 same_project = True
         from jcc.governor import settings as resource_settings
         max_running=resource_settings(cfg)['max_parallel_jobs'] or cfg.tier3_max_running

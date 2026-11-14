@@ -372,7 +372,7 @@ function drawTopButtons() {
     paneButtons.set(p.id, b); topRight.append(b);
   }
   const settingsB = el('button', { class: 'nv-icon', id: 'nv-settings', type: 'button', 'aria-label': 'Settings', data: { tip: 'Settings: connections, voice, appearance and more' } }, icon('gear'));
-  settingsB.onclick = () => $('info').click();
+  settingsB.onclick = () => window.Nova.voiceSettings ? window.Nova.voiceSettings() : $('info').click();     // (straight to Settings, as in Claude)
   topRight.append(settingsB);
   const moreB = el('button', { class: 'nv-icon nv-chat-only', type: 'button', 'aria-label': 'Chat options', data: { tip: 'Rename, star, export or delete this chat' } }, icon('more'));
   moreB.onclick = () => current && openPop(moreB, p => chatMenu(p, current), { right: true });
@@ -409,6 +409,7 @@ function drawTabs() {
 function hideNovaPanes() { panel.querySelectorAll('.nv-pane').forEach(n => n.classList.add('hidden')); }
 async function openPane(id) {
   const def = PANES.find(p => p.id === id); if (!def) return;
+  if (def.node && !panel.contains(def.node)) { box.querySelector('.nv-pane-card[data-pane="' + id + '"]')?.nvPutBack?.(); if (!panel.contains(def.node)) panel.append(def.node); }
   closePop(); currentPane = id; hideNovaPanes();
   try {
     if (def.node) { panel.querySelectorAll('.tool-content').forEach(n => n.classList.add('hidden')); panel.classList.remove('hidden'); def.node.classList.remove('hidden'); activeTool = 'nova-' + id; await def.show?.(); }
@@ -449,7 +450,13 @@ function dayGroup(ts) {
   const now = new Date(), start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
   return !ts ? 'Earlier' : ts >= start ? 'Today' : ts >= start - 86400 ? 'Yesterday' : ts >= start - 7 * 86400 ? 'Previous 7 days' : 'Earlier';
 }
-const row = c => '<div class="nv-row">' + (starred.has(c.id) ? '<i class="nv-star"></i>' : '') + '<button class="nav-item ' + (c.id === current ? 'active' : '') + '" data-chat="' + esc(c.id) + '">' + (runningChats.has(c.id) ? '<i class="nv-live" data-tip="JARVIS is working in this chat"></i>' : unread.has(c.id) ? '<i class="nv-unread" data-tip="New reply you have not read"></i>' : '') + esc(c.title || 'Untitled chat') + '</button><button class="nv-row-more" type="button" data-row-menu="' + esc(c.id) + '" aria-label="Options for this chat" data-tip="Rename, star or delete">' + icon('more') + '</button></div>';
+const foldedGroups = new Set((() => { try { return JSON.parse(store.get('nv-folded', '[]')) || []; } catch { return []; } })());
+document.addEventListener('click', e => {
+  const fold = e.target.closest?.('[data-fold]'), add = e.target.closest?.('[data-new-in]');
+  if (fold) { const k = fold.dataset.fold; foldedGroups.has(k) ? foldedGroups.delete(k) : foldedGroups.add(k); store.set('nv-folded', JSON.stringify([...foldedGroups])); listSig = ''; renderLists(); }
+  else if (add) { e.stopPropagation(); setWorkMode('code', true); selectProject(add.dataset.newIn); projectChip?.(); message.focus(); }
+});
+const row = c => '<div class="nv-row' + (c.nvChild ? ' nv-child' : '') + '">' + (starred.has(c.id) ? '<i class="nv-star"></i>' : '') + '<button class="nav-item ' + (c.id === current ? 'active' : '') + '" data-chat="' + esc(c.id) + '">' + (runningChats.has(c.id) ? '<i class="nv-live" data-tip="JARVIS is working in this chat"></i>' : unread.has(c.id) ? '<i class="nv-unread" data-tip="New reply you have not read"></i>' : '') + esc(c.title || 'Untitled chat') + '</button><button class="nv-row-more" type="button" data-row-menu="' + esc(c.id) + '" aria-label="Options for this chat" data-tip="Rename, star or delete">' + icon('more') + '</button></div>';
 renderLists = function () {
   if (!state) return;
   const openGroups = new Set([...$('chats').querySelectorAll('details[open]')].map(e => e.dataset.group));
@@ -464,10 +471,26 @@ renderLists = function () {
     html = sources.map(source => { const group = items.filter(c => c.source === source); return '<details class="history-group" data-group="' + esc(source) + '" ' + (openGroups.has(String(source)) ? 'open' : '') + '><summary>' + esc(labels[source] || source) + '<span>' + group.length + '</span></summary><div class="nav-list">' + group.slice(0, 50).map(row).join('') + (group.length > 50 ? '<div class="nav-empty">Search to find more.</div>' : '') + '</div></details>'; }).join('') || '<div class="nav-empty">Chats you archive or import appear here.</div>';
   } else if (q) html = items.slice(0, 60).map(row).join('') || '<div class="nav-empty">No chats match that search.</div>';
   else {
-    const stars = items.filter(c => starred.has(c.id)), rest = items.filter(c => !starred.has(c.id)).slice(0, 80); html = '';
+    const stars = items.filter(c => starred.has(c.id)), rest = items.filter(c => !starred.has(c.id)).slice(0, 120); html = '';
     if (stars.length) html += '<div class="section-label">Starred</div>' + stars.map(row).join('');
-    let group = '';
-    for (const c of rest) { const g = dayGroup(c.updated); if (g !== group) { group = g; html += '<div class="section-label">' + g + '</div>'; } html += row(c); }
+    // As in Claude Code: the chats under their project, newest project first, each folding away; "+" starts a chat in it.
+    const byProject = new Map();
+    for (const c of rest) { const k = c.project || ''; if (!byProject.has(k)) byProject.set(k, []); byProject.get(k).push(c); }
+    const grouped = !selectedProject && !(byProject.size === 1 && byProject.has(''));
+    body.classList.toggle('nv-grouped', grouped);
+    if (grouped) {
+      for (const [k, unordered] of byProject) {
+        const ids = new Set(unordered.map(c => c.id)), list = [];
+        for (const c of unordered) if (!c.parent || !ids.has(c.parent)) { list.push(c); for (const kid of unordered.filter(x => x.parent === c.id)) list.push({ ...kid, nvChild: true }); }
+        const name = k ? projectName(k) : workMode === 'code' ? 'No project' : 'Chats', closed = foldedGroups.has(k || '-');
+        html += '<div class="nv-pgroup' + (closed ? ' closed' : '') + '"><div class="nv-pgroup-head"><button type="button" class="nv-pgroup-name" data-fold="' + esc(k || '-') + '" aria-expanded="' + !closed + '">' +
+          '<span>' + esc(name) + '</span>' + icon('chev') + '</button>' + (k ? '<button type="button" class="nv-icon nv-pgroup-add" data-new-in="' + esc(k) + '" aria-label="New chat in ' + esc(name) + '" data-tip="New chat in ' + esc(name) + '">' + icon('plus') + '</button>' : '') +
+          '</div>' + (closed ? '' : list.map(row).join('')) + '</div>';
+      }
+    } else {
+      let group = '';
+      for (const c of rest) { const g = dayGroup(c.updated); if (g !== group) { group = g; html += '<div class="section-label">' + g + '</div>'; } html += row(c); }
+    }
     html = html || '<div class="nav-empty">' + (workMode === 'code' ? 'No code sessions yet. Choose a project and describe what to build.' : 'No chats yet. Type a message to start one.') + '</div>';
   }
   if (html !== listSig) { listSig = html; $('chats').innerHTML = html; }
@@ -483,11 +506,12 @@ async function setStar(id, on) {
   on ? starred.add(id) : starred.delete(id); listSig = ''; renderLists();
 }
 // "Delete project": it leaves JARVIS. Its folder stays where it is unless the box is ticked, and then it goes to the
-// Recycle Bin (never deleted for good). Its chats and its notes are kept.
+// Recycle Bin (never deleted for good). Its chats are deleted with it (to Deleted chats, where they can be brought back).
 const BIN = /Mac/.test(navigator.platform) ? 'Trash' : 'Recycle Bin';
 async function deleteProject(key) {
   const p = (state?.projects || []).find(x => x.key === key); if (!p) return;
-  const d = dialog('<h2>Delete the project ' + esc(p.name) + '?</h2><p>It is taken out of JARVIS. Its chats and notes are kept.</p>' +
+  const n = (state?.chats || []).filter(c => c.project === key).length;
+  const d = dialog('<h2>Delete the project ' + esc(p.name) + '?</h2><p>It is taken out of JARVIS' + (n ? ', with its ' + n + (n === 1 ? ' chat' : ' chats') + ' (you can bring them back from Deleted chats)' : '') + '. Its notes are kept.</p>' +
     '<label class="nv-check"><input type="checkbox" data-trash> Also move its folder to the ' + BIN + '</label>' +
     '<p class="small">' + esc(p.path || '') + '</p><div class="actions"><button class="plain" data-no>Cancel</button><button class="primary danger" data-yes>Delete project</button></div>');
   d.querySelector('[data-no]').onclick = () => d.close();
@@ -495,12 +519,18 @@ async function deleteProject(key) {
     const trash = d.querySelector('[data-trash]').checked; d.close();
     try {
       const done = await api('/api/project/remove', { project: key, trash });
-      if (selectedProject === key) selectProject('');
-      notify(done.trashed ? 'Deleted. Its folder is in the ' + BIN + '.' : 'Deleted from JARVIS. Its folder is still at ' + (done.kept || 'the same place') + '.');
+      if (selectedProject === key || state?.chats?.some(c => c.id === current && c.project === key)) selectProject('');
+      notify('Deleted' + (done.chats ? ', with ' + done.chats + (done.chats === 1 ? ' chat' : ' chats') : '') + '. ' + (done.trashed ? 'Its folder is in the ' + BIN + '.' : 'Its folder is still at ' + (done.kept || 'the same place') + '.'));
       await refresh();
     } catch (error) { toast(error.message); }
   };
 }
+// A chat in the list: right-click for its menu (rename, star, delete...), as in Claude.
+document.addEventListener('contextmenu', e => {
+  const chatRow = e.target.closest?.('#chats [data-chat]'); if (!chatRow) return;
+  e.preventDefault();
+  openPop(chatRow, p => chatMenu(p, chatRow.dataset.chat));
+});
 // A project in the list: right-click for its folder, or to delete it.
 document.addEventListener('contextmenu', e => {
   const row = e.target.closest?.('.project-item[data-project]'); if (!row || row.dataset.project === 'all') return;
@@ -604,7 +634,7 @@ function stepsHtml(rid, message) {
 }
 function workBlock(message) {
   const rid = message.receipt, live = LIVE.has(message.status), events = eventsCache.get(rid) || [];
-  const open = openWork.has(rid) ? openWork.get(rid) : false;            // (one line until it is opened, as in Claude Code)
+  const open = openWork.has(rid) ? openWork.get(rid) : store.get('nv-transcript', 'normal') === 'verbose';   // (one line until it is opened, as in Claude Code; Verbose: open)
   const span = events.length > 1 ? events[events.length - 1].at - events[0].at : 0;
   const latest = events[events.length - 1];
   const did = tally(events);
@@ -624,6 +654,7 @@ function messageHtml(m, i, c) {
   const live = LIVE.has(m.status), job = m.fast ? (LIVE.has(m.status) || !!m.steps?.length) : (!!m.agent || (m.status && m.status !== 'done')), streamed = liveText.get(m.receipt);
   let html = (m.receipt && (job || live)) ? workBlock(m) : '';
   if (m.content?.startsWith('**From the planner**')) return '<details class="nv-planner"><summary>' + icon('note') + '<b>The planner wrote the next steps</b></summary><div class="content">' + rich(m.content.replace(/^\*\*From the planner\*\*\s*/, '')) + '</div></details>';
+  if (m.child) html += '<button class="nv-open-child" type="button" data-open-chat="' + esc(m.child) + '">' + icon('arrow') + 'Open its chat</button>';
   if (m.receipt && !m.fast && (m.job || m.agent) && !live && /^(done|needs_approval)$/.test(m.status || '')) html += '<details class="nv-changed" data-job="' + esc(m.receipt) + '"><summary>' + icon('edit') + '<b>See what changed</b></summary><div class="nv-changed-body">Reading the changes…</div></details>';
   if (m.fast && m.status === 'paused' && m.resumes) html += '<div class="nv-waits">' + icon('clock') + '<span>Waiting for an AI to be available again. JARVIS carries on with this by itself at about ' +
     esc(new Date(m.resumes * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })) + '.</span><button class="plain" type="button" data-nv-wait="now" data-rid="' + esc(m.receipt) + '">Try now</button>' +
@@ -655,7 +686,7 @@ function reveal(node, text, rid) {
 }
 function draw(c) {
   const fresh = (c?.id || '') !== lastChatId; lastChatId = c?.id || '';
-  if (fresh) { rendered = []; box.replaceChildren(); wasLive.clear(); pinned = true; }
+  if (fresh) { box.querySelectorAll('.nv-pane-card').forEach(card => card.nvPutBack?.()); rendered = []; box.replaceChildren(); wasLive.clear(); pinned = true; }
   const messages = c?.messages || [];
   if (!messages.length) { rendered = []; box.innerHTML = '<div class="welcome"></div><div class="nv-empty">' + (body.classList.contains('nv-panel') ? 'Type a message below to start this chat.' : '') + '</div>'; return; }
   let thread = box.querySelector('.nv-thread'); if (!thread) { box.replaceChildren(); thread = el('div', { class: 'nv-thread' }); box.append(thread); rendered = []; }
@@ -678,8 +709,68 @@ function draw(c) {
   });
   if (busy && messages[messages.length - 1].role === 'user') wasLive.set('i' + messages.length, true);
   while (rendered.length > list.length) rendered.pop().node.remove();
+  drawChecklist(c);
   requestAnimationFrame(stick);
+  // A chat opens at its latest message, as in Claude, even when pictures and cards finish drawing a moment later.
+  if (fresh) for (const ms of [60, 250, 700]) setTimeout(() => { if (pinned && lastChatId === (c?.id || '')) box.scrollTop = box.scrollHeight; }, ms);
 }
+/* ---------- the master chat's checklist: everything this chat set going, one line each, opening to its progress ---------- */
+const checklistOpen = new Set();
+const JOB_MARK = { running: '<i class="nv-spin"></i>', queued: '<i class="nv-ck wait"></i>', paused: '<i class="nv-ck wait"></i>', done: '<i class="nv-ck done"></i>',
+  failed: '<i class="nv-ck bad"></i>', cancelled: '<i class="nv-ck off"></i>', needs_approval: '<i class="nv-ck ask"></i>' };
+function jobsOf(c) {
+  const messages = c?.messages || [];
+  return messages.map((m, i) => ({ m, i })).filter(({ m }) => m.role === 'assistant' && m.receipt && !m.fast && (m.job || m.agent) && /^\d{8}-\d{6}-[a-z0-9]{4}$/.test(m.receipt))
+    .map(({ m, i }) => {
+      const asked = [...messages.slice(0, i)].reverse().find(x => x.role === 'user');
+      const title = String(m.task || (asked ? asked.content.split('\n\nAttached: ')[0] : '') || 'Coding job').split('\n')[0].slice(0, 160);
+      return { rid: m.receipt, status: m.status || 'running', title, message: m, child: m.child || '' };
+    });
+}
+function drawChecklist(c) {
+  let spot = box.querySelector(':scope > .nv-checklist');
+  const jobs = jobsOf(c);
+  if (jobs.length < 2 && !(jobs.length === 1 && LIVE.has(jobs[0].status))) { spot?.remove(); return; }      // (one finished job needs no list)
+  if (!spot) { spot = el('section', { class: 'nv-checklist', 'aria-label': 'Everything in this chat' }); }
+  const asks = box.querySelector(':scope > .nv-asks');
+  if (asks) asks.before(spot); else if (spot !== box.lastElementChild) box.append(spot);
+  const done = jobs.filter(j => j.status === 'done').length;
+  const sig = JSON.stringify(jobs.map(j => [j.rid, j.status, j.title])) + [...checklistOpen].join();
+  if (spot.dataset.sig === sig) { for (const rid of checklistOpen) fillChecklistRow(spot, rid); return; }
+  spot.dataset.sig = sig;
+  spot.innerHTML = '<div class="nv-checklist-head"><b>Everything in this chat</b><span>' + done + ' of ' + jobs.length + ' done</span></div>' +
+    jobs.map(j => '<details class="nv-ck-row ' + esc(j.status) + '" data-ck="' + esc(j.rid) + '"' + (checklistOpen.has(j.rid) ? ' open' : '') + '><summary>' + (JOB_MARK[j.status] || JOB_MARK.queued) +
+      '<span>' + esc(j.title) + '</span><small>' + esc(WORDS[j.status] || j.status) + '</small></summary><div class="nv-ck-body">Reading its progress…</div></details>').join('');
+  for (const rid of checklistOpen) fillChecklistRow(spot, rid);
+  stick();
+}
+async function fillChecklistRow(spot, rid) {
+  const row = spot.querySelector('[data-ck="' + rid + '"]'); if (!row) return;
+  const job = jobsOf(chat).find(j => j.rid === rid); if (!job) return;
+  try {
+    const [timeline, live] = await Promise.all([api('/api/timeline?id=' + encodeURIComponent(rid)).catch(() => null), LIVE.has(job.status) ? api('/api/live?id=' + encodeURIComponent(rid)).catch(() => null) : null]);
+    const events = [...(timeline?.events || [])];
+    for (const step of live?.steps || []) events.push({ stage: 'tool', message: step.text, at: step.at });
+    events.sort((a, b) => (a.at || 0) - (b.at || 0)); eventsCache.set(rid, events);
+    const body = row.querySelector('.nv-ck-body'); if (!body) return;
+    const did = tally(events);
+    body.innerHTML = (did ? '<p class="nv-ck-did">' + esc(did) + '</p>' : '') + '<ol class="nv-steps">' + stepsHtml(rid, job.message) + '</ol>' +
+      '<div class="nv-ck-foot">' + (LIVE.has(job.status) ? '<button class="plain" type="button" data-nv-stop="' + esc(rid) + '">' + icon('stop') + 'Stop</button>' : '') +
+      (job.child ? '<button class="plain" type="button" data-open-chat="' + esc(job.child) + '">Open its chat</button>' : '<button class="plain" type="button" data-ck-show="' + esc(rid) + '">Show in the chat</button>') + '</div>';
+    stick();
+  } catch {}
+}
+box.addEventListener('toggle', e => {
+  const row = e.target.closest?.('.nv-ck-row[data-ck]'); if (!row) return;
+  if (row.open) { checklistOpen.add(row.dataset.ck); fillChecklistRow(row.closest('.nv-checklist'), row.dataset.ck); } else checklistOpen.delete(row.dataset.ck);
+}, true);
+box.addEventListener('click', e => {
+  const b = e.target.closest?.('[data-ck-show]'); if (!b) return;
+  const block = box.querySelector('.nv-work[data-rid="' + b.dataset.ckShow + '"]')?.closest('.nv-msg');
+  if (block) { pinned = false; block.scrollIntoView({ behavior: 'smooth', block: 'center' }); block.classList.add('nv-flash'); setTimeout(() => block.classList.remove('nv-flash'), 1400); }
+});
+// While something in the checklist is running, its open rows are read again every few seconds.
+setInterval(() => { const spot = box.querySelector(':scope > .nv-checklist'); if (!spot || document.hidden) return; for (const rid of checklistOpen) { const j = jobsOf(chat).find(x => x.rid === rid); if (j && LIVE.has(j.status)) fillChecklistRow(spot, rid); } }, 3000);
 renderChat = function (c) {
   chat = c; busy = sending.has(c?.id || 'new') || (sending.has('new') && !c?.messages?.length);
   if (c) unread.delete(c.id);
@@ -830,7 +921,7 @@ renderState = function (d) {
 /* ---------- home / chat mode ---------- */
 const wrap = document.querySelector('.composer-wrap');
 function updateMode() {
-  const has = !!chat?.messages?.length, voice = body.classList.contains('nv-voice') && !body.classList.contains('nv-panel');
+  const has = !!chat?.messages?.length || !!box.querySelector('.nv-local'), voice = body.classList.contains('nv-voice') && !body.classList.contains('nv-panel');
   const nextHome = voice || (!has && !body.classList.contains('nv-panel') && !(busy && current));
   if (nextHome === home && body.classList.contains(home ? 'nv-home' : 'nv-chat')) return;
   const first = wrap.getBoundingClientRect(); home = nextHome;
@@ -1008,13 +1099,38 @@ function localReply(title, html) {
   let thread = box.querySelector('.nv-thread');
   if (!thread) { box.replaceChildren(); thread = el('div', { class: 'nv-thread' }); box.append(thread); body.classList.remove('nv-home'); }
   const node = el('article', { class: 'nv-msg assistant nv-local' }, '<div class="nv-local-head">' + icon('slash') + '<b>' + esc(title) + '</b><button class="nv-icon" type="button" aria-label="Close" data-tip="Close">' + icon('x') + '</button></div><div class="content">' + html + '</div>');
-  node.querySelector('.nv-local-head button').onclick = () => node.remove();
-  thread.append(node); pinned = true; requestAnimationFrame(stick);
+  node.querySelector('.nv-local-head button').onclick = () => { node.remove(); updateMode(); };
+  thread.append(node); pinned = true; updateMode(); requestAnimationFrame(stick);
   return node;
 }
 const PANE_COMMANDS = { files: 'files', terminal: 'terminal', browser: 'browser', artifacts: 'preview', agents: 'agents', pair: 'pair', court: 'court', security: 'security',
   routines: 'routines', activity: 'activity', efficiency: 'insights', tasks: 'queue', recall: 'recall', shared: 'shared', control: 'computer' };
 const MODE_IDS = { auto: 'sending', manual: 'all', edits: 'edits', 'accept-edits': 'edits', plan: 'plan', bypass: 'bypass' };
+// A feature's panel, shown inside a chat card instead of beside the chat: the same controls, in the conversation.
+// (Files, Terminal and Browser stay beside the chat, as tools; so do Artifacts, which open next to what made them.)
+const BESIDE = new Set(['files', 'terminal', 'browser', 'preview']);
+async function paneInChat(id) {
+  const def = PANES.find(p => p.id === id); if (!def) return;
+  if (BESIDE.has(id)) return openPane(id);
+  const there = box.querySelector('.nv-pane-card[data-pane="' + id + '"]');
+  if (there) { there.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+  let node = def.node;
+  if (!node) {           // an older panel: it is drawn once, then its part is taken into the chat
+    await openPane(id);
+    node = [...panel.querySelectorAll('.tool-content')].find(n => !n.classList.contains('hidden'));
+    if (!node) return;
+  }
+  const home = node.parentElement;
+  const card = localReply(def.label, ''); card.dataset.pane = id; card.classList.add('nv-pane-card');
+  node.classList.remove('hidden', 'tool-content'); node.classList.add('nv-in-chat');
+  card.querySelector('.content').append(node);
+  if (body.classList.contains('nv-panel')) await closePanel();
+  const putBack = () => { if (!node.classList.contains('nv-in-chat')) return; node.classList.remove('nv-in-chat'); node.classList.add('tool-content', 'hidden'); (home || panel).append(node); };
+  card.nvPutBack = putBack;
+  card.querySelector('.nv-local-head button').onclick = () => { putBack(); card.remove(); updateMode(); };
+  if (def.node) { try { await def.show?.(); } catch (error) { toast(error.message); } }
+  requestAnimationFrame(() => card.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+}
 async function runCommand(name, words) {
   try {
     if (name === 'work') {
@@ -1022,11 +1138,21 @@ async function runCommand(name, words) {
       const row = r => '<li><span class="nv-dot ' + esc(r.state || '') + '"></span><b>' + esc(r.title || 'Working') + '</b>' + (r.project ? ' <small>' + esc(r.project) + '</small>' : '') + '<small>' + esc(r.doing || '') + '</small>' +
         (r.chat ? '<button class="plain" type="button" data-open-chat="' + esc(r.chat) + '">Open</button>' : '') + '</li>';
       const working = now?.working || [], recent = (now?.recent || []).slice(0, 6), held = now?.held || [];
-      const node = localReply('Work', (waiting.length ? '<h4>Waiting for you</h4>' + window.Nova.waitingCards(waiting) : '') +
+      const heldBack = waiting.filter(r => r.kind === 'blocked');
+      const node = localReply('Work', (waiting.length ? '<h4>Waiting for you</h4>' + (heldBack.length > 1 ? '<p class="small">' + heldBack.length + ' jobs were held for what they mention. ' +
+        '<button class="plain" type="button" data-cancel-held>Cancel all ' + heldBack.length + '</button></p>' : '') + window.Nova.waitingCards(waiting) : '') +
         '<h4>Working now</h4>' + (working.length ? '<ul class="nv-worklist">' + working.map(row).join('') + '</ul>' : '<p class="small">Nothing is running.</p>') +
         (held.length ? '<h4>Waiting to start</h4><ul class="nv-worklist">' + held.map(row).join('') + '</ul>' : '') +
         (recent.length ? '<h4>Finished lately</h4><ul class="nv-worklist">' + recent.map(row).join('') + '</ul>' : ''));
       node.querySelectorAll('.nv-next[data-kind="review"]').forEach(card => window.Nova.fillChanges?.(card));
+      // Held jobs often pile up as the same request sent again: they can be cancelled together (nothing was started).
+      const all = node.querySelector('[data-cancel-held]');
+      if (all) all.onclick = async () => {
+        if (!(await confirmBox({ title: 'Cancel all ' + heldBack.length + ' held jobs?', text: 'None of them was started, so nothing in your projects changes. You can ask again any time.', ok: 'Cancel them' }))) return;
+        all.disabled = true; let done = 0;
+        for (const r of heldBack) { try { await api('/api/permissions', { action: 'decide', kind: 'blocked', id: r.id, yes: false }); done++; } catch {} }
+        notify(done + (done === 1 ? ' held job cancelled.' : ' held jobs cancelled.')); node.remove(); window.Nova.permissionsChanged?.(); runCommand('work');
+      };
       return;
     }
     if (name === 'mode' || name === 'permissions') {
@@ -1034,7 +1160,7 @@ async function runCommand(name, words) {
       if (want) return void window.Nova.setPermissionMode?.(want);
       const current = window.Nova.permissionMode?.() || 'sending';
       return void localReply('Mode', '<ul class="nv-modelist">' + [['sending', 'Auto', 'JARVIS decides. It asks only before sending, deleting or paying.'], ['all', 'Manual', 'Always ask before making changes.'],
-        ['edits', 'Accept edits', 'File edits happen by themselves; commands and other changes ask first.'], ['plan', 'Plan', 'Make a plan first, and change nothing until you say go ahead.'], ['bypass', 'Bypass permissions', 'Never ask, except before paying.']]
+        ['edits', 'Accept edits', 'File edits happen by themselves; commands and other changes ask first.'], ['plan', 'Plan', 'Make a plan first, and change nothing until you say go ahead.'], ['bypass', 'Bypass permissions', 'Never ask. (What JARVIS never does stays off.)']]
         .map(([id, label, about], i) => '<li><button class="' + (id === current ? 'primary' : 'plain') + '" type="button" data-set-mode="' + id + '">' + (i + 1) + '. ' + label + '</button><small>' + about + '</small></li>').join('') + '</ul><p class="small">Shift+Tab in the message box goes to the next mode.</p>');
     }
     if (name === 'status' || name === 'usage') {
@@ -1060,7 +1186,7 @@ async function runCommand(name, words) {
     if (name === 'folder') { const key = chat?.project || selectedProject; return void (key ? revealProject(key) : localReply('Open file location', '<p>Choose a project first: /projects.</p>')); }
     if (name === 'settings') return void window.Nova.voiceSettings?.(words || undefined);
     if (['voice', 'connections', 'models', 'updates'].includes(name)) return void window.Nova.voiceSettings?.(name === 'connections' ? 'connections' : name);
-    if (PANE_COMMANDS[name]) return void openPane(PANE_COMMANDS[name]);
+    if (PANE_COMMANDS[name]) return void paneInChat(PANE_COMMANDS[name]);
   } catch (error) { toast(error.message); }
 }
 document.addEventListener('click', e => {
@@ -1140,7 +1266,7 @@ form.onsubmit = async e => {
   if (command) {   // one of JARVIS's own commands is done here; one of the owner's goes on to JARVIS, which knows what it stands for
     const name = command[1].toLowerCase(), words = (command[2] || '').trim();
     if (name === 'research' && words) { setResearch(true); text = words; }
-    else if (name === 'dryrun' || name === 'checklist') { message.value = words; grow(); beforeSending(name === 'dryrun' ? 'Dry run' : 'Checklist'); return; }   // what follows stays in the box, unsent
+    else if (BEFORE_COMMANDS[name]) { message.value = words; grow(); beforeSending(BEFORE_COMMANDS[name]); return; }   // what follows stays in the box, unsent
     else if ((name === 'mode' || name === 'permissions') && words && runBuiltin(name, words)) { message.value = ''; grow(); return; }
     else if (!words && runBuiltin(name)) { message.value = ''; grow(); return; }
   }
@@ -1204,7 +1330,7 @@ toolsB.onclick = () => openPop(toolsB, p => {
   item(p, 'Research on the web', 'search', () => { setResearch(!window.Nova.research); message.focus(); }, { note: 'Answer with a report and its sources (/research)', tick: !!window.Nova.research });
   if (workMode === 'code') {
     item(p, 'Ultracode', 'spark', () => setUltra(!ultra), { note: 'The strongest AI, thinking hardest. Uses more allowance (/ultracode)', tick: ultra });
-    item(p, 'Security check', 'shield', () => window.Nova.openPane('security'), { note: 'Look for the usual holes in a project (/security)' });
+    item(p, 'Security check', 'shield', () => paneInChat('security'), { note: 'Look for the usual holes in a project (/security)' });
   }
   p.append(el('hr'));
   const effort = el('label', {}, 'How carefully to think'); const select = el('select', { 'aria-label': 'How carefully to think' }); select.innerHTML = $('effort').innerHTML; select.value = $('effort').value;
@@ -1221,9 +1347,27 @@ toolsB.onclick = () => openPop(toolsB, p => {
 const BEFORE = [['Dry run', 'pulse', 'What JARVIS would do, without doing it'], ['Checklist', 'check', 'What will count as done'],
   ['Context', 'eye', 'What JARVIS will read before answering'], ['Compare rewrite', 'copy', 'Your message beside the improved one']];
 // One of those four, from the menu, the Dry run button in Code, or /dryrun and /checklist. Nothing is sent and nothing is started.
-function beforeSending(name) {
-  if ((name === 'Dry run' || name === 'Checklist') && !message.value.trim()) { toast('Type what you want first. ' + name + ' then shows ' + (name === 'Dry run' ? 'what JARVIS would do with it, without doing it.' : 'what will count as done.')); message.focus(); return; }
+// The four "Before you send" choices are commands too: /dryrun, /checklist, /context and /compare, each with what follows.
+const BEFORE_COMMANDS = { dryrun: 'Dry run', checklist: 'Checklist', context: 'Context', compare: 'Compare rewrite' };
+async function beforeSending(name) {
+  if (!message.value.trim()) { toast('Type what you want first, then ' + ({ 'Dry run': 'Dry run shows what JARVIS would do with it, without doing it.', Checklist: 'Checklist shows what will count as done.', Context: 'Context shows what JARVIS will read before answering.', 'Compare rewrite': 'Compare rewrite shows your message beside the improved one.' }[name] || name)); message.focus(); return; }
+  const before = new Set(document.querySelectorAll('dialog[open]'));
   legacyButton($('easy-option-body'), name)?.click();
+  let last = '', steady = 0;
+  for (let i = 0; i < 80; i++) {                      // (its answer is drawn in a box of its own: it is shown in the chat instead)
+    await new Promise(resolve => setTimeout(resolve, 150));
+    const d = [...document.querySelectorAll('dialog[open]')].find(x => !before.has(x)); if (!d) continue;
+    const now = d.innerHTML; steady = now === last && d.textContent.trim().length > 20 && !/^\s*(Loading|One moment|Checking)/i.test(d.textContent) ? steady + 1 : 0; last = now;
+    if (steady < 2) continue;
+    const copy = el('div'); copy.innerHTML = now;                 // (the window's own drawing of it, already made safe)
+    copy.querySelectorAll('button, dialog, form [type=submit], h2').forEach(n => n.remove());
+    copy.querySelectorAll('[id]').forEach(n => n.removeAttribute('id'));
+    d.close();
+    const card = localReply(name, copy.innerHTML + '<div class="nv-local-foot"><button class="plain" type="button" data-before-edit>Change my message</button><button class="primary" type="button" data-before-send>Send it</button></div>');
+    card.querySelector('[data-before-send]').onclick = () => { card.remove(); form.requestSubmit(); };
+    card.querySelector('[data-before-edit]').onclick = () => { card.remove(); message.focus(); };
+    return;
+  }
 }
 function modelLabel() { const option = $('model')?.selectedOptions[0]; $('nv-model-name').textContent = !option || option.value === 'auto' ? 'Auto' : option.textContent; }
 modelB.onclick = () => openPop(modelB, p => {

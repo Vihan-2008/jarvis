@@ -20,8 +20,7 @@ Four kinds of things wait:
 
 This file decides nothing by itself and widens nothing. It lists what the parts that own these questions say is
 waiting, and hands each answer back to the part that owns it, which checks it again. Changing the mode changes only
-how often the owner is asked: what is refused outright stays refused in every mode, and paying is asked about in
-every mode.
+how often the owner is asked: what is refused outright stays refused in every mode, Bypass permissions included.
 """
 from __future__ import annotations
 
@@ -36,7 +35,7 @@ MODES = (("sending", "Auto", "JARVIS decides. It asks only before sending, delet
          ("all", "Manual", "Always ask before making changes."),
          ("edits", "Accept edits", "File edits happen by themselves; commands and other changes ask first."),
          ("plan", "Plan", "Make a plan first, and change nothing until you say go ahead."),
-         ("bypass", "Bypass permissions", "Never ask, except before paying."))
+         ("bypass", "Bypass permissions", "Never ask. (What JARVIS never does stays off.)"))
 OLDER = {"risky": ("Ask before risky things", "The setting from earlier versions.")}
 MOST = 20                      # requests listed at once
 KINDS = ("assistant", "job", "review", "blocked")

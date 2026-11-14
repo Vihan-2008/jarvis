@@ -20,7 +20,7 @@ How much is asked is the owner's choice (LEVELS), the same modes as Claude Code'
             (commands, installing, pressing keys in other apps) waits for a yes, as in careful mode.
   plan      "Plan": nothing is changed yet. JARVIS looks, then writes a plan and asks to go ahead.
   all       "Manual": before every action that changes something on the PC.
-  bypass    "Bypass permissions": nothing is asked, except before paying (money is never spent unasked).
+  bypass    "Bypass permissions": nothing is asked. (What is never done stays refused, in this mode too.)
   risky     (from earlier versions: also before anything risky, and everything in careful mode.)
 What is never done (idea 1) does not depend on the level.
 """
@@ -456,7 +456,7 @@ def needs_owner(decision: Decision, ctx: Context) -> bool:
     if decision.verdict != CONFIRM:
         return False
     if ctx.level == "bypass":
-        return decision.money
+        return False                             # the owner chose to be asked nothing (what is never done stays refused)
     if ctx.level in ("sending", "plan"):
         return decision.core
     if ctx.level == "all":

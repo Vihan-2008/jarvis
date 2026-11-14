@@ -245,7 +245,7 @@ class WorkspaceApiTests(GuiTestCase):
         self.assertEqual(len(c["messages"]), 2)
         status, again = self.req("POST", "/api/chat/send", {"id": c["id"], "text": "explain more", "mode": "chat"})
         self.assertEqual(len(again["messages"]), 4)
-        self.assertEqual(len(self.spawned), 1)  # follow-up queues behind the first native-agent response
+        self.assertEqual(len(self.spawned), 2)  # several requests at once: the follow-up does not wait for the first answer
         note = (self.vault / "Jobs" / (again["messages"][-1]["receipt"] + ".md")).read_text("utf-8")
         self.assertIn("what is gravity", note)
         self.assertEqual(self.transport.calls, [])  # native Claude/GPT chat, not the old free API tier

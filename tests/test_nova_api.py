@@ -59,14 +59,14 @@ class TestNovaApi(GuiTestCase):
         self.assertTrue(state["jobs"])
         self.assertEqual(state["jobs"][0]["chat"], chat["id"])
 
-    def test_two_chats_run_side_by_side_and_a_third_waits(self):
+    def test_four_chats_run_side_by_side_and_a_fifth_waits(self):
         ids = []
-        for n in range(3):
+        for n in range(5):
             _, chat = self.req("POST", "/api/chats", {"title": f"chat {n}"})
             _, out = self.req("POST", "/api/chat/send", {"id": chat["id"], "text": f"Summarise topic number {n} for me", "mode": "chat"})
             ids.append((chat["id"], out["messages"][-1]["status"]))
-        self.assertEqual([status for _, status in ids], ["running", "running", "queued"])
-        self.assertEqual(len(self.spawned), 2)
+        self.assertEqual([status for _, status in ids], ["running", "running", "running", "running", "queued"])
+        self.assertEqual(len(self.spawned), 4)
         _, state = self.req("GET", "/api/state")
         self.assertEqual({job["chat"] for job in state["jobs"]}, {cid for cid, _ in ids})
 

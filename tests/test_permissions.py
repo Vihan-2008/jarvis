@@ -67,7 +67,8 @@ class TestPermissions(GuiTestCase):
         self.assertEqual([asks("edits", *x) for x in (new, replace, command, install, email)], [False, False, False, True, True],
                          "Accept edits: file edits by themselves; installing, sending and the like ask")
         self.assertIs(asks("bypass", *install), False)
-        self.assertEqual([asks("bypass", *x) for x in (new, replace, command, email, pay)], [False, False, False, False, True], "Bypass: only paying is ever asked")
+        self.assertEqual([asks("bypass", *x) for x in (new, replace, command, email, pay)], [False, False, False, False, False], "Bypass: nothing is asked")
+        self.assertEqual(asks("bypass", "type_text", {"text": "4111 1111 1111 1111"}, window="Pay with card - Bank"), "refused", "and what is never done stays refused")
         self.assertEqual([asks("plan", *x) for x in (new, replace, command, email)], ["refused", "refused", "refused", "refused"], "Plan: nothing is changed yet")
         self.assertIs(asks("plan", "read_file", {"path": "C:/work/notes.txt"}), False, "but looking is fine while planning")
         self.assertIn("plan", policy.decide("run_command", {"command": "dir"}, policy.Context(level="plan")).reason.lower())

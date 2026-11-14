@@ -991,10 +991,12 @@ const row = (label, control, note) => '<label class="nv-field"><span>' + label +
 const check = (id, label, note) => '<label class="assistant-check"><input type="checkbox" id="' + id + '"> <span>' + label + (note ? '<small>' + note + '</small>' : '') + '</span></label>';
 const pick = (id, entries) => '<select id="' + id + '">' + entries.map(([value, text]) => '<option value="' + esc(value) + '">' + esc(text) + '</option>').join('') + '</select>';
 // The sections of Settings, in groups as Claude has them, and the words each can be found by.
-const SECTIONS = [[['connect', 'Connections', 'keys'], ['models', 'AI models', 'spark'], ['usage', 'Usage', 'clock']],
-  [['assistant', 'Assistant', 'shield'], ['voice', 'Voice', 'mic'], ['email', 'Email', 'note'], ['people', 'Assistants', 'layers']],
-  [['skills', 'Skills', 'box'], ['mods', 'Customize', 'sliders'], ['updates', 'Updates', 'retry']]];
-const FINDS = { connect: 'keys api claude codex groq gemini openai elevenlabs perplexity connect sign in microphone muted helpers', models: 'model ai gpt claude research who answers fast',
+const SECTIONS = [[['connect', 'Connections', 'keys'], ['models', 'AI models & accounts', 'spark'], ['usage', 'Usage', 'clock']],
+  [['appearance', 'Appearance', 'palette'], ['assistant', 'Assistant', 'shield'], ['voice', 'Voice', 'mic'], ['email', 'Email', 'note'], ['people', 'Assistants', 'layers']],
+  [['skills', 'Skills', 'box'], ['mods', 'Customize', 'sliders'], ['updates', 'Updates', 'retry']],
+  [['everyday', 'Everyday use', 'gear'], ['memory', 'Chats & memory', 'note'], ['advanced', 'Advanced', 'code']]];
+const FINDS = { everyday: 'text size movement startup sign in windows project preferences workspace desktop app', memory: 'chats import export backup restore memory browser connection history',
+  advanced: 'expert terminal diagnostics developer tools controls', appearance: 'theme dark light colour color chat view transcript verbose steps detail', connect: 'keys api claude codex groq gemini openai elevenlabs perplexity connect sign in microphone muted helpers', models: 'model ai gpt claude chatgpt codex account sign in log in subscription api key research who answers fast',
   usage: 'allowance tokens cost spend limits left', assistant: 'mode permissions ask auto manual plan bypass pc control computer persona name light theme sleep standin resume',
   voice: 'microphone speakers listening speaking wake word hey jarvis language whisper dictation sound', email: 'mail gmail outlook send', people: 'assistants personas helpers',
   skills: 'skills packs scan install', mods: 'commands hooks panels status line slash mods', updates: 'version update install restart signed' };
@@ -1004,7 +1006,7 @@ async function openSettings(tab = 'assistant') {
   const nav = SECTIONS.map(group => group.map(([id, label, glyph]) => '<button type="button" data-tab="' + id + '">' + icon(glyph) + '<span>' + label + '</span></button>').join('')).join('<hr>');
   const d = dialog('<div class="nv-set-head"><h2>Settings</h2><button class="nv-icon" data-close aria-label="Close">' + icon('x') + '</button></div>' +
     '<div class="nv-set-main"><aside class="nv-set-side"><label class="nv-set-search">' + icon('search') + '<input type="search" placeholder="Search" aria-label="Search settings"></label>' +
-    '<nav class="nv-set-tabs">' + nav + '</nav></aside><section class="nv-set-right"><h3 class="nv-set-title"></h3><div class="nv-set-body"></div></section></div>', 'nv-settings');
+    '<nav class="nv-set-tabs">' + nav + '</nav><button type="button" class="nv-set-foot" data-keys>API keys' + icon('arrow') + '</button></aside><section class="nv-set-right"><h3 class="nv-set-title"></h3><div class="nv-set-body"></div></section></div>', 'nv-settings');
   const pane = d.querySelector('.nv-set-body'), saved = () => notify('Saved.');
   let showing = '';   // the tab on screen. A tab that was waiting for an answer checks this before it draws, so it never writes over another tab.
   d.querySelector('[data-close]').onclick = () => d.close();
@@ -1137,7 +1139,7 @@ async function openSettings(tab = 'assistant') {
       row('Mode', pick('as-ask', [['sending', 'Auto (recommended)'], ['all', 'Manual'], ['edits', 'Accept edits'], ['plan', 'Plan'], ['bypass', 'Bypass permissions'],
         ...(options.ask === 'risky' ? [['risky', 'Ask before risky things (older setting)']] : [])]),
         'How much JARVIS asks before it acts, as in Claude Code. Also the chip in the message bar, and Shift+Tab there. You can answer out loud: “yes” or “no”') +
-      '<p class="small nv-never">' + SHIELD + '<span>Never done, whatever you choose: typing passwords or card numbers, reading saved passwords, and acting on banking, payment or password-manager windows. Paying is always asked; in every mode but Bypass permissions, so are sending a message or email, deleting, and commands that install or download something.</span></p>' +
+      '<p class="small nv-never">' + SHIELD + '<span>Never done, whatever you choose: typing passwords or card numbers, reading saved passwords, and acting on banking, payment or password-manager windows. In every mode but Bypass permissions, JARVIS asks before paying, sending a message or email, deleting, and commands that install or download something. With Bypass permissions it asks nothing.</span></p>' +
       '<h3>About you</h3><label>Anything JARVIS should always keep in mind<textarea id="as-persona" rows="3" maxlength="1200" placeholder="For example: Call me Sam. Keep answers short. I am learning Python."></textarea></label>' +
       '<p class="small">JARVIS also remembers things you tell it (“remember that…”). They are in the note <b>System / JARVIS Memory</b> in your vault, where you can read and edit them.</p>' +
       '<h3>This computer</h3>' + row('Light mode', pick('as-light', [['auto', 'Automatic (on for PCs with 8 GB or less)'], ['on', 'On — use less memory'], ['off', 'Off']]), 'Fewer effects and only one AI kept ready');
@@ -1285,6 +1287,37 @@ async function openSettings(tab = 'assistant') {
   }
   // After connecting or disconnecting one: the list as it is now, without looking round the PC again.
   const refreshModels = async () => { await loadServices(false); if (showing === 'models' && pane.isConnected) drawModels('', false); };
+  // Accounts (jcc/accounts.py): each one says whether it is signed in; Sign in starts its own sign-in page.
+  async function drawAccounts(spot, fresh) {
+    if (!spot) return;
+    let rows = [];
+    try { rows = (await api('/api/accounts', { action: 'status', fresh: !!fresh })).accounts; } catch (error) { spot.innerHTML = '<p class="small">' + esc(error.message) + '</p>'; return; }
+    if (!spot.isConnected) return;
+    spot.innerHTML = rows.map(a => '<div class="nv-field nv-account" data-account="' + esc(a.id) + '"><span>' + esc(a.name) + '<small>' + esc(a.about) + '</small>' +
+      '<small class="nv-account-state ' + (a.signed_in ? 'ok' : '') + '">' + (a.signed_in ? 'Signed in' + (a.how ? ' ' + esc(a.how) : '') : a.installed ? 'Not signed in' : esc(a.install)) + '</small></span>' +
+      '<div class="nv-account-do">' + (!a.installed ? '' : a.signed_in ? '<button class="plain" type="button" data-sign-out>Sign out</button>' : '<button class="primary" type="button" data-sign-in>Sign in</button>') +
+      (a.installed ? '<button class="plain" type="button" data-recheck>Check</button>' : '') + '</div></div>').join('');
+    for (const line of spot.querySelectorAll('[data-account]')) {
+      const id = line.dataset.account, name = rows.find(a => a.id === id)?.name || id;
+      const inB = line.querySelector('[data-sign-in]'), outB = line.querySelector('[data-sign-out]'), again = line.querySelector('[data-recheck]');
+      if (inB) inB.onclick = async () => {
+        inB.disabled = true;
+        try {
+          await api('/api/accounts', { action: 'sign_in', id });
+          notify('Sign in to ' + name + ' on the page that opened in your browser. This shows it once it is done.');
+          // It is asked again a few times while the sign-in page is open.
+          for (const wait of [8000, 15000, 30000, 60000]) setTimeout(() => { if (spot.isConnected) drawAccounts(spot, true); }, wait);
+        } catch (error) { toast(error.message); inB.disabled = false; }
+      };
+      if (outB) outB.onclick = async () => {
+        if (!(await N.confirmBox({ title: 'Sign out of ' + name + '?', text: 'JARVIS (and the ' + (id === 'claude' ? 'Claude Code' : 'Codex') + ' app itself) can no longer use your ' + name + ' subscription until you sign in again.', ok: 'Sign out', danger: true }))) return;
+        outB.disabled = true;
+        try { await api('/api/accounts', { action: 'sign_out', id }); notify('Signed out of ' + name + '.'); } catch (error) { toast(error.message); }
+        drawAccounts(spot, true);
+      };
+      if (again) again.onclick = () => { again.disabled = true; drawAccounts(spot, true); };
+    }
+  }
   function drawModels(opened, looking) {
     const one = s => '<div class="nv-link nv-ai" data-id="' + esc(s.id) + '" data-state="' + (s.connected ? 'ok' : 'off') + '"><span class="nv-dot"></span>' +
       '<div class="nv-link-text"><div class="nv-ai-name"><b>' + esc(s.name) + '</b>' + (s.free ? '<span class="nv-tag">Free key</span>' : '') + (s.local ? '<span class="nv-tag">On this PC</span>' : '') +
@@ -1295,13 +1328,15 @@ async function openSettings(tab = 'assistant') {
       '<div class="nv-link-do">' + (s.connected ? '<button class="plain" data-off>Disconnect</button>' : '<button class="primary" data-connect>' + (s.local ? 'Check' : 'Connect') + '</button>') +
       (s.get && !s.connected ? '<a class="plain" href="' + esc(s.get) + '" target="_blank" rel="noopener">' + (s.local ? 'Get it' : 'Get a key') + '</a>' : '') + '</div></div>';
     const on = services.filter(s => s.connected), rest = services.filter(s => !s.connected);
-    pane.innerHTML = '<h3>Who answers</h3>' + row('JARVIS’s brain', pick('mo-model', brainChoices()), 'For talking, quick questions and controlling the PC. Building software has its own choice, next to the message box.') +
+    pane.innerHTML = '<h3>Accounts</h3><p class="small">Sign in with your own subscription, as in T3 Code: no key needed. Each one signs in on its own page, in your browser.</p><div class="nv-accounts" data-accounts><p class="small nv-set-wait"><i class="nv-spin"></i>Asking each one whether it is signed in…</p></div>' +
+      '<h3>Who answers</h3>' + row('JARVIS’s brain', pick('mo-model', brainChoices()), 'For talking, quick questions and controlling the PC. Building software has its own choice, next to the message box.') +
       check('mo-standin', 'When that AI reaches its usage limit, carry on with another one', 'The same request simply continues with the next connected AI, and JARVIS tells you. It switches back by itself when the limit is over.') +
       check('mo-resume', 'If nothing can answer, carry on by itself as soon as something can', 'The request waits, and is picked up where it stopped. You are told when it happens.') +
-      '<h3>Connected</h3>' + (on.length ? on.map(one).join('') : '<p class="small">Only Claude so far. Connect at least one more so that JARVIS can keep going when Claude’s allowance runs out. Groq and Gemini have free keys.</p>') +
-      '<h3>More AI services</h3>' + (looking ? '<p class="small nv-set-wait"><i class="nv-spin"></i>Looking for models running on this PC…</p>' : '') + rest.map(one).join('') +
+      '<h3>API keys: connected</h3>' + (on.length ? on.map(one).join('') : '<p class="small">None yet. Connect at least one so that JARVIS can keep going when Claude’s allowance runs out. Groq and Gemini have free keys.</p>') +
+      '<h3>API keys: more AI services</h3>' + (looking ? '<p class="small nv-set-wait"><i class="nv-spin"></i>Looking for models running on this PC…</p>' : '') + rest.map(one).join('') +
       '<p class="small">A key is kept in Windows Credential Manager on this PC and sent only to the service it belongs to. JARVIS never buys anything: paid services charge your own account with them.</p>';
     bind('mo-model', options.model, 'model', setAssistant); bind('mo-standin', options.standin !== false, 'standin', setAssistant); bind('mo-resume', options.resume !== false, 'resume', setAssistant);
+    drawAccounts(pane.querySelector('[data-accounts]'));
     for (const line of pane.querySelectorAll('.nv-ai')) {
       const id = line.dataset.id, service = services.find(s => s.id === id), box = line.querySelector('.nv-keyrow'), save = line.querySelector('[data-save]');
       const connect = line.querySelector('[data-connect]'), off = line.querySelector('[data-off]'), model = line.querySelector('[data-model]');
@@ -1533,15 +1568,45 @@ async function openSettings(tab = 'assistant') {
     if (busy.size) { all.disabled = true; all.lastChild.textContent = 'Checking…'; }
     all.onclick = () => { for (const item of data.items) if (item.check && !busy.has(item.id)) run(item.id); };
   }
-  const tabs = { connect: connectTab, voice: voiceTab, models: modelsTab, skills: skillsTab, mods: modsTab, usage: usageTab, assistant: assistantTab, people: peopleTab, email: emailTab,
-    updates: updatesTab };
+  // Appearance, as in Claude: the theme, and how much of its work JARVIS shows in a chat.
+  function appearanceTab() {
+    const seg = (name, value, choices) => '<div class="nv-segrow" role="radiogroup" data-seg="' + name + '">' + choices.map(([v, label]) => '<button type="button" role="radio" data-v="' + v + '" class="' + (v === value ? 'on' : '') + '" aria-checked="' + (v === value) + '">' + label + '</button>').join('') + '</div>';
+    const rowHtml = (label, note, control) => '<div class="nv-field"><span>' + label + '<small>' + note + '</small></span>' + control + '</div>';
+    pane.innerHTML = rowHtml('Theme', 'Follow Windows, or always light or dark.', seg('theme', N.store.get('nv-theme', 'system'), [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']])) +
+      rowHtml('Default chat view', 'Normal shows each piece of work as one line you can open; Verbose shows every step.', seg('transcript', N.store.get('nv-transcript', 'normal'), [['normal', 'Normal'], ['verbose', 'Verbose']]));
+    pane.querySelectorAll('[data-seg]').forEach(group => group.querySelectorAll('button').forEach(b => b.onclick = () => {
+      group.querySelectorAll('button').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', String(x === b)); });
+      if (group.dataset.seg === 'theme') N.setTheme(b.dataset.v); else { N.store.set('nv-transcript', b.dataset.v); N.refreshMode?.(); }
+      saved();
+    }));
+  }
+  // The older settings, shown in place: their own part of the page is lent to this section while it is on screen.
+  const lent = { node: null, home: null, next: null };
+  const giveBack = () => { if (!lent.node) return; lent.home?.insertBefore(lent.node, lent.next && lent.next.parentNode === lent.home ? lent.next : null); lent.node = null; };
+  d.addEventListener('close', giveBack);
+  const olderTab = section => () => {
+    const node = document.getElementById('settings-body'), dlg = document.getElementById('settings-dialog');
+    if (!node || !dlg || typeof window.openSettings !== 'function') { pane.innerHTML = '<p class="small">These settings are not available here.</p>'; return; }
+    if (!lent.node) { lent.node = node; lent.home = node.parentNode; lent.next = node.nextSibling; }
+    window.openSettings(section);
+    if (dlg.open) dlg.close();
+    pane.replaceChildren(node);
+  };
+  function advancedTab() {
+    pane.innerHTML = '<div class="nv-field"><span>Advanced tools<small>The terminal, detailed diagnostics and every expert control, shown in the window.</small></span><div class="nv-account-do"><button class="primary" type="button" data-advanced>Show advanced tools</button></div></div>';
+    pane.querySelector('[data-advanced]').onclick = () => { d.close(); document.querySelector('[data-easy-advanced]')?.click(); };
+  }
+  const tabs = { everyday: olderTab('app'), memory: olderTab('memory'), advanced: advancedTab, connect: connectTab, voice: voiceTab, models: modelsTab, skills: skillsTab, mods: modsTab, usage: usageTab, assistant: assistantTab, people: peopleTab, email: emailTab,
+    updates: updatesTab, appearance: appearanceTab };
   // A tab that has to ask for something says so while it waits: no tab is ever simply empty.
   const show = name => {
+    if (lent.node && !['everyday', 'memory'].includes(name)) giveBack();
     showing = name; d.querySelectorAll('.nv-set-tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === name)); pane.replaceChildren(); pane.scrollTop = 0;
     d.querySelector('.nv-set-title').textContent = (SECTIONS.flat().find(([id]) => id === name) || [, ''])[1]; tabs[name]();
     setTimeout(() => { if (showing === name && pane.isConnected && !pane.firstChild) pane.innerHTML = '<p class="small nv-set-wait"><i class="nv-spin"></i>One moment…</p>'; }, 250);
   };
   d.querySelectorAll('.nv-set-tabs button').forEach(b => b.onclick = () => show(b.dataset.tab));
+  d.querySelector('[data-keys]').onclick = () => show('connect');        // (keys are kept with the connections)
   // Search: the sections whose name or settings match what is typed; Enter opens the first of them.
   const search = d.querySelector('.nv-set-search input');
   search.oninput = () => {

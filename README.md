@@ -13,16 +13,20 @@ The AI comes from the accounts you already have.
 - **Talk to it.** "Hey JARVIS", then say what you want. It can be interrupted, and it tells its own voice from yours.
 - **It does things on your PC.** Opens apps and pages, finds and writes files, runs commands, fills in forms.
   How much it asks is a mode, as in Claude Code: **Auto** (the usual: it asks only before sending, deleting or
-  paying), **Manual**, **Accept edits**, **Plan** and **Bypass permissions**. Paying is asked about in every mode.
+  paying), **Manual**, **Accept edits**, **Plan** and **Bypass permissions** (it asks nothing; what it never does,
+  such as typing passwords or card numbers, stays off).
   When it does ask, the question is a card at the end of the chat with its answers on it, and the work carries on.
-- **Give it a prompt and it does the rest.** A request becomes a job for Claude Code or Codex in its own copy of
-  your project (a git worktree), and it reports in the chat you asked in: one line per step ("Ran 3 commands,
-  edited 4 files ›"), and a line that opens to the diff. When the project's checks pass, the change goes into your
-  project by itself, with Undo; there is no time limit. In Manual mode it waits for you to keep it. A planner and a
-  builder can work as a pair, in the same chat.
-- **Everything else is a /command.** `/work`, `/mode`, `/status`, `/projects`, `/undo`, `/folder` (open the
-  project's folder), `/court`, `/pair`, `/security`, `/routines`, `/agents` and the rest answer in the chat; the
-  side panel holds only Files, Terminal and Browser. Projects can be opened in Explorer or Finder, and deleted
+- **Give it a prompt and it does the rest.** The chat you ask in becomes the project's **Master** chat, with one
+  checklist of everything it set going (each line opens to its progress). Each piece of work gets a chat of its own,
+  named after what it does, under the Master in the sidebar. Jobs run for Claude Code or Codex in their own copy of
+  your project (a git worktree), four at a time; when the project's checks pass, the change goes in by itself, with
+  Undo, and there is no time limit. In Manual mode a change waits for you to keep it.
+- **Sign in with your own account,** as in T3 Code: Settings, AI models & accounts signs in to Claude (Claude Code)
+  and ChatGPT (Codex) with your subscriptions. API keys for other services are still there.
+- **Everything else is a /command, answered in the chat.** Type `/` for two lists: Features (`/work`, `/mode`,
+  `/status`, `/projects`, `/undo`, `/folder`, `/dryrun`, `/checklist`, `/context`, `/compare`, `/court`, `/pair`,
+  `/security`, `/routines`, `/agents`...) and Skills, plugins & mods. Each answers in the chat, the Court and the
+  security check included; only Files, Terminal and Browser sit beside it. Projects can be opened in Explorer or Finder, and deleted
   (their folder goes to the Recycle Bin only if you tick the box).
 - **Security check.** Finds the usual holes in a project, has the ones you tick fixed in a copy, shows you the
   change, applies it, and can undo it.

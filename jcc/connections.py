@@ -52,9 +52,9 @@ def overview(cfg) -> list[dict]:
     from jcc import assistant, mailer, speech
     items = [
         _agent(cfg, "claude", "Claude", "JARVIS's mind. Uses your Claude subscription through Claude Code; no API key is needed.", True,
-               "Install Claude Code, then open a terminal, type claude and sign in with your Claude account."),
+               "Install Claude Code, then press Sign in in Settings, AI models & accounts, and sign in with your Claude account."),
         _agent(cfg, "codex", "GPT (Codex)", "A second AI for building software. Optional.", False,
-               "Install the Codex CLI and sign in with your ChatGPT account. JARVIS works without it."),
+               "Install the Codex CLI, then press Sign in in Settings, AI models & accounts. JARVIS works without it."),
     ]
     from jcc import providers
     others = [providers.label(cfg, ident).split(" (")[0] for ident in providers.CATALOG if providers.connected(cfg, ident)]

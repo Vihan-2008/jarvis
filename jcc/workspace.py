@@ -104,7 +104,8 @@ def create(cfg: Config, name: str, kind: str = "python") -> dict:
 
 
 def remove(cfg: Config, key: str, trash: bool = False) -> dict:
-    """Delete a project from JARVIS. Its folder is left where it is, unless its owner also asked for it to go to the Recycle
+    """Delete a project from JARVIS, and its chats with it (they go to Deleted chats, where they can be brought back, as
+    when one chat is deleted). Its folder is left where it is, unless its owner also asked for it to go to the Recycle
     Bin (Trash on a Mac): never deleted for good, so it can be put back from there. Its notes in the vault are kept."""
     lock = InstanceLock(cfg.state_dir / "projects.lock")
     if not lock.acquire():
@@ -122,8 +123,17 @@ def remove(cfg: Config, key: str, trash: bool = False) -> dict:
         del registry[key]
         atomic_write(path, json.dumps(registry, indent=2))
         cfg.projects.pop(key, None)
+        from jcc.chats import Chats
+        chats, gone = Chats(cfg), []
+        for chat in chats.list():
+            if chat.get("project") == key:
+                try:
+                    chats.set_deleted(chat["id"], True)
+                    gone.append(chat["id"])
+                except (OSError, ValueError):
+                    continue
         moved = bool(trash) and folder.is_dir() and _may_trash(cfg, folder) and to_trash(folder)
-        return {"removed": key, "trashed": moved, "kept": "" if moved else str(folder)}
+        return {"removed": key, "trashed": moved, "kept": "" if moved else str(folder), "chats": len(gone)}
     finally:
         lock.release()
 

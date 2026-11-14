@@ -55,7 +55,8 @@ function fill(p) {
     N.item(p, (i + 1) + '.  ' + m.name, GLYPH[id], () => setMode(id), { note: m.about, tick: info.mode === id, keep: true });
   });
   if (info.mode === 'risky') p.append(el('p', { class: 'small nv-perm-more' }, 'In force now: the older setting "Ask before risky things". Choose one of these to change it.'));
-  const here = openChatId(), elsewhere = info.pending.filter(r => r.chat !== here);
+  const here = openChatId(), kids = new Set((() => { try { return (state?.chats || []).filter(c => c.parent === here).map(c => c.id); } catch { return []; } })());
+  const elsewhere = info.pending.filter(r => r.chat !== here && !kids.has(r.chat));
   if (elsewhere.length) {
     p.append(el('hr'), el('h5', {}, 'Waiting in other chats'));
     for (const r of elsewhere) N.item(p, r.question, KIND_GLYPH[r.kind] || 'help', () => goTo(r), { note: (r.title || r.detail || '').slice(0, 90) + (r.project ? ' · ' + r.project : '') });
@@ -147,7 +148,9 @@ function host() {
   return spot;
 }
 function drawCards(force) {
-  const here = openChatId(), mine = info.pending.filter(r => r.chat && r.chat === here), plan = planCard();
+  // This chat's own, and those of the work it set going (each piece of work has a chat of its own, under this Master).
+  const here = openChatId(), kids = new Set((() => { try { return (state?.chats || []).filter(c => c.parent === here).map(c => c.id); } catch { return []; } })());
+  const mine = info.pending.filter(r => r.chat && (r.chat === here || kids.has(r.chat))), plan = planCard();
   if (plan) mine.push(plan);
   const spot = host(); if (!spot) { drawnCards = ''; return; }
   const sig = here + JSON.stringify(mine.map(r => [r.kind, r.id, r.mark || '', r.question, r.detail]));

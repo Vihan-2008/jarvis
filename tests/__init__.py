@@ -2,6 +2,13 @@
 import os
 
 os.environ.setdefault("JCC_NO_LOCAL_CONFIG", "1")
+
+# On GitHub's machines a run that hangs is cut off with nothing said. There, every thread's place is written out after
+# twenty minutes (the whole suite takes about six), and the run stops, so a hang says where it is.
+if os.environ.get("GITHUB_ACTIONS") == "true":
+    import faulthandler
+    import sys
+    faulthandler.dump_traceback_later(1200, exit=True, file=sys.stderr)
 """Every test runs away from the real app: nothing here may read or write JARVIS's own folders on this PC."""
 import atexit
 import os

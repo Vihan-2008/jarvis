@@ -106,11 +106,16 @@ class Chats:
                 body += [f"[[{receipts.receipt_rel(m['receipt']).removesuffix('.md')}|Job details]] · {m.get('status', '')}", ""]
         self.vault.write(f"Conversations/{chat['id']}.md", render_note(chat, "\n".join(body)))
 
-    def create(self, title: str = "New chat", project: str | None = None) -> dict:
+    def create(self, title: str = "New chat", project: str | None = None, parent: str | None = None) -> dict:
+        """A new chat. parent: the Master chat it belongs to (a piece of work the agents do for a request made there)."""
         if project and project not in self.cfg.projects:
             raise ValueError("Project not found.")
+        if parent is not None and not CHAT_ID.fullmatch(str(parent)):
+            raise ValueError("Invalid chat.")
         chat = {"id": receipts.new_id(), "title": redact(title.strip()[:100] or "New chat"),
                 "project": project, "updated": time.time(), "messages": []}
+        if parent:
+            chat["parent"] = parent
         self.save(chat)
         return chat
 
@@ -152,7 +157,7 @@ class Chats:
                 if local is None:
                     prior=cached.get(stem,{})
                     local=prior.get('has_local_work') if prior.get('signature')==signature else any(m.get('receipt') for m in self.get(stem).get('messages',[]))
-                row={k:metadata.get(k) for k in ('id','title','project','updated','source','source_id','archived')}
+                row={k:metadata.get(k) for k in ('id','title','project','updated','source','source_id','archived','parent')}
                 row['workspace']=not metadata.get('archived') and (metadata.get('pinned') or not metadata.get('source') or bool(metadata.get('project')) or bool(local))
                 out.append(row);current[stem]={'signature':signature,'has_local_work':bool(local)}
             except (ValueError,OSError):continue
@@ -207,9 +212,18 @@ class Chats:
                     chat["title"] = message["content"][:70]
             chat["updated"] = time.time()
             self.save(chat)
-            return chat
         finally:
             lock.discard()
+        if message and chat.get("parent") and message.get("receipt") and message.get("role") == "assistant":
+            # A piece of work in a chat of its own: its Master chat hears how it is going (its line and its checklist).
+            content = str(message.get("content") or "").split("\n\n", 1)[0][:400]
+            try:
+                self.update(chat["parent"], message={"role": "assistant", "receipt": message["receipt"], "job": True, "child": cid,
+                                                     **{k: message[k] for k in ("status", "agent", "model") if message.get(k)},
+                                                     "content": content or "Working."})
+            except (OSError, ValueError):
+                pass
+        return chat
 
     def forget(self, cid: str, receipt: str) -> bool:
         """Take one exchange out of a chat again (something overheard that was not meant for JARVIS).

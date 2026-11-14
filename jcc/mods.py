@@ -38,6 +38,8 @@ BUILTIN = (("work", "What is running, waiting for you and finished, here in the 
            ("ultracode", "Code with the strongest AI, thinking as hard as it can (on or off)"),
            ("dryrun", "Show what JARVIS would do with what follows, without doing it"),
            ("checklist", "Show what will count as done for what follows"),
+           ("context", "Show what JARVIS will read before answering what follows"),
+           ("compare", "Show what follows beside the improved rewrite of it"),
            ("files", "The project's files"),
            ("terminal", "A terminal"),
            ("browser", "A web browser beside the chat"),

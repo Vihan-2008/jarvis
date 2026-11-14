@@ -186,9 +186,22 @@ class GuiState:
             from jcc.image_inputs import validate as validate_images
             validate_images(self.cfg,image_ids)
             message_text = text + ("\n\nAttached: " + ", ".join(labels) if labels else "")
+            work_chat = cid
             if as_job:
-                chats.update(cid, archived=False, message={"role": "assistant", "content": "Starting the coding agents.", "receipt": rid, "status": "queued",
-                                                           "job": True, "task": text[:300]})
+                # The chat where it was asked is the Master chat; this piece of work gets a chat of its own, named after
+                # what it works on, under the Master. The Master keeps a line for it (and hears how it goes).
+                master_id = str(chat.get("parent") or cid)
+                master = chats.get(master_id) if master_id != cid else chat
+                if not str(master.get("title") or "").startswith("Master"):
+                    chats.update(master_id, title="Master: " + str(master.get("title") or "New chat"))
+                name = " ".join(text.split())[:70]
+                if name.lower().startswith("step "):
+                    name = name.split(" - ", 1)[-1][:70] if " - " in name else name
+                work_chat = chats.create(name, project or chat.get("project") or None, parent=master_id)["id"]
+                chats.update(work_chat, message={"role": "user", "content": text, "receipt": rid})
+                chats.update(master_id, archived=False, message={"role": "assistant", "content": "Started: " + name, "receipt": rid, "status": "queued",
+                                                                 "job": True, "task": text[:300], "child": work_chat})
+                cid = master_id
             else:
                 chats.update(cid, archived=False, message={"role": "user", "content": message_text, "receipt": rid,"image_ids":image_ids})
             if mode not in ("auto", "code", "chat"):
@@ -210,13 +223,13 @@ class GuiState:
                 self.busy += 1
             try:
                 r = e.process(text, rid=rid, project=project or chat.get("project") or "none", agent=agent,
-                              chat_id=cid, context=context, mode=mode, manual_model=manual_model, effort=effort,image_ids=image_ids)
+                              chat_id=work_chat, context=context, mode=mode, manual_model=manual_model, effort=effort,image_ids=image_ids)
             finally:
                 e.close()
                 with self.lock:
                     self.busy -= 1
-            chats.update(cid, message={"role": "assistant", "content": r.answer or r.error or r.status,
-                                      "receipt": rid, "status": r.status, "model": r.model, **({"job": True, "task": text[:300]} if as_job else {})})
+            chats.update(work_chat, message={"role": "assistant", "content": r.answer or r.error or r.status,
+                                            "receipt": rid, "status": r.status, "model": r.model, **({"job": True, "task": text[:300]} if as_job else {})})
             return chats.get(cid)
         finally:
             lock.discard()
@@ -1112,7 +1125,7 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                 system.open_path(Path(__file__).resolve().parents[1] / "browser-sync")
                 self._json(HTTPStatus.OK, {"opened": True})
                 return
-            if self.path not in ("/api/project/remove", "/api/reveal", "/api/updates", "/api/ask", "/api/mods", "/api/chats", "/api/chat/send", "/api/chat/update", "/api/projects", "/api/terminal", "/api/browser/open", "/api/routing", "/api/prompt-master", "/api/cloud", "/api/efficiency", "/api/job/control", '/api/assistant/settings','/api/feedback','/api/project/browse','/api/project/inspect','/api/project/connect','/api/job/review','/api/maintenance','/api/ui/activity','/api/context/inspect','/api/memory/resolve','/api/delivery/settings','/api/delivery/plan','/api/task-queue','/api/project/preferences','/api/dry-run','/api/evaluations','/api/handoff','/api/library','/api/provenance','/api/controls','/api/restorepoints','/api/diagnostics/export','/api/attachments/extract','/api/memory/search','/api/files/save','/api/pty','/api/web','/api/computer','/api/voice','/api/speech','/api/speech/tts','/api/mail','/api/assistants','/api/preview','/api/screenshot','/api/connections','/api/window','/api/providers','/api/usage','/api/skills','/api/pairs','/api/court','/api/agents','/api/artifacts','/api/security','/api/permissions','/api/routines'):
+            if self.path not in ("/api/accounts", "/api/project/remove", "/api/reveal", "/api/updates", "/api/ask", "/api/mods", "/api/chats", "/api/chat/send", "/api/chat/update", "/api/projects", "/api/terminal", "/api/browser/open", "/api/routing", "/api/prompt-master", "/api/cloud", "/api/efficiency", "/api/job/control", '/api/assistant/settings','/api/feedback','/api/project/browse','/api/project/inspect','/api/project/connect','/api/job/review','/api/maintenance','/api/ui/activity','/api/context/inspect','/api/memory/resolve','/api/delivery/settings','/api/delivery/plan','/api/task-queue','/api/project/preferences','/api/dry-run','/api/evaluations','/api/handoff','/api/library','/api/provenance','/api/controls','/api/restorepoints','/api/diagnostics/export','/api/attachments/extract','/api/memory/search','/api/files/save','/api/pty','/api/web','/api/computer','/api/voice','/api/speech','/api/speech/tts','/api/mail','/api/assistants','/api/preview','/api/screenshot','/api/connections','/api/window','/api/providers','/api/usage','/api/skills','/api/pairs','/api/court','/api/agents','/api/artifacts','/api/security','/api/permissions','/api/routines'):
                 self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
             if not self.headers.get("Content-Type", "").startswith("application/json"):
@@ -1316,6 +1329,14 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                         else:
                             if now != 'applied': raise ValueError('There is no applied fix to undo.')
                             result = review.undo(state.cfg, job)
+                    else: raise ValueError('Unknown request.')
+                    self._json(HTTPStatus.OK, result);return
+                if self.path == '/api/accounts':              # signing in with your own Claude or ChatGPT account, as T3 Code does (jcc/accounts.py)
+                    from jcc import accounts
+                    action, ident = body.get('action'), str(body.get('id') or '')
+                    if action == 'status': result = {'accounts': accounts.status(state.cfg, fresh=body.get('fresh') is True)}
+                    elif action == 'sign_in': result = accounts.sign_in(state.cfg, ident)
+                    elif action == 'sign_out': result = accounts.sign_out(state.cfg, ident)
                     else: raise ValueError('Unknown request.')
                     self._json(HTTPStatus.OK, result);return
                 if self.path == '/api/project/remove':        # "Delete project": out of JARVIS; its folder only to the Recycle Bin, if asked

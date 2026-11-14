@@ -46,6 +46,30 @@ class TestNothingWaitsForNothing(unittest.TestCase):
         self.assertEqual(review.tidy(self.cfg), 0, "once is enough")
 
 
+class TestMasterAndWorkChats(unittest.TestCase):
+    """The chat a request was made in is its Master; each piece of work has a chat of its own under it, and the Master
+    hears how each one goes (its line and its checklist)."""
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="jcc-master-"))
+        self.addCleanup(lambda: shutil.rmtree(self.root, ignore_errors=True))
+        self.cfg = Cfg(self.root)
+
+    def test_a_work_chat_reports_to_its_master(self):
+        from jcc.chats import Chats
+        chats = Chats(self.cfg)
+        master = chats.create("Build a party console")["id"]
+        work = chats.create("Package skeleton and launcher", None, parent=master)["id"]
+        listed = {c["id"]: c for c in chats.list()}
+        self.assertEqual(listed[work]["parent"], master, "the sidebar can put it under its Master")
+        chats.update(master, message={"role": "assistant", "receipt": "20261115-050505-abcd", "status": "queued", "job": True, "child": work, "content": "Started"})
+        chats.update(work, message={"role": "assistant", "receipt": "20261115-050505-abcd", "status": "done", "content": "Done. The changes are in WII.\n\nChecks passed: npm test."})
+        line = [m for m in chats.get(master)["messages"] if m.get("receipt") == "20261115-050505-abcd"]
+        self.assertEqual(len(line), 1, "one line for it in the Master, kept up to date")
+        self.assertEqual((line[0]["status"], line[0]["content"], line[0]["child"]), ("done", "Done. The changes are in WII.", work))
+        with self.assertRaises(ValueError):
+            chats.create("x", None, parent="../../etc")
+
+
 class TestDeleteProject(unittest.TestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp(prefix="jcc-del-"))
@@ -57,9 +81,14 @@ class TestDeleteProject(unittest.TestCase):
         (self.cfg.state_dir / "projects.json").write_text(json.dumps({"wii": {"name": "WII", "path": str(self.folder)}}), "utf-8")
         self.cfg.projects = {"wii": object(), "trading": object()}
 
-    def test_it_leaves_jarvis_and_the_folder_stays(self):
+    def test_it_leaves_jarvis_with_its_chats_and_the_folder_stays(self):
+        from jcc.chats import Chats
+        chats = Chats(self.cfg)
+        mine, other = chats.create("Build the console", "wii")["id"], chats.create("Something else", None)["id"]
         done = workspace.remove(self.cfg, "wii")
-        self.assertEqual((done["removed"], done["trashed"]), ("wii", False))
+        self.assertEqual((done["removed"], done["trashed"], done["chats"]), ("wii", False, 1))
+        self.assertEqual([c["id"] for c in chats.list()], [other], "its chat went with it, the other stays")
+        self.assertIn(mine, chats.deleted_ids(), "to Deleted chats, where it can be brought back")
         self.assertTrue((self.folder / "src" / "game.js").exists(), "the folder is never touched unless asked")
         self.assertNotIn("wii", json.loads((self.cfg.state_dir / "projects.json").read_text("utf-8")))
         self.assertNotIn("wii", self.cfg.projects)

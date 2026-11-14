@@ -19,7 +19,7 @@ class Node {
 }
 
 const MODES = [{ id: 'sending', name: 'Auto', about: 'JARVIS decides.' }, { id: 'all', name: 'Manual', about: 'Always ask.' }, { id: 'edits', name: 'Accept edits', about: EVIL },
-  { id: 'plan', name: 'Plan', about: 'Plan first.' }, { id: 'bypass', name: 'Bypass permissions', about: 'Never ask, except before paying.' }];
+  { id: 'plan', name: 'Plan', about: 'Plan first.' }, { id: 'bypass', name: 'Bypass permissions', about: 'Never ask.' }];
 const STATE = more => ({ mode: 'sending', more: 0, modes: MODES, pending: [], ...more });
 const ASSISTANT = { kind: 'assistant', id: 'a1b2c3', question: 'Shall I send this email to ' + EVIL + '?', detail: 'Subject: ' + SCRIPT, chat: 'chat-1', why: 'It reaches other people.' };
 const JOB = { kind: 'job', id: '20261114-010101-abcd', question: 'The coding job has a question for you', detail: 'May I change the deploy script? ' + EVIL, mark: '4cc910b57d7c4268', title: SCRIPT, project: 'Site', chat: 'chat-2' };

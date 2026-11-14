@@ -132,7 +132,8 @@ class Engine:
             task = str(fm.get("task", ""))
             prefer = str(fm.get("preferred_agent", "auto"))
             plan = agents.plan(self.cfg, task, self.usage.cooldowns(), prefer=prefer)
-            if not plan.agents or self.jobs.running_jobs() >= self.cfg.tier3_max_running:
+            from jcc.governor import settings as resource_settings
+            if not plan.agents or self.jobs.running_jobs() >= (resource_settings(self.cfg)['max_parallel_jobs'] or self.cfg.tier3_max_running):
                 continue
             rid = str(fm["id"])
             context = str(fm.get("context", ""))

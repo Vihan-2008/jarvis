@@ -40,7 +40,7 @@ requests = 200
 tokens = 60000
 
 [tier3]
-max_running = 2
+max_running = 4               # jobs at once (jobs on the same project still take turns)
 timeout_minutes = 45
 cooldown_hours = 5             # skip an agent this long after it reports a usage limit
 reserve_percent = 5           # use another agent when a fresh quota reading is this low
