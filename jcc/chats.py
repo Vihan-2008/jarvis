@@ -164,7 +164,7 @@ class Chats:
         if not CHAT_ID.fullmatch(cid):
             raise ValueError("Invalid chat.")
         acquired = False
-        for _ in range(20):
+        for _ in range(100):
             if lock.acquire():
                 acquired = True
                 break
@@ -217,7 +217,7 @@ class Chats:
         lock = InstanceLock(self.cfg.state_dir / f"chat-{cid}.lock")
         if not CHAT_ID.fullmatch(cid) or not receipt:
             raise ValueError("Invalid chat.")
-        for _ in range(20):
+        for _ in range(100):
             if lock.acquire():
                 break
             time.sleep(0.05)

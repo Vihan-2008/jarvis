@@ -103,6 +103,88 @@ def create(cfg: Config, name: str, kind: str = "python") -> dict:
         lock.release()
 
 
+def remove(cfg: Config, key: str, trash: bool = False) -> dict:
+    """Delete a project from JARVIS. Its folder is left where it is, unless its owner also asked for it to go to the Recycle
+    Bin (Trash on a Mac): never deleted for good, so it can be put back from there. Its notes in the vault are kept."""
+    lock = InstanceLock(cfg.state_dir / "projects.lock")
+    if not lock.acquire():
+        raise ValueError("Another project is being changed. Try again in a moment.")
+    try:
+        path = cfg.state_dir / "projects.json"
+        registry = json.loads(path.read_text("utf-8")) if path.exists() else {}
+        if key not in registry:
+            if key in cfg.projects:
+                raise ValueError("This project is set in JARVIS's settings file (config/local.toml): remove it there.")
+            raise ValueError("That project is not known.")
+        if _busy(cfg, key):
+            raise ValueError("A coding job is working in this project. Stop it first, then delete the project.")
+        folder = Path(registry[key].get("path") or "")
+        del registry[key]
+        atomic_write(path, json.dumps(registry, indent=2))
+        cfg.projects.pop(key, None)
+        moved = bool(trash) and folder.is_dir() and _may_trash(cfg, folder) and to_trash(folder)
+        return {"removed": key, "trashed": moved, "kept": "" if moved else str(folder)}
+    finally:
+        lock.release()
+
+
+def _busy(cfg: Config, key: str) -> bool:
+    from jcc.vault import parse_frontmatter
+    folder = cfg.vault / "Jobs"
+    for note in sorted(folder.glob("*.md"), reverse=True)[:80] if folder.exists() else []:
+        try:
+            fm, _ = parse_frontmatter(note.read_text("utf-8"))
+        except (OSError, ValueError):
+            continue
+        if fm.get("project_key") == key and fm.get("status") in ("running", "queued", "paused"):
+            return True
+    return False
+
+
+def _may_trash(cfg: Config, folder: Path) -> bool:
+    """Never a drive, the home folder, or a folder that holds the vault, JARVIS itself or its data."""
+    try:
+        folder = folder.resolve()
+    except OSError:
+        return False
+    if len(folder.parts) < 3 or folder == Path.home().resolve():
+        return False
+    keep = [cfg.vault, cfg.state_dir, Path(__file__).resolve().parents[1], *cfg.all_protected()]
+    for place in keep:
+        try:
+            place = Path(place).resolve()
+        except OSError:
+            continue
+        if place == folder or place.is_relative_to(folder):
+            return False
+    return True
+
+
+def to_trash(folder: Path) -> bool:
+    """Move a folder to the Recycle Bin (Windows) or the Trash (Mac, Linux). False when that could not be done."""
+    import os
+    import subprocess
+    try:
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+
+            class SHFILEOPSTRUCTW(ctypes.Structure):
+                _fields_ = [("hwnd", wintypes.HWND), ("wFunc", wintypes.UINT), ("pFrom", wintypes.LPCWSTR), ("pTo", wintypes.LPCWSTR),
+                            ("fFlags", ctypes.c_ushort), ("fAnyOperationsAborted", wintypes.BOOL), ("hNameMappings", ctypes.c_void_p),
+                            ("lpszProgressTitle", wintypes.LPCWSTR)]
+            FO_DELETE, FOF_SILENT, FOF_NOCONFIRMATION, FOF_ALLOWUNDO, FOF_NOERRORUI = 3, 0x4, 0x10, 0x40, 0x400
+            op = SHFILEOPSTRUCTW(None, FO_DELETE, str(folder) + "\0", None, FOF_SILENT | FOF_NOCONFIRMATION | FOF_ALLOWUNDO | FOF_NOERRORUI, False, None, None)
+            return ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op)) == 0 and not op.fAnyOperationsAborted and not folder.exists()
+        if sys.platform == "darwin":
+            quoted = str(folder).replace("\\", "\\\\").replace('"', '\\"')
+            script = 'tell application "Finder" to delete (POSIX file "' + quoted + '" as alias)'
+            return subprocess.run(["osascript", "-e", script], capture_output=True, timeout=60).returncode == 0 and not folder.exists()
+        return subprocess.run(["gio", "trash", str(folder)], capture_output=True, timeout=60).returncode == 0 and not folder.exists()
+    except (OSError, subprocess.SubprocessError, AttributeError, ValueError):
+        return False
+
+
 def memory(cfg: Config, project: str | None, query: str = "", source_manifest=None) -> str:
     vault = Vault(cfg.vault)
     from jcc.memory_conflicts import context

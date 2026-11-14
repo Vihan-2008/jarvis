@@ -89,7 +89,7 @@ def approve(cfg, rid, expected):
         receipts.update_status(vault,rid,'done',append='Reviewed and merged with passing checks.')
         if fm.get('chat_id'):
             from jcc.chats import Chats
-            Chats(cfg).update(fm['chat_id'],message={'role':'assistant','receipt':rid,'status':'done','content':f'Reviewed changes passed checks and were merged.\n\n[[Jobs/{rid}|Job details]]'})
+            Chats(cfg).update(fm['chat_id'],message={'role':'assistant','receipt':rid,'status':'done','content':f'Kept: the changes passed their checks again and are in {proj.name} now.'})
         path=cfg.jobs_root/rid/'metrics.json'
         if path.exists():
             metrics=json.loads(path.read_text('utf-8'));metrics.update({'status':'done','checks_passed':True});atomic_write(path,json.dumps(metrics))
@@ -97,6 +97,64 @@ def approve(cfg, rid, expected):
         activity.alert(cfg,rid,'done')
         return {'status':'done','commit':message}
     finally: lock.release()
+
+
+def tidy(cfg):
+    """Jobs that wait to be kept but have nothing left to keep (no copy of the project with a change in it): earlier versions
+    left a job that changed nothing waiting like that. They are marked as not finished, so nothing waits for nothing."""
+    put_right = 0
+    folder = cfg.vault / 'Jobs'
+    for path in sorted(folder.glob('*.md'))[-400:] if folder.exists() else []:
+        try:
+            fm, _ = parse_frontmatter(path.read_text('utf-8'))
+        except (OSError, ValueError):
+            continue
+        rid = path.stem
+        if fm.get('status') != 'needs_approval' or fm.get('blocked_by') or fm.get('asked') or not fm.get('project_key'):
+            continue
+        if (cfg.jobs_root / rid / 'repo').exists() or (cfg.jobs_root / rid / 'ASKED.md').exists():
+            continue
+        try:
+            _close(cfg, rid, fm, 'failed', 'Nothing was left to keep: the agent did not change any file. Ask again to try once more.')
+            put_right += 1
+        except (OSError, ValueError):
+            continue
+    return put_right
+
+
+def discard(cfg, rid):
+    """Throw a finished change away: the project is left as it is. The branch is kept in the project's git (never work
+    deleted for good), so it can still be looked at; the job's own copy is removed."""
+    fm=note(cfg,rid);workspace.refresh(cfg);proj=cfg.projects.get(fm.get('project_key'));work=cfg.jobs_root/rid;repo=work/'repo'
+    if fm.get('status')!='needs_approval' or fm.get('blocked_by'): raise ValueError('This change is no longer waiting.')
+    lock=InstanceLock(work/'job.lock')
+    if work.exists() and not lock.acquire(): raise ValueError('The job is still running.')
+    try:
+        if proj and repo.exists(): projects.remove_worktree(proj,repo,rid,delete_branch=False)
+        _close(cfg,rid,fm,'cancelled','Thrown away by its owner: nothing was put into the project.'+(f' (Its branch {projects.branch_name(rid)} is kept in git.)' if proj else ''))
+        return {'status':'cancelled'}
+    finally: lock.release()
+
+
+def close_held(cfg, rid, why):
+    """End a job that was never started because of what it mentions (jcc/guard.py): its owner cancelled it, or said go ahead
+    and it was sent again as a new job."""
+    fm=note(cfg,rid)
+    if fm.get('status')!='needs_approval' or not fm.get('blocked_by'): raise ValueError('That is no longer waiting.')
+    _close(cfg,rid,fm,'cancelled',why)
+
+
+def _close(cfg, rid, fm, status, why):
+    fm=dict(fm,status=status)
+    vault=Vault(cfg.vault);_,body=parse_frontmatter(vault.read(f'Jobs/{rid}.md'))
+    vault.write(f'Jobs/{rid}.md',render_note(fm,body+'\n\n'+why))
+    try: receipts.update_status(vault,rid,status,append=why)
+    except (OSError,ValueError): pass
+    activity.emit(cfg,rid,status,why)
+    if fm.get('chat_id'):
+        from jcc.chats import Chats
+        try: Chats(cfg).update(fm['chat_id'],message={'role':'assistant','receipt':rid,'status':status,'content':why})
+        except (OSError,ValueError): pass
 
 
 def undo(cfg, rid):

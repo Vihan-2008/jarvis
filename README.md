@@ -12,10 +12,18 @@ The AI comes from the accounts you already have.
 
 - **Talk to it.** "Hey JARVIS", then say what you want. It can be interrupted, and it tells its own voice from yours.
 - **It does things on your PC.** Opens apps and pages, finds and writes files, runs commands, fills in forms.
-  Sending, deleting and paying always wait for your yes; you choose how much else it asks about.
-- **Coding with agents.** A request becomes a job for Claude Code or Codex in its own copy of your project
-  (a git worktree). The project's checks run, you look at the change, and only then is it merged. A planner and a
-  builder can work as a pair, and one list shows what every agent is doing.
+  How much it asks is a mode, as in Claude Code: **Auto** (the usual: it asks only before sending, deleting or
+  paying), **Manual**, **Accept edits**, **Plan** and **Bypass permissions**. Paying is asked about in every mode.
+  When it does ask, the question is a card at the end of the chat with its answers on it, and the work carries on.
+- **Give it a prompt and it does the rest.** A request becomes a job for Claude Code or Codex in its own copy of
+  your project (a git worktree), and it reports in the chat you asked in: one line per step ("Ran 3 commands,
+  edited 4 files ›"), and a line that opens to the diff. When the project's checks pass, the change goes into your
+  project by itself, with Undo; there is no time limit. In Manual mode it waits for you to keep it. A planner and a
+  builder can work as a pair, in the same chat.
+- **Everything else is a /command.** `/work`, `/mode`, `/status`, `/projects`, `/undo`, `/folder` (open the
+  project's folder), `/court`, `/pair`, `/security`, `/routines`, `/agents` and the rest answer in the chat; the
+  side panel holds only Files, Terminal and Browser. Projects can be opened in Explorer or Finder, and deleted
+  (their folder goes to the Recycle Bin only if you tick the box).
 - **Security check.** Finds the usual holes in a project, has the ones you tick fixed in a copy, shows you the
   change, applies it, and can undo it.
 - **Routines.** Things done again and again at the times you choose, each run sent as if you had typed it.
@@ -71,7 +79,8 @@ artifacts, routines, security check). The table is in [docs/PLATFORMS.md](docs/P
 - One set of rules decides every action the assistant takes (`jcc/policy.py`). An approval covers exactly the
   action and the details you were shown, once.
 - Coding agents work in a copy of your project, never in your real folder, and nothing is merged before its checks
-  pass. Deploying, pushing, servers and secrets are refused outright.
+  pass. They are told never to deploy, push, touch servers or handle secrets themselves; a request that mentions
+  those waits for your Go ahead, and spending money or changing a trading bot's risk limits is never done.
 - What it reads from the web, e-mail and notes is treated as information, never as instructions. After reading
   outside content it asks more.
 - Notes in a `Private` folder, or marked `private: true`, are never sent to a model.

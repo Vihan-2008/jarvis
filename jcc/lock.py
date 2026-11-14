@@ -15,7 +15,12 @@ class InstanceLock:
 
     def acquire(self) -> bool:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        fh = open(self.path, "a+b")
+        try:
+            fh = open(self.path, "a+b")
+        except OSError:
+            # Windows refuses to open a file for a moment after another holder deleted it (a lock that was just
+            # discarded, while something such as a virus scanner still looks at it): that is "taken", so the caller waits.
+            return False
         try:
             if sys.platform == "win32":
                 import msvcrt

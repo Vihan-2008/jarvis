@@ -65,6 +65,8 @@ class TestAPairThroughTheRealJobPipeline(EngineTestCase):
         three = plan([(1, "Add a value to the package", True), (2, "Say so in the README", True)], done=True)
         planner = Hands([one, two, three])
         self.state.pair_planner = planner.plan
+        from jcc import assistant
+        assistant.configure(self.state.cfg, {"ask": "all"})           # Manual: each change waits for its owner
         made = pairing.open_pair(self.state.cfg, "trading", GOAL, builder="auto")
         done = pairing.start(self.state.cfg, made["id"], self.hands(), wait=True)
         self.assertEqual((done["status"], len(done["handoffs"])), ("done", 2), done["now"])
@@ -83,7 +85,9 @@ class TestAPairThroughTheRealJobPipeline(EngineTestCase):
         self.assertEqual(chat.get("project"), "trading")
         said = [m["content"] for m in chat["messages"]]
         self.assertTrue(any(m.startswith("**From the planner**") and "1. Add a value to the package" in m and "Hand-over 1" in m for m in said))
-        self.assertTrue(any(m.startswith("Step 1: Add a value to the package") for m in said), "what the builder was asked: the step, and nothing else")
+        asked = [m.get("task", "") for m in chat["messages"] if m.get("job")]
+        self.assertTrue(any(m.startswith("Step 1: Add a value to the package") for m in asked), "what the builder was asked: the step, and nothing else")
+        self.assertFalse(any(m["role"] == "user" for m in chat["messages"]), "a job of the chat, not a second message of the owner's")
         self.assertEqual(planner.asked[0]["cwd"], str(self.repo), "the planner reads the project itself")
 
     def test_a_change_that_fails_the_projects_checks_is_not_merged_and_the_planner_is_told(self):

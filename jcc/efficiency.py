@@ -3,8 +3,9 @@ import json
 import re
 from jcc.vault import atomic_write
 
-DEFAULTS = {"max_attempts": 4, "timeout_minutes": 20, "context_chars": 6000, "session_turns": 8}
-BOUNDS = {"max_attempts": (1, 12), "timeout_minutes": (1, 120), "context_chars": (2000, 18000), "session_turns": (1, 20)}
+# (timeout_minutes is kept only so that older saved settings still read: coding jobs have no time limit any more.)
+DEFAULTS = {"max_attempts": 6, "timeout_minutes": 0, "context_chars": 6000, "session_turns": 8}
+BOUNDS = {"max_attempts": (1, 12), "timeout_minutes": (0, 0), "context_chars": (2000, 18000), "session_turns": (1, 20)}
 
 
 def settings(cfg):
@@ -21,7 +22,10 @@ def settings(cfg):
 
 
 def save(cfg, values):
-    if not isinstance(values, dict) or set(values) != set(DEFAULTS):
+    if not isinstance(values, dict):
+        raise ValueError("Supply all efficiency preferences.")
+    values = {**values, "timeout_minutes": 0}               # (there is no time limit to set)
+    if set(values) != set(DEFAULTS):
         raise ValueError("Supply all efficiency preferences.")
     cleaned = {}
     for k, v in values.items():

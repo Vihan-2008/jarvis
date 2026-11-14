@@ -112,9 +112,9 @@
         <p>Buttons are pressed by name through the system's accessibility layer (UI Automation on Windows, the Accessibility interface on a Mac), which lists the buttons, boxes and links of a window. While it works for you, it types and clicks only in the window it opened or switched to, never in whatever happens to be in front and never in its own window; if that window cannot be brought to the front, nothing is typed. On a Mac, macOS asks you once to allow this under Privacy &amp; Security.</p>
       </article>
       <article class="card">
-        <h3>Asks before sending, deleting or paying</h3>
-        <p>A control beside the message box shows how much JARVIS asks before it acts, and what is waiting for your yes or no.</p>
-        <p>You choose: ask only before sending, deleting and paying; also before anything risky; or before every change. Sending things to other people, deleting and paying are asked about in every mode. A yes covers exactly the action that was shown, with those details, once.</p>
+        <h3>Modes, as in Claude Code</h3>
+        <p>A chip in the message bar sets how much JARVIS asks before it acts: Auto (the usual one: only before sending, deleting or paying), Manual, Accept edits, Plan, or Bypass permissions. Shift+Tab goes to the next one.</p>
+        <p>When JARVIS asks, the question is a card at the end of the chat with its answers on it; nothing else stops, and the work carries on as soon as you answer. A yes covers exactly the action that was shown, once. Paying is asked about in every mode.</p>
       </article>
       <article class="card">
         <h3>Never done, in any mode</h3>
@@ -168,9 +168,9 @@
         <p>If no attempt passes, the branch is kept for you rather than merged. Jobs interrupted by a restart are recovered, and jobs on the same project run one after another.</p>
       </article>
       <article class="card">
-        <h3>Review and undo</h3>
-        <p>A change that passed its checks can wait for you to look at its diff before it is merged.</p>
-        <p>A merged change can be undone with a checked revert commit, and your own work is never discarded. An optional second review of the diff by the other provider can be switched on.</p>
+        <h3>It finishes by itself, with undo</h3>
+        <p>Give it a prompt and it does the rest: when the project's checks pass, the change goes into your project by itself, and the chat shows one line that opens to the diff. There is no time limit on a job.</p>
+        <p>A change can be undone with a checked revert commit, and your own work is never discarded. In Manual mode a change waits on a card in the chat: Keep it or throw it away.</p>
       </article>
       <article class="card">
         <h3>Ultracode and dry run</h3>

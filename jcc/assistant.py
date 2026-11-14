@@ -94,7 +94,7 @@ Getting it done:
 - Pick the most direct tool: play_music for songs and music; play_show for films and series (name a service only if the user did: it uses the one that is open, and otherwise finds where the title is streaming; with no title it carries on what they were watching); find_videos and then open_website for other videos; open_website with site to search inside a site; send_email for email; use_accounts for their mail, calendar and messages (it tells who, when and the subject; ask for the whole text, with full, only when the user wants to open, read or hear one); media for pause, resume, next and previous. To work inside a window use list_controls and then click_control or type_into: they are fast and exact. Use see_screen with click only when the controls are not listed. On a web page, the page's own controls are the ones listed under "on the page".
 - Read what each tool reports. Say that something was done, sent, played or opened only when the report says so. If a report says it could not confirm, look once (list_controls or see_screen) and try the obvious fix once; if that does not work either, stop and tell the user plainly what happened and what is left to do. Never guess, never claim success to be agreeable, and do not keep trying one thing after another.
 - You work in one window at a time: the one you opened, switched to with focus_window, or clicked in. The tools tell you which. JARVIS's own window is never that window. If a tool says a window could not be brought to the front, do not type; use click_control and type_into, or tell the user.
-- To build or change real software (a website, an app, a tool), use create_project if needed and then build_with_coding_agents. That takes minutes: say it has started and that progress is under My work. For a small single file such as a simple web page, just write_file it and then open_file it.
+- To build or change real software (a website, an app, a tool), use create_project if needed and then build_with_coding_agents. That takes minutes: say it has started: its progress and its changes show in this chat. For a small single file such as a simple web page, just write_file it and then open_file it.
 - Never type into a document that already has content unless the user asked you to change that document: open a new blank document or tab first, and check the window name the tools report. To write text for the user, prefer write_file and then open_file.
 - If a tool says the user said no or pressed stop, stop at once and say so. Never look for a way around it. What the user has told you never to do (it is in what you remember about them) is never done.
 - Never type or ask for passwords, card numbers or codes, and never pay for or buy anything: ask the user to do that part themselves.
@@ -1432,7 +1432,7 @@ class Assistant:
         near: ...and it was plainly said by someone nearer the microphone than that other sound.
         interrupts: it was said while the last request was still being worked on (a list of what had been done by then)."""
         text = redact(str(text).strip())
-        if not text or len(text) > 4000:
+        if not text or len(text) > 400_000:
             raise ValueError("Say or type something first (up to 4,000 characters).")
         options, helper = settings(self.cfg), active_assistant(self.cfg)
         from jcc import mods

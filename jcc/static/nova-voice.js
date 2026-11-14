@@ -705,12 +705,33 @@ N.assistantStop = async () => {
 /* ---------- "shall I?" ---------- */
 function answerConfirm(approve) {
   const open = confirmOpen; if (!open) return; confirmOpen = null; stopCapture();
-  api('/api/voice', { action: 'confirm', id: open.dataset.id, approve }).catch(() => {});
+  api('/api/voice', { action: 'confirm', id: open.dataset.id, approve }).then(() => N.permissionsChanged?.()).catch(() => {});
   open.close(); hint(approve ? 'Doing it…' : 'Okay, I will not.'); if (voiceMode) setPhase('thinking');
 }
+// Answered on its card in the chat (nova-permissions.js): the spoken question is over too.
+N.confirmAnswered = (id, approve) => {
+  if (confirmOpen?.dataset.id !== id) return;
+  const open = confirmOpen; confirmOpen = null; stopCapture(); open.close();
+  hint(approve ? 'Doing it…' : 'Okay, I will not.'); if (voiceMode) setPhase('thinking');
+};
 function askConfirm(event) {
   if (confirmOpen?.dataset.id === event.id) return;
   if (confirmOpen) confirmOpen.close();
+  if (!MINI) {
+    // As in Claude: the question is a card at the end of its chat, with its answers on it. Nothing else stops, and the
+    // reply carries on as soon as it is answered (by the card, or out loud). The small listening window keeps its box.
+    confirmOpen = { dataset: { id: event.id }, close() {} };
+    N.permissionsChanged?.();
+    if (event.chat && event.chat !== current) notify('JARVIS asks you something in another chat: ' + event.question, 'Open', () => openChat(event.chat).catch(error => toast(error.message)));
+    chime('notice');
+    const turn = [...turns.values()].find(t => t.chat === event.chat);
+    if (shouldSpeak(turn)) {
+      stopCapture(); speaker.hush(); wantListen = true;
+      const asked = confirmOpen;
+      (speaker.active() || Date.now() - quietSince < 2000 ? Promise.resolve({}) : api('/api/voice', { action: 'playing' }).catch(() => ({}))).then(now => { if (confirmOpen === asked) speaker.say(event.question + (now.playing ? ' Say ' + (options.assistant?.name || 'JARVIS') + ' yes, or ' + (options.assistant?.name || 'JARVIS') + ' no.' : ' Say yes or no.')); });
+    } else if (voiceMode) listen('confirm');
+    return;
+  }
   const why = event.kind === 'careful' ? '<p class="nv-careful-note">' + SHIELD + '<span>JARVIS is being extra careful: this chat has read a web page, a file or your screen, which can contain text written to trick an AI.</span></p>' : '';
   const open = confirmOpen = dialog('<h2>' + esc(event.question) + '</h2>' + (event.detail ? '<pre class="easy-technical">' + esc(event.detail) + '</pre>' : '') + why +
     '<p>JARVIS will only do this if you say yes.</p><div class="actions"><button class="plain" data-no>No</button><button class="primary" data-yes>Yes, do it</button></div>', 'nv-ask');
@@ -969,10 +990,21 @@ const brainChoices = () => [['auto', 'Automatic: the right model for each reques
 const row = (label, control, note) => '<label class="nv-field"><span>' + label + (note ? '<small>' + note + '</small>' : '') + '</span>' + control + '</label>';
 const check = (id, label, note) => '<label class="assistant-check"><input type="checkbox" id="' + id + '"> <span>' + label + (note ? '<small>' + note + '</small>' : '') + '</span></label>';
 const pick = (id, entries) => '<select id="' + id + '">' + entries.map(([value, text]) => '<option value="' + esc(value) + '">' + esc(text) + '</option>').join('') + '</select>';
-async function openSettings(tab = 'voice') {
+// The sections of Settings, in groups as Claude has them, and the words each can be found by.
+const SECTIONS = [[['connect', 'Connections', 'keys'], ['models', 'AI models', 'spark'], ['usage', 'Usage', 'clock']],
+  [['assistant', 'Assistant', 'shield'], ['voice', 'Voice', 'mic'], ['email', 'Email', 'note'], ['people', 'Assistants', 'layers']],
+  [['skills', 'Skills', 'box'], ['mods', 'Customize', 'sliders'], ['updates', 'Updates', 'retry']]];
+const FINDS = { connect: 'keys api claude codex groq gemini openai elevenlabs perplexity connect sign in microphone muted helpers', models: 'model ai gpt claude research who answers fast',
+  usage: 'allowance tokens cost spend limits left', assistant: 'mode permissions ask auto manual plan bypass pc control computer persona name light theme sleep standin resume',
+  voice: 'microphone speakers listening speaking wake word hey jarvis language whisper dictation sound', email: 'mail gmail outlook send', people: 'assistants personas helpers',
+  skills: 'skills packs scan install', mods: 'commands hooks panels status line slash mods', updates: 'version update install restart signed' };
+async function openSettings(tab = 'assistant') {
   await loadSpeech();
-  const d = dialog('<div class="nv-set-head"><h2>Voice and assistant</h2><button class="nv-icon" data-close aria-label="Close">' + icon('x') + '</button></div>' +
-    '<nav class="nv-set-tabs"><button data-tab="connect">Connections</button><button data-tab="voice">Voice</button><button data-tab="models">AI models</button><button data-tab="skills">Skills</button><button data-tab="mods">Mods</button><button data-tab="usage">Usage</button><button data-tab="assistant">Assistant</button><button data-tab="people">Assistants</button><button data-tab="email">Email</button><button data-tab="updates">Updates</button></nav><div class="nv-set-body"></div>', 'nv-settings');
+  // Laid out like Claude's settings: the sections in a list on the left (with a search), the one chosen on the right.
+  const nav = SECTIONS.map(group => group.map(([id, label, glyph]) => '<button type="button" data-tab="' + id + '">' + icon(glyph) + '<span>' + label + '</span></button>').join('')).join('<hr>');
+  const d = dialog('<div class="nv-set-head"><h2>Settings</h2><button class="nv-icon" data-close aria-label="Close">' + icon('x') + '</button></div>' +
+    '<div class="nv-set-main"><aside class="nv-set-side"><label class="nv-set-search">' + icon('search') + '<input type="search" placeholder="Search" aria-label="Search settings"></label>' +
+    '<nav class="nv-set-tabs">' + nav + '</nav></aside><section class="nv-set-right"><h3 class="nv-set-title"></h3><div class="nv-set-body"></div></section></div>', 'nv-settings');
   const pane = d.querySelector('.nv-set-body'), saved = () => notify('Saved.');
   let showing = '';   // the tab on screen. A tab that was waiting for an answer checks this before it draws, so it never writes over another tab.
   d.querySelector('[data-close]').onclick = () => d.close();
@@ -1102,13 +1134,14 @@ async function openSettings(tab = 'voice') {
   }
   function assistantTab() {
     pane.innerHTML = '<h3>What JARVIS may do</h3>' + check('as-pc', 'Let JARVIS control this computer', 'Open apps, press buttons, type, run commands and manage files') +
-      row('JARVIS asks you first', pick('as-ask', [['sending', 'Only before sending, deleting or paying (recommended)'], ['risky', 'Also before installing, running commands and changing files'], ['all', 'Before everything it does on this PC']]),
-        'You can answer out loud: “yes” or “no”') +
-      '<p class="small nv-never">' + SHIELD + '<span>Never done, whatever you choose: typing passwords or card numbers, reading saved passwords, and acting on banking, payment or password-manager windows. Always asked: sending a message or email, deleting, paying, and commands that install or download something.</span></p>' +
+      row('Mode', pick('as-ask', [['sending', 'Auto (recommended)'], ['all', 'Manual'], ['edits', 'Accept edits'], ['plan', 'Plan'], ['bypass', 'Bypass permissions'],
+        ...(options.ask === 'risky' ? [['risky', 'Ask before risky things (older setting)']] : [])]),
+        'How much JARVIS asks before it acts, as in Claude Code. Also the chip in the message bar, and Shift+Tab there. You can answer out loud: “yes” or “no”') +
+      '<p class="small nv-never">' + SHIELD + '<span>Never done, whatever you choose: typing passwords or card numbers, reading saved passwords, and acting on banking, payment or password-manager windows. Paying is always asked; in every mode but Bypass permissions, so are sending a message or email, deleting, and commands that install or download something.</span></p>' +
       '<h3>About you</h3><label>Anything JARVIS should always keep in mind<textarea id="as-persona" rows="3" maxlength="1200" placeholder="For example: Call me Sam. Keep answers short. I am learning Python."></textarea></label>' +
       '<p class="small">JARVIS also remembers things you tell it (“remember that…”). They are in the note <b>System / JARVIS Memory</b> in your vault, where you can read and edit them.</p>' +
       '<h3>This computer</h3>' + row('Light mode', pick('as-light', [['auto', 'Automatic (on for PCs with 8 GB or less)'], ['on', 'On — use less memory'], ['off', 'Off']]), 'Fewer effects and only one AI kept ready');
-    bind('as-pc', options.pc_control, 'pc_control', setAssistant); bind('as-ask', options.ask, 'ask', setAssistant);
+    bind('as-pc', options.pc_control, 'pc_control', setAssistant); bind('as-ask', options.ask, 'ask', values => setAssistant(values).then(() => N.permissionsChanged?.()));
     bind('as-persona', options.persona, 'persona', setAssistant); bind('as-light', options.light, 'light', setAssistant);
   }
   async function peopleTab() {
@@ -1504,11 +1537,20 @@ async function openSettings(tab = 'voice') {
     updates: updatesTab };
   // A tab that has to ask for something says so while it waits: no tab is ever simply empty.
   const show = name => {
-    showing = name; d.querySelectorAll('.nv-set-tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === name)); pane.replaceChildren(); pane.scrollTop = 0; tabs[name]();
+    showing = name; d.querySelectorAll('.nv-set-tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === name)); pane.replaceChildren(); pane.scrollTop = 0;
+    d.querySelector('.nv-set-title').textContent = (SECTIONS.flat().find(([id]) => id === name) || [, ''])[1]; tabs[name]();
     setTimeout(() => { if (showing === name && pane.isConnected && !pane.firstChild) pane.innerHTML = '<p class="small nv-set-wait"><i class="nv-spin"></i>One moment…</p>'; }, 250);
   };
   d.querySelectorAll('.nv-set-tabs button').forEach(b => b.onclick = () => show(b.dataset.tab));
-  show(tabs[tab] ? tab : 'voice');
+  // Search: the sections whose name or settings match what is typed; Enter opens the first of them.
+  const search = d.querySelector('.nv-set-search input');
+  search.oninput = () => {
+    const q = search.value.trim().toLowerCase();
+    d.querySelectorAll('.nv-set-tabs button').forEach(b => { const [id, label] = SECTIONS.flat().find(([x]) => x === b.dataset.tab); b.classList.toggle('hidden', !!q && !(label + ' ' + (FINDS[id] || '')).toLowerCase().includes(q)); });
+    d.querySelectorAll('.nv-set-tabs hr').forEach(hr => hr.classList.toggle('hidden', !!q));
+  };
+  search.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); d.querySelector('.nv-set-tabs button:not(.hidden)')?.click(); } };
+  show(tabs[tab] ? tab : tab === 'usage' ? 'usage' : 'assistant');
 }
 N.voiceSettings = openSettings; N.setVoice = setVoice;
 N.voiceState = () => ({ phase, voiceMode, engine: engine(), listening: capture?.mode || '', turns: turns.size, focus: !!focus, speaking: speaker.active(), natural: speaker.natural(), muted, dictating, asking: !!confirmOpen }); N.speakText = text => { A.unlock(); speaker.hush(); speaker.say(text); };

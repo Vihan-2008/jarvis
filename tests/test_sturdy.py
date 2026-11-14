@@ -125,7 +125,7 @@ class TestTheStatusAlwaysAnswers(GuiTestCase):
                 self.assertEqual(sorted(data), sorted(good), "every section is still there")
                 self.assertEqual([m["id"] for m in data["models"]][:3], ["claude:haiku", "claude:sonnet", "claude:opus"])
                 self.assertEqual(data["resources"]["settings"]["retention_days"], 30, "settings fall back to their defaults")
-                self.assertEqual(data["efficiency"]["settings"]["max_attempts"], 4)
+                self.assertEqual(data["efficiency"]["settings"]["max_attempts"], 6)
                 self.assertTrue(data["learning"]["settings"]["adaptive_routing"])
                 self.assertEqual(self.req("GET", "/api/speech")[0], 200)
         finally:

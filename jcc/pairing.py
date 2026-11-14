@@ -36,7 +36,7 @@ from jcc.redact import redact
 from jcc.vault import atomic_write, read_json
 
 ID = re.compile(r"pair-\d{8}-\d{6}-[0-9a-f]{4}")
-SHORTEST, LONGEST = 12, 4000
+SHORTEST, LONGEST = 12, 400_000
 ROUNDS = 8                     # hand-overs before the pair stops and waits for its owner
 AT_ONCE = 3                    # steps handed to the builder in one go, at most
 TRIES = 2                      # the first try at the planner and one more, and only after technical trouble
@@ -131,7 +131,16 @@ def planner_model(cfg, choice: str = "auto") -> str:
         return "opus"
 
 
-def open_pair(cfg, project: str, goal: str, planner: str = "auto", builder: str = "auto", effort: str = "auto") -> dict:
+def _own_chat(cfg, chat: str) -> str:
+    """The chat a pair was started from, when it is one: its plans and its builder's jobs are reported there."""
+    from jcc.chats import Chats
+    try:
+        return str(Chats(cfg).get(str(chat))["id"]) if chat else ""
+    except (ValueError, OSError, KeyError):
+        return ""
+
+
+def open_pair(cfg, project: str, goal: str, planner: str = "auto", builder: str = "auto", effort: str = "auto", chat: str = "") -> dict:
     """A new pair for one goal in one project. Nothing is started yet."""
     text = str(goal or "").replace("\r\n", "\n").strip()
     if len(text) < SHORTEST:
@@ -147,7 +156,7 @@ def open_pair(cfg, project: str, goal: str, planner: str = "auto", builder: str 
     ident = "pair-" + time.strftime("%Y%m%d-%H%M%S") + "-" + _rand.token_hex(2)
     pair = {"id": ident, "created": time.time(), "project": project, "goal": redact(text), "status": "new", "now": "",
             "planner": {"asked": str(planner or "auto"), "model": planner_model(cfg, planner), "effort": effort, "session": "", "answered_by": "", "turns": 0},
-            "builder": {"asked": str(builder or "auto")}, "chat": "",
+            "builder": {"asked": str(builder or "auto")}, "chat": _own_chat(cfg, chat),
             "plans": [], "handoffs": [], "notes": [], "questions": [], "usage": _no_usage(), "rounds": ROUNDS}
     _folder(cfg).mkdir(parents=True, exist_ok=True)
     _save(cfg, pair)

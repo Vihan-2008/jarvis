@@ -55,7 +55,12 @@ class TestCommands(EngineTestCase):
     def test_the_list_for_the_window(self):
         mods.save_command(self.cfg, "tidy", "Tidy text", "Tidy this text.")
         listed = mods.listing(self.cfg)
-        self.assertEqual([c["name"] for c in listed["builtin"]], ["compact", "research", "chat", "code", "ultracode", "dryrun", "checklist", "new", "usage", "mods", "help"])
+        self.assertEqual([c["name"] for c in listed["builtin"]][:4], ["work", "mode", "new", "research"], "the ones used most come first")
+        # Every panel is a command too (the side panel holds only Files, Terminal and Browser), and nothing was dropped.
+        for name in ("work", "mode", "status", "projects", "undo", "folder", "stop", "settings", "files", "terminal", "browser", "artifacts", "agents", "pair", "court",
+                     "security", "routines", "activity", "efficiency", "tasks", "recall", "shared", "control", "voice", "connections", "models", "updates", "mods", "help"):
+            self.assertIn(name, [c["name"] for c in listed["builtin"]])
+        self.assertEqual(len({c["name"] for c in listed["builtin"]}), len(listed["builtin"]), "each name once")
         self.assertEqual(listed["commands"], [{"name": "tidy", "about": "Tidy text", "text": "Tidy this text."}])
         self.assertEqual(listed["packs"], [], "no skill pack is switched on here")
         self.assertEqual(set(listed["when"]), {"open", "answer", "job", "reminder"})

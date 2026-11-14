@@ -12,12 +12,16 @@ Three ideas:
    anything that changes the computer or could send data out also waits for a yes, for the rest of
    that chat. A fresh chat starts clean.
 
-How much is asked is the owner's choice (LEVELS):
-  sending   only before sending something to other people, deleting, paying, and the few things an
+How much is asked is the owner's choice (LEVELS), the same modes as Claude Code's:
+  sending   "Auto": only before sending something to other people, deleting, paying, and the few things an
             attack hidden in a web page would need (installing or downloading by command, running a
             program file, writing where programs start themselves). Everything else is simply done.
-  risky     also before anything risky, and everything in careful mode (ideas 2 and 3 in full).
-  all       before every action that changes something on the PC.
+  edits     "Accept edits": writing and changing files is simply done; anything else that changes the PC
+            (commands, installing, pressing keys in other apps) waits for a yes, as in careful mode.
+  plan      "Plan": nothing is changed yet. JARVIS looks, then writes a plan and asks to go ahead.
+  all       "Manual": before every action that changes something on the PC.
+  bypass    "Bypass permissions": nothing is asked, except before paying (money is never spent unasked).
+  risky     (from earlier versions: also before anything risky, and everything in careful mode.)
 What is never done (idea 1) does not depend on the level.
 """
 from __future__ import annotations
@@ -52,11 +56,13 @@ MESSAGING_WINDOW = re.compile(
 TERMINAL_WINDOW = re.compile(
     r"powershell|command prompt|cmd\.exe|windows terminal|\bterminal\b|pwsh|\bbash\b|ubuntu|\bwsl\b|mingw|^run$|registry editor|"
     r"task scheduler|group policy", re.I)
-LEVELS = ("sending", "risky", "all")
+LEVELS = ("sending", "edits", "plan", "all", "bypass", "risky")
 # Tools that only look, or change nothing that matters: never asked about, even at the "all" level.
 QUIET_TOOLS = frozenset({"see_screen", "list_controls", "list_windows", "find_files", "read_file", "read_web_page", "weather", "list_reminders",
                          "list_projects", "wait", "find_videos", "read_clipboard", "scroll", "set_timer", "set_reminder", "cancel_reminder",
                          "set_volume", "set_brightness", "media", "focus_window", "move_window", "where_to_watch"})
+# What may still be done in Plan mode besides those: looking things up, which changes nothing.
+PLAN_LOOKS = frozenset({"WebSearch", "WebFetch", "list_projects", "see_screen", "find_files", "read_file"})
 # Windows where Enter sends what was typed (chat apps and public posts). In a mail window only ctrl+enter sends.
 CHAT_WINDOW = re.compile(
     r"whatsapp|telegram|signal|discord|slack|microsoft teams|\bteams\b|messenger|instagram|facebook|twitter|linkedin|\bmessages\b|skype|wechat|"
@@ -164,6 +170,8 @@ class Decision:
     detail: str = ""
     reason: str = ""             # shown to the model when refused
     core: bool = False           # asked at every level: sending, deleting, paying, or what an attack would need
+    money: bool = False          # it may spend money: asked even with "Bypass permissions"
+    edit: bool = False           # it only writes or changes a file: done by itself with "Accept edits"
 
     @property
     def must_ask(self) -> bool:
@@ -178,8 +186,8 @@ def _deny(reason: str) -> Decision:
     return Decision(DENY, reason=reason)
 
 
-def _ask(kind: str, question: str, detail: str = "", core: bool = False) -> Decision:
-    return Decision(CONFIRM, kind, question[:200], redact(detail)[:700], core=core)
+def _ask(kind: str, question: str, detail: str = "", core: bool = False, money: bool = False, edit: bool = False) -> Decision:
+    return Decision(CONFIRM, kind, question[:200], redact(detail)[:700], core=core, money=money, edit=edit)
 
 
 def _visible(name: str) -> str:
@@ -249,9 +257,16 @@ def path_problem(path: str, vault: str = "", state_dir: str = "") -> str | None:
     return None
 
 
+PLAN_FIRST = ("Plan mode is on: the owner wants a plan before anything is changed, so this was not done. Look around as much as "
+              "you need, then write the plan as a short numbered list and end by asking whether to go ahead.")
+
+
 def decide(tool: str, args: dict, ctx: Context) -> Decision:
     """The single place where an assistant action is allowed, held for a yes, or refused."""
     decision = _decide(tool, args, ctx)
+    looks = tool in QUIET_TOOLS or tool in PLAN_LOOKS or (tool == "use_accounts" and not (args or {}).get("change"))
+    if ctx.level == "plan" and decision.verdict != DENY and not looks:
+        return _deny(PLAN_FIRST)
     if ctx.level == "all" and decision.verdict == ALLOW and tool not in QUIET_TOOLS:
         given = args if isinstance(args, dict) else {}
         what = {"open_app": "open " + str(given.get("name", "that app"))[:40], "open_website": "open that web page", "open_file": "open that file",
@@ -281,7 +296,8 @@ def _decide(tool: str, args: dict, ctx: Context) -> Decision:
         # A tool from a connector the owner added (Gmail, a calendar...). Trusted in a clean chat; asked about in careful mode.
         name = str(args.get("tool", "")).split("__")[-1].replace("_", " ")[:60] or "a connector"
         if re.search(r"\b(send|reply|forward|post|publish|delete|remove|trash|pay|purchase|buy|transfer)\b", name, re.I):
-            return _ask("send", f"Shall I use {name}?", str(args.get("input", "")), core=True)
+            return _ask("send", f"Shall I use {name}?", str(args.get("input", "")), core=True,
+                        money=bool(re.search(r"\b(pay|purchase|buy|transfer|checkout|subscribe)\b", name, re.I)))
         return _ask("careful", f"Shall I use {name}?", str(args.get("input", ""))) if careful else _allow()
 
     if tool == "use_accounts":
@@ -334,7 +350,7 @@ def _decide(tool: str, args: dict, ctx: Context) -> Decision:
         if name and DELETE_BUTTON.search(name):
             return _ask("send", f"Shall I press “{name.strip()[:40]}”" + where, "This deletes or removes something.", core=True)
         if name and PAY_BUTTON.search(name):
-            return _ask("send", f"Shall I press “{name.strip()[:40]}”" + where, "This may spend money.", core=True)
+            return _ask("send", f"Shall I press “{name.strip()[:40]}”" + where, "This may spend money.", core=True, money=True)
         if name and OUTWARD_BUTTON.search(name):
             return _ask("send", f"Shall I press “{name.strip()[:40]}”" + where, "This may send, buy, delete or agree to something.")
         if tool == "click" and not name and careful and MESSAGING_WINDOW.search(ctx.window or ""):
@@ -423,9 +439,9 @@ def _decide(tool: str, args: dict, ctx: Context) -> Decision:
         if DANGEROUS_PLACE.search(path) or DANGEROUS_PLACE.search(_norm(path)):
             return _ask("risky", "Shall I write to this file?", path + "\nPrograms read this file when they start.", core=True)
         if args.get("exists") and not args.get("own"):     # (a file JARVIS itself wrote in this conversation may be rewritten)
-            return _ask("risky", f"Shall I replace the file {name}?", path + "\nWhat it holds now would be lost.", core=True)
+            return _ask("risky", f"Shall I replace the file {name}?", path + "\nWhat it holds now would be lost.", core=True, edit=True)
         if careful:
-            return _ask("careful", "Shall I create this file?", path)
+            return _ask("careful", "Shall I create this file?", path, edit=True)
         return _allow()
 
     if tool == "send_email":
@@ -439,10 +455,14 @@ def needs_owner(decision: Decision, ctx: Context) -> bool:
     """Whether to actually stop and ask: that depends on how much the owner wants to be asked (LEVELS)."""
     if decision.verdict != CONFIRM:
         return False
-    if ctx.level == "sending":
+    if ctx.level == "bypass":
+        return decision.money
+    if ctx.level in ("sending", "plan"):
         return decision.core
     if ctx.level == "all":
         return True
+    if ctx.level == "edits" and decision.edit:
+        return ctx.exposed                       # (a chat that read something from outside still asks before writing)
     return decision.kind == "careful" or ctx.confirm_risky or ctx.exposed      # in careful mode every question is asked
 
 

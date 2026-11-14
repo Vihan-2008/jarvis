@@ -80,7 +80,7 @@ class TestGuiSecurity(GuiTestCase):
     def test_non_json_and_oversized_rejected(self):
         self.assertEqual(self.req("POST", "/api/ask", {"text": "help"}, ctype="text/plain")[0],
                          415)
-        self.assertEqual(self.req("POST", "/api/ask", {"text": "x" * 3000})[0], 400)
+        self.assertEqual(self.req("POST", "/api/ask", {"text": "x" * 400_001})[0], 413)
 
     def test_bad_receipt_id_rejected(self):
         self.assertEqual(self.req("GET", "/api/receipt?id=../../secrets")[0], 400)

@@ -19,7 +19,9 @@ from pathlib import Path
 from typing import Any
 
 from jcc import agents, projects, receipts, efficiency, sessions, job_control, learning, activity, resilience, budgets
-from jcc import live, system
+from jcc import live, system, permissions
+
+NO_LIMIT = 7 * 24 * 3600
 from jcc.config import Config, ProjectCfg, load
 from jcc.jobs import scrub_env
 from jcc.redact import redact
@@ -56,6 +58,9 @@ Rules:
   run its independent checks. Do not try unrelated runtimes or install replacements.
 - Never deploy, touch servers, SSH, read or write keys/secrets/.env files, delete data, or change
   {protected_files}. If the task needs any of that, stop and write NEEDS_APPROVAL.md here.
+- Work on your own to the end: the owner is not watching. When something is unclear, choose a sensible,
+  reversible default, note it in JCC_PROGRESS.md and carry on. Write NEEDS_APPROVAL.md only for the
+  things above that you may never do.
 - Keep changes focused on the task. Follow the project's CLAUDE.md / AGENTS.md conventions.
 - Preserve useful existing edits. After each meaningful step, update JCC_PROGRESS.md with
   completed work, remaining steps and test results so another model can continue.
@@ -249,10 +254,11 @@ def run_job(cfg: Config, spec: dict[str, Any], workdir: Path,
                       "<untrusted source='obsidian-memory'>\n" + spec["context"][:18000] + "\n</untrusted>\n"
         (workdir / "TASK.md").write_text(redact(prompt), "utf-8")
 
-        timeout_s = int(spec.get("timeout_minutes", cfg.tier3_timeout_minutes)) * 60 - spent
+        # A coding job has no time limit: it runs until it is done. (Only the quick message rewrite keeps its short one.
+        # NO_LIMIT is not a budget: it only ends a program that has hung for a week.)
+        minutes = int(spec.get("timeout_minutes") or 0) if spec.get("kind") == "rewrite" else 0
+        timeout_s = (minutes * 60 if minutes > 0 else NO_LIMIT) - spent
         deadline = time.monotonic() + timeout_s
-        seconds_left=budgets.remaining_seconds(cfg,spec.get('project') or spec.get('reference_project'),res.attempts,exclude_id=rid)
-        if seconds_left is not None:deadline=min(deadline,time.monotonic()+seconds_left)
         maximum = int(spec.get("max_attempts", efficiency.settings(cfg)["max_attempts"]))
         from jcc.planning import milestones
         steps=milestones(task,res.level,kind);atomic_write(workdir/'milestones.json',json.dumps(steps))
@@ -300,8 +306,6 @@ def run_job(cfg: Config, spec: dict[str, Any], workdir: Path,
                 activity.emit(cfg,rid,'waiting',f'{name}/{model} is cooling down after a usage limit or error.')
                 continue
             remaining = int(deadline - time.monotonic())
-            budget_seconds=budgets.remaining_seconds(cfg,spec.get('project') or spec.get('reference_project'),res.attempts,exclude_id=rid)
-            if budget_seconds is not None:remaining=min(remaining,budget_seconds)
             if remaining <= 0:
                 res.log += "\nJob time budget reached."
                 break
@@ -366,7 +370,7 @@ def run_job(cfg: Config, spec: dict[str, Any], workdir: Path,
                 return _controlled(workdir, cwd, proj, res)
             if code == 124:
                 res.status = "paused"
-                res.log = "Time budget reached. Existing work is preserved. Increase the time limit before resuming."
+                res.log = "The agent's program stopped answering. Existing work is preserved; Continue carries on from it."
                 _checkpoint(workdir, cwd, proj, res, out)
                 return res
             if code == 0 and not proj and not (cwd / "RESULT.md").is_file():
@@ -482,6 +486,7 @@ def run_job(cfg: Config, spec: dict[str, Any], workdir: Path,
             atomic_write(workdir / job_control.ASKED, wanted[:20000])
             approval.unlink()
 
+        review_notes=''
         if proj:
             latest=project_policy.effective(cfg,cfg.projects[proj.key])
             spec['project_review_policy']=project_policy.read(cfg,proj.key)['review']
@@ -506,13 +511,23 @@ def run_job(cfg: Config, spec: dict[str, Any], workdir: Path,
                     if job_control.signal(workdir) in ('pause','cancel'):
                         return _controlled(workdir,cwd,proj,res)
                 if evidence['needs_review'] or peer and peer['status']!='clear':
-                    res.status='needs_approval';res.merge_note='Acceptance coverage or independent review needs your attention. Branch retained for review.'
                     implementation=next((a for a in reversed(res.attempts) if a.get('kind')!='review'),None)
                     if implementation:implementation['acceptance_failed']=True
                     atomic_write(workdir/'attempts.json',json.dumps(res.attempts))
+                    if permissions.mode(cfg)=='all' or spec.get('project_review_policy')=='always':
+                        # Manual mode (or a project that asks for it): the change waits until its owner keeps it.
+                        res.status='needs_approval';res.merge_note='Acceptance coverage or independent review needs your attention. Branch retained for review.'
+                    else:
+                        # Like Claude Code: the change goes in once the project's own checks pass, and what the second look
+                        # found is said beside it, with Undo.
+                        found=[str(f) for f in ((peer or {}).get('findings') or [])][:3]
+                        review_notes='A second look had notes: '+'; '.join(found)[:400] if found else 'Not every requirement was shown to be met; look it over.'
+
             from jcc import security_check
             _finish_project(proj, rid, cwd, task, res, env,
-                            review_first=learning.settings(cfg)['review_before_merge'] or security_check.held(cfg, spec.get('chat_id')))
+                            review_first=learning.settings(cfg)['review_before_merge'] or security_check.held(cfg, spec.get('chat_id')) or permissions.mode(cfg)=='all')
+            if review_notes and res.status=='done':
+                res.merge_note=(res.merge_note+' '+review_notes).strip()
         else:
             result = cwd / "RESULT.md"
             if result.exists():
@@ -557,8 +572,13 @@ def _finish_project(proj: ProjectCfg, rid: str, wt: Path, task: str, res: JobRes
                     env: dict[str, str], review_first: bool = False) -> None:
     res.files = projects.changed_files(wt)
     if not res.files:
-        res.merge_note = "The agent made no changes."
         projects.remove_worktree(proj, wt, rid, delete_branch=True)
+        if res.status == "needs_approval" and not res.asked:
+            # Nothing was changed, so there is nothing to keep: not something to wait for its owner.
+            res.status = "failed"
+            res.merge_note = "The agent finished without changing any file, so nothing was built. Continue tries again."
+        else:
+            res.merge_note = "The agent made no changes."
         return
     res.checks = res.checks or projects.run_checks(proj, wt, env)
     projects.commit_all(wt, f"JARVIS job {rid}: {task[:60]}\n\nAgent: {res.agent} "
@@ -662,14 +682,18 @@ def record(cfg: Config, spec: dict[str, Any], workdir: Path, res: JobResult,
         if res.status in ("paused", "cancelled"):
             answer = (res.merge_note or res.log) + f"\n\n[[Jobs/{rid}|Job details]]"
         if proj:
-            answer = res.merge_note or f"The coding job is {res.status}."
-            if res.files:
-                answer += "\n\nChanged files:\n\n" + "\n".join(f"- `{p}`" for p in res.files[:20])
+            # In plain words, as Claude Code says it: what happened, what the checks said, and where the details are.
+            # (What changed is the line above it in the chat, which opens to the diff.)
+            note = res.merge_note or ""
+            said = note.split(" Not pushed.", 1)[1].strip() if " Not pushed." in note else ""
+            answer = {"done": f"Done. The changes are in {proj.name}." if res.merged else (note or "Done."),
+                      "needs_approval": "The agent has a question for you, below." if res.asked else "Finished. Keep the changes or throw them away, below.",
+                      "failed": "This did not finish. " + (note or "Open its details for what went wrong.")}.get(res.status, note or f"The coding job is {res.status}.")
+            if said:
+                answer += "\n\n" + said
             if res.checks:
-                answer += "\n\nVerified by JARVIS:\n\n" + checks_md
-            if res.status == "failed":
-                answer += "\n\n" + (res.merge_note or "The job did not finish. Open its details for the diagnostic output.")
-            answer += f"\n\n[[Jobs/{rid}|Job details and full output]]"
+                answer += "\n\nChecks " + ("passed" if all(c.ok for c in res.checks) else "did not pass") + ": " + ", ".join(c.name for c in res.checks)[:300] + "."
+            answer += f"\n\n[[Jobs/{rid}|Details]]"
         result = workdir / "RESULT.md"
         if not proj and res.status == "done" and result.exists():
             answer = result.read_text("utf-8", errors="replace")

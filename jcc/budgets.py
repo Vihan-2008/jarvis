@@ -44,13 +44,14 @@ def reason(cfg,project=None,attempts=(),exclude_id=None):
     current_tokens=sum(max(0,a.get('input_tokens') or 0)+max(0,a.get('output_tokens') or 0) for a in attempts)
     current_seconds=sum(max(0,a.get('seconds') or 0) for a in attempts)
     for label,limits,spent in scopes:
-        for key,amount in (('daily_seconds',spent['seconds']+current_seconds),('daily_tokens',spent['measured_tokens']+current_tokens)):
+        for key,amount in (('daily_tokens',spent['measured_tokens']+current_tokens),):      # (there is no time budget: work runs until it is done)
             if limits.get(key) and amount>=limits[key]*(1-prefs['reserve_percent']/100):return label+' '+('time' if key.endswith('seconds') else 'measured token')+' budget reached; work is preserved.'
     if prefs['task_tokens'] and current_tokens>=prefs['task_tokens']:return 'Task measured token budget reached; work is preserved.'
     return None
 
 
 def remaining_seconds(cfg,project=None,attempts=(),exclude_id=None):
+    return None                     # there is no time budget any more: work runs until it is done
     prefs=settings(cfg);remaining=[];current=sum(max(0,a.get('seconds') or 0) for a in attempts)
     for key,limits in ((None,prefs),(project,prefs['projects'].get(project,{}))):
         if limits.get('daily_seconds'):

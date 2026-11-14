@@ -245,6 +245,22 @@ def open_folder(path: Path) -> None:
         pass
 
 
+def reveal(path: Path) -> None:
+    """Show a file in the system's file manager, selected in its folder (a folder is simply opened)."""
+    path = Path(path)
+    if path.is_dir():
+        return open_folder(path)
+    try:
+        if os.name == "nt":
+            subprocess.Popen(["explorer.exe", "/select,", str(path)])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", str(path)])
+        else:
+            open_folder(path.parent)
+    except OSError:
+        pass
+
+
 # ---------------------------------------------------------------------------------------------------------- run
 def run(app_dir: Path, vault: str | os.PathLike | None = None, *, state_dir: Path | None = None,
         open_it: bool = False) -> list[str]:

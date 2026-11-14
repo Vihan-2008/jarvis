@@ -42,11 +42,37 @@ class TestPermissions(GuiTestCase):
         self.addCleanup(lambda: (agent.turns.pop(chat, None), [entry["event"].set() for entry in list(agent.pending.values())]))
         return waiting, got
 
-    def test_the_mode_in_force_and_the_three_ways_of_asking(self):
+    def test_the_mode_in_force_and_claude_codes_five_modes(self):
         status, got = self.call(action="state")
         self.assertEqual((status, got["mode"], got["pending"], got["more"]), (200, "sending", [], 0))
-        self.assertEqual([m["id"] for m in got["modes"]], list(policy.LEVELS), "the same three as the rules themselves go by")
-        self.assertTrue(all(m["name"] and m["about"] for m in got["modes"]))
+        self.assertEqual([(m["id"], m["name"]) for m in got["modes"]],
+                         [("sending", "Auto"), ("all", "Manual"), ("edits", "Accept edits"), ("plan", "Plan"), ("bypass", "Bypass permissions")])
+        self.assertTrue(all(m["id"] in policy.LEVELS and m["about"] for m in got["modes"]), "each is one the rules themselves go by")
+
+    def test_what_each_mode_asks_about(self):
+        new = ("write_file", {"path": "C:/work/new-page.html"})
+        replace = ("write_file", {"path": "C:/work/notes.txt", "exists": True})
+        command = ("run_command", {"command": "npm test"})
+        email = ("send_email", {"to": "a@b.com", "subject": "Hi", "body": "Hello"})
+        pay = ("click_control", {"name": "Pay now"})
+
+        def asks(level, tool, args, window="Shop"):
+            ctx = policy.Context(level=level, window=window, control=args.get("name", ""))
+            decision = policy.decide(tool, args, ctx)
+            return "refused" if decision.verdict == policy.DENY else policy.needs_owner(decision, ctx)
+        # Auto: making things and running ordinary commands just happen; sending, paying, and losing what a file holds are asked.
+        self.assertEqual([asks("sending", *x) for x in (new, command, replace, email, pay)], [False, False, True, True, True], "Auto")
+        self.assertEqual([asks("all", *x) for x in (new, command, replace, email, pay)], [True, True, True, True, True], "Manual: every change")
+        install = ("run_command", {"command": "npm install left-pad"})
+        self.assertEqual([asks("edits", *x) for x in (new, replace, command, install, email)], [False, False, False, True, True],
+                         "Accept edits: file edits by themselves; installing, sending and the like ask")
+        self.assertIs(asks("bypass", *install), False)
+        self.assertEqual([asks("bypass", *x) for x in (new, replace, command, email, pay)], [False, False, False, False, True], "Bypass: only paying is ever asked")
+        self.assertEqual([asks("plan", *x) for x in (new, replace, command, email)], ["refused", "refused", "refused", "refused"], "Plan: nothing is changed yet")
+        self.assertIs(asks("plan", "read_file", {"path": "C:/work/notes.txt"}), False, "but looking is fine while planning")
+        self.assertIn("plan", policy.decide("run_command", {"command": "dir"}, policy.Context(level="plan")).reason.lower())
+        exposed = policy.Context(level="edits", exposed=True)
+        self.assertTrue(policy.needs_owner(policy.decide(*replace, exposed), exposed), "a chat that read something from outside still asks before writing")
 
     def test_changing_the_mode_is_what_the_rules_then_go_by(self):
         self.assertEqual(self.call(action="mode", mode="all"), (200, {"mode": "all"}))
@@ -109,16 +135,50 @@ class TestPermissions(GuiTestCase):
         self.assertEqual(self.call(action="decide", kind="job", id=rid, yes=False, text="Not on this server."), (200, {"kind": "job", "id": rid, "status": "cancelled", "answered": "no"}))
         self.assertEqual(self.call(action="state")[1]["pending"], [])
 
-    def test_a_change_that_waits_to_be_looked_at_is_listed_but_never_decided_here(self):
+    def test_a_change_to_keep_is_kept_only_as_it_was_shown_and_can_be_thrown_away(self):
         rid = self.job("20261114-040403-abcd")
-        (self.state.cfg.jobs_root / rid / "repo").mkdir()                      # a copy with a change in it: a review, not a question
-        blocked = self.job("20261114-040404-abcd", blocked_by="keys/secrets")   # something a job may never do by itself: nothing to decide
+        (self.state.cfg.jobs_root / rid / "repo").mkdir()                      # a copy with a change in it: a change to keep
         asked = self.call(action="state")[1]["pending"]
-        self.assertEqual([(a["kind"], a["id"]) for a in asked], [("review", rid)])
-        self.assertNotIn(blocked, str(asked))
-        status, said = self.call(action="decide", kind="review", id=rid, yes=True)
-        self.assertEqual((status, said["error"]), (400, "Look at the change first: open it, then approve it there."))
-        self.assertEqual(parse_frontmatter(Vault(self.state.cfg.vault).read(f"Jobs/{rid}.md"))[0]["status"], "needs_approval")
+        self.assertEqual([(a["kind"], a["id"], a["question"]) for a in asked], [("review", rid, "Keep these changes?")])
+        for revision in (None, "", "not-hex!", "abc"):
+            status, said = self.call(action="decide", kind="review", id=rid, yes=True, revision=revision)
+            self.assertEqual((status, said["error"]), (400, "Look at the changes first: the card shows them, then Keep them."), revision)
+        self.assertEqual(parse_frontmatter(Vault(self.state.cfg.vault).read(f"Jobs/{rid}.md"))[0]["status"], "needs_approval", "nothing was kept unseen")
+        status, said = self.call(action="decide", kind="review", id=rid, yes=False)
+        self.assertEqual((status, said["status"], said["answered"]), (200, "cancelled", "no"))
+        fm, body = parse_frontmatter(Vault(self.state.cfg.vault).read(f"Jobs/{rid}.md"))
+        self.assertEqual(fm["status"], "cancelled")
+        self.assertIn("Thrown away by its owner", body)
+        self.assertEqual(self.call(action="state")[1]["pending"], [], "answered: it no longer waits")
+        self.assertEqual(self.call(action="decide", kind="review", id=rid, yes=False)[0], 400, "an answer is taken once")
+
+    def test_a_job_held_for_what_it_mentions_can_go_ahead_once_or_be_cancelled(self):
+        cfg = self.state.cfg
+        from jcc.chats import Chats
+        where = Chats(cfg).create("The site", None)["id"]
+        held = self.job("20261114-040404-abcd", blocked_by="deploying", chat_id=where, task="Build it and deploy it")
+        never = self.job("20261114-040406-abcd", blocked_by="money", chat_id=where)
+        asked = {a["id"]: a for a in self.call(action="state")[1]["pending"]}
+        self.assertEqual((asked[held]["kind"], asked[held]["can"]), ("blocked", True))
+        self.assertEqual((asked[never]["kind"], asked[never]["can"]), ("blocked", False), "spending money: it can only be cancelled")
+        self.assertEqual(self.call(action="decide", kind="blocked", id=never, yes=True)[0], 400)
+        self.assertFalse(permissions.may_go_ahead(cfg, where, "deploying"), "not without its owner's go-ahead")
+        sent = []
+        self.state.send_chat = lambda cid, text, **kw: (sent.append((cid, text, kw)), {"messages": [{"role": "assistant", "job": True, "receipt": "20261114-040407-abcd"}]})[1]
+        status, said = self.call(action="decide", kind="blocked", id=held, yes=True)
+        self.assertEqual((status, said.get("answered"), said.get("started")), (200, "yes", "20261114-040407-abcd"), said)
+        self.assertEqual(sent[0][:2], (where, "Build it and deploy it"), "the same task, sent again in the same chat")
+        self.assertIs(sent[0][2]["as_job"], True)
+        self.assertTrue(permissions.may_go_ahead(cfg, where, "deploying"), "the guard lets it through")
+        self.assertFalse(permissions.may_go_ahead(cfg, where, "deploying"), "once")
+        self.assertFalse(permissions.may_go_ahead(cfg, where, "money"), "and never what a job may never do")
+        self.assertEqual(parse_frontmatter(Vault(cfg.vault).read(f"Jobs/{held}.md"))[0]["status"], "cancelled", "the held one is closed")
+        self.assertEqual(self.call(action="decide", kind="blocked", id=never, yes=False)[1]["answered"], "no")
+        self.assertEqual(self.call(action="state")[1]["pending"], [])
+        self.assertIn("go ahead", permissions.GO_AHEAD_NOTE)
+        assistant.configure(cfg, {"ask": "bypass"})
+        self.assertTrue(permissions.may_go_ahead(cfg, "chat-1", "keys/secrets"), "Bypass permissions: it starts without asking")
+        self.assertFalse(permissions.may_go_ahead(cfg, "chat-1", "the risk limits (AI may never change them)"), "but the trading risk limits never")
 
     def test_everything_that_waits_is_in_one_list_oldest_question_first(self):
         self.held(question="Shall I run this command?", detail="dir", kind="risky")

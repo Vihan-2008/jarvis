@@ -237,7 +237,7 @@ class TestTheRecord(PairCase):
         self.assertEqual(done["status"], "done")
 
     def test_what_a_pair_needs_to_begin(self):
-        for goal, project in (("too short", "calc"), ("x" * 5000, "calc"), (GOAL, "no-such-project")):
+        for goal, project in (("too short", "calc"), ("x" * 400_001, "calc"), (GOAL, "no-such-project")):
             with self.assertRaises(pairing.PairError):
                 pairing.open_pair(self.cfg, project, goal)
         with self.assertRaises(pairing.PairError):

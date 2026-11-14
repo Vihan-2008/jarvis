@@ -139,6 +139,11 @@ class JobLauncher:
         block = guard.tier3_block_reason(task, [str(p) for p in cfg.protected])
         if kind == "chat" and block != "keys/secrets" and not str(block).startswith("protected folder") and re.match(r"^(what|why|how|explain|describe|tell me|summarize)\b", task, re.I):
             block = None  # an explanation is not an instruction to execute the described action
+        if block and kind == "job":
+            from jcc import permissions
+            if permissions.may_go_ahead(cfg, chat_id or "", block):
+                # Its owner said go ahead (or chose Bypass permissions). The agents are still told to leave those things alone.
+                task, block = task + permissions.GO_AHEAD_NOTE, None
         u = Usage(cfg.state_dir, cfg.caps)
         try:
             # Ultracode (effort "ultra") is always planned as a large job: the strongest models, helpers for wide searches and
@@ -169,9 +174,8 @@ class JobLauncher:
         if block:
             note = self.write_job_note(
                 rid, {**base_fm, "status": "needs_approval", "blocked_by": block},
-                f"# Needs approval\n\nCoding jobs will not do this automatically because it "
-                f"involves **{block}**.\n\n> {task}\n\nDo it yourself, or run it in Claude Code "
-                "where you approve each step.")
+                f"# Waiting for your go-ahead\n\nThis was not started because it mentions **{block}**.\n\n> {task}\n\n"
+                "Answer it in the chat: Go ahead starts it (the agents still never do that part themselves), Cancel ends it.")
             return JobOutcome("needs_approval", f"Blocked: involves {block}.", [note])
         from jcc.task_queue import blocked
         dependency_reason=blocked(cfg,rid)

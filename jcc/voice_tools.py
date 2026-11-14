@@ -73,7 +73,7 @@ TOOLS = [
     _tool("read_file", "Read a text file.", {"path": _S}, ["path"]),
     _tool("create_project", "Create a new JARVIS project folder with a starter. kind is web (website), python (tool or automation) or node.",
           {"name": _S, "kind": {"type": "string", "enum": ["web", "python", "node"]}}, ["name"]),
-    _tool("build_with_coding_agents", "Hand a real building or coding task in a project to the coding agents (Claude Code and Codex). It runs in the background for minutes; progress shows in JARVIS under My work.",
+    _tool("build_with_coding_agents", "Hand a real building or coding task in a project to the coding agents (Claude Code and Codex). It runs in the background for minutes; its progress shows in this chat.",
           {"project": {"type": "string", "description": "project key from create_project or list_projects"}, "task": _S,
            "ultra": {"type": "boolean", "description": "Ultracode: the strongest AI, thinking as hard as it can, with a second opinion. Only when the user asks for it."}},
           ["project", "task"]),
@@ -1198,7 +1198,7 @@ class Toolbox:
         return "\n".join(f"{p['name']} (key {p['key']}) in {p['path']}" for p in rows) or "There are no projects yet."
 
     def build_with_coding_agents(self, project: str, task: str, ultra: bool = False) -> str:
-        return self._said("build_with_coding_agents", {"project": str(project)[:80], "task": str(task)[:1900], **({"ultra": True} if ultra is True else {})})
+        return self._said("build_with_coding_agents", {"project": str(project)[:80], "task": str(task)[:400_000], **({"ultra": True} if ultra is True else {})})
 
     def make_image(self, description: str) -> str:
         return self._said("make_image", {"description": str(description)[:600]})

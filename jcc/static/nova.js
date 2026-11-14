@@ -291,7 +291,7 @@ function setWorkMode(next, byHand) {
 // Sidebar: one-click new chat, search, my work, then projects and chats.
 const newChat = el('button', { class: 'nv-nav', type: 'button', data: { tip: 'Start a fresh conversation', key: 'Ctrl+Shift+O' } }, icon('plus') + '<span>New chat</span>');
 const workNav = el('button', { class: 'nv-nav', type: 'button', data: { tip: 'See what JARVIS is doing, what is finished and what needs you' } }, icon('work') + '<span>My work</span>');
-$('search').before(newChat); $('search').after(workNav);
+$('search').before(newChat); $('search').after(workNav); workNav.classList.add('hidden');
 $('search').placeholder = 'Search chats'; $('search').dataset.tip = 'Find a chat by its name'; $('search').dataset.key = 'Ctrl+K';
 sidebar.querySelector('.brand').childNodes.forEach(n => { if (n.nodeType === 1 && n.tagName === 'DIV') n.firstChild.textContent = 'JARVIS'; });
 // A small living mark next to the name. (While a chat is open the real orb sits there instead.)
@@ -311,7 +311,7 @@ function setFull(on) {
 fullScreen.addEventListener('change', () => store.set('nv-open', fullScreen.matches ? 'fullscreen' : 'remember'));
 function goHome() { selectProject(selectedProject || 'all'); if (innerWidth < 900) setSide(false); $('message').focus(); }
 newChat.onclick = () => { closePanel(); goHome(); };
-workNav.onclick = () => openPane('work');
+workNav.onclick = () => window.Nova.command?.('work');
 $('new-project').dataset.tip = 'Create a project, or use a folder you already have';
 $('new-project').onclick = e => { e.stopPropagation(); openPop($('new-project'), p => {
   item(p, 'Create a new project', 'plus', () => $('project-dialog').showModal(), { note: 'JARVIS sets up the folder for you' });
@@ -360,7 +360,7 @@ function fitTop() {
   topbar.classList.toggle('nv-top-1', free < 150); topbar.classList.toggle('nv-top-2', free < 64); topbar.classList.toggle('nv-top-3', free < 0);
 }
 if (window.ResizeObserver) new ResizeObserver(fitTop).observe(topLeft);
-const PANES = [], paneButtons = new Map();
+const PANES = [], paneButtons = new Map(), TOOL_TABS = new Set(['files', 'terminal', 'browser']);
 function registerPane(def) { const at = PANES.findIndex(p => p.id === def.id); if (at >= 0) PANES[at] = { ...PANES[at], ...def }; else PANES.push(def); drawTabs(); drawTopButtons(); }
 function unregisterPane(id) { const at = PANES.findIndex(p => p.id === id); if (at >= 0) { PANES.splice(at, 1); drawTabs(); drawTopButtons(); } }
 function drawTopButtons() {
@@ -398,7 +398,9 @@ if (window.ResizeObserver) new ResizeObserver(tabEdges).observe(tabStrip);
 function drawTabs() {
   const left = tabStrip.scrollLeft;
   tabStrip.replaceChildren();
-  for (const p of PANES) {
+  // Only the tools are tabs (as in Claude and T3 Code): files, terminal and browser, and panels of the owner's own.
+  // Everything else is a /command that answers in the chat; a panel opened by one shows as a tab while it is open.
+  for (const p of PANES.filter(p => TOOL_TABS.has(p.id) || p.id.startsWith('mod') || p.id === currentPane)) {
     const b = el('button', { class: 'nv-tab' + (p.adv ? ' nv-adv' : '') + (p.id === currentPane ? ' on' : ''), type: 'button', role: 'tab', data: { tip: p.tip } }, icon(p.icon) + esc(p.label));
     b.onclick = () => openPane(p.id); tabStrip.append(b);
   }
@@ -434,7 +436,7 @@ const legacyTab = selector => () => toolBar.querySelector(selector)?.click();
 registerPane({ id: 'files', label: 'Files', icon: 'folder', top: true, tip: 'Browse, create and edit the files in a project', open: () => showTool('files') });
 registerPane({ id: 'terminal', label: 'Terminal', icon: 'term', top: true, key: 'Ctrl+`', tip: 'Type commands for your computer', open: () => showTool('terminal') });
 registerPane({ id: 'browser', label: 'Browser', icon: 'globe', top: true, tip: 'Open web pages next to your chat', open: () => showTool('browser') });
-registerPane({ id: 'activity', label: 'Activity', icon: 'pulse', top: true, tip: 'Review what JARVIS changed and approve results', open: () => showTool('activity') });
+registerPane({ id: 'activity', label: 'Activity', icon: 'pulse', tip: 'Review what JARVIS changed and approve results', open: () => showTool('activity') });
 registerPane({ id: 'work', label: 'My work', icon: 'work', tip: 'Everything in progress, finished or waiting for you', open: () => $('easy-work-tab').click() });
 registerPane({ id: 'insights', label: 'Efficiency', icon: 'spark', adv: true, tip: 'How much each AI was used and how well it did', open: legacyTab('[data-insights]') });
 registerPane({ id: 'queue', label: 'Tasks', icon: 'check', adv: true, tip: 'The order of waiting work', open: legacyTab('[data-delivery-pane="queue"]') });
@@ -480,6 +482,37 @@ async function setStar(id, on) {
   await api('/api/library', { action: 'organize', id, preferences: { folder: meta.folder || '', tags: meta.tags || [], pinned: on } });
   on ? starred.add(id) : starred.delete(id); listSig = ''; renderLists();
 }
+// "Delete project": it leaves JARVIS. Its folder stays where it is unless the box is ticked, and then it goes to the
+// Recycle Bin (never deleted for good). Its chats and its notes are kept.
+const BIN = /Mac/.test(navigator.platform) ? 'Trash' : 'Recycle Bin';
+async function deleteProject(key) {
+  const p = (state?.projects || []).find(x => x.key === key); if (!p) return;
+  const d = dialog('<h2>Delete the project ' + esc(p.name) + '?</h2><p>It is taken out of JARVIS. Its chats and notes are kept.</p>' +
+    '<label class="nv-check"><input type="checkbox" data-trash> Also move its folder to the ' + BIN + '</label>' +
+    '<p class="small">' + esc(p.path || '') + '</p><div class="actions"><button class="plain" data-no>Cancel</button><button class="primary danger" data-yes>Delete project</button></div>');
+  d.querySelector('[data-no]').onclick = () => d.close();
+  d.querySelector('[data-yes]').onclick = async () => {
+    const trash = d.querySelector('[data-trash]').checked; d.close();
+    try {
+      const done = await api('/api/project/remove', { project: key, trash });
+      if (selectedProject === key) selectProject('');
+      notify(done.trashed ? 'Deleted. Its folder is in the ' + BIN + '.' : 'Deleted from JARVIS. Its folder is still at ' + (done.kept || 'the same place') + '.');
+      await refresh();
+    } catch (error) { toast(error.message); }
+  };
+}
+// A project in the list: right-click for its folder, or to delete it.
+document.addEventListener('contextmenu', e => {
+  const row = e.target.closest?.('.project-item[data-project]'); if (!row || row.dataset.project === 'all') return;
+  e.preventDefault();
+  openPop(row, p => {
+    item(p, 'Open file location', 'folder', () => revealProject(row.dataset.project));
+    item(p, 'Delete project', 'trash', () => deleteProject(row.dataset.project), { danger: true });
+  });
+});
+async function revealProject(key, file) {
+  try { await api('/api/reveal', { project: key, ...(file ? { file } : {}) }); } catch (error) { toast(error.message); }
+}
 async function renameChat(id) {
   const info = state.chats.find(c => c.id === id), title = await ask({ title: 'Rename chat', label: 'Chat name', value: info?.title || '' });
   if (!title) return; await api('/api/chat/update', { id, title }); await refresh();
@@ -507,6 +540,7 @@ function chatMenu(p, id) {
   const info = state.chats.find(c => c.id === id) || {}, isStar = starred.has(id);
   item(p, isStar ? 'Remove star' : 'Star', 'star', () => setStar(id, !isStar), { note: 'Starred chats stay at the top' });
   item(p, 'Rename', 'edit', () => renameChat(id));
+  if (info?.project) item(p, 'Open file location', 'folder', () => revealProject(info.project), { note: 'Show the project’s folder in ' + (/Mac/.test(navigator.platform) ? 'Finder' : 'File Explorer') });
   item(p, isWorkspace(info) ? 'Archive' : 'Move back to chats', 'box', async () => { await api('/api/chat/update', { id, archived: isWorkspace(info) }); await refresh(); }, { note: 'Hide it from the main list, but keep it' });
   if (id === current && chat) item(p, 'Save as a file', 'down', () => exportChat(chat), { note: 'Download this chat as a text document' });
   if (id === current && chat) item(p, 'Save as a web page to share', 'globe', () => sharePage(chat), { note: 'One file anyone can open in a browser' });
@@ -534,9 +568,9 @@ document.addEventListener('click', async e => {
 /* ---------- conversation ---------- */
 const box = $('messages');
 let madeIn = { chat: '', count: 0 };              // how many artifacts the open conversation had when it was last looked at
-const STAGES = { planned: 'Chose the best AI for this', effort: 'Decided how deeply to think', working: 'Working on it', checking: 'Double-checking the result', waiting: 'Waiting for an AI to be free', switching: 'Switching to another AI', repair: 'Fixing a problem it found', baseline: 'Looking at the project first', context: 'Gathering more background', context_reused: 'Reusing what it already knows', acceptance: 'Noting the evidence', stalled: 'Stuck and needs you', done: 'Finished', failed: 'Could not finish', paused: 'Paused', queued: 'Waiting to start', cancelled: 'Stopped', needs_approval: 'Ready for your review', tool: 'Used a tool', note: 'Note' };
+const STAGES = { planned: 'Chose the best AI for this', effort: 'Decided how deeply to think', working: 'Working on it', checking: 'Double-checking the result', waiting: 'Waiting for an AI to be free', switching: 'Switching to another AI', repair: 'Fixing a problem it found', baseline: 'Looking at the project first', context: 'Gathering more background', context_reused: 'Reusing what it already knows', acceptance: 'Noting the evidence', stalled: 'Stuck and needs you', done: 'Finished', failed: 'Could not finish', paused: 'Paused', queued: 'Waiting to start', cancelled: 'Stopped', needs_approval: 'Waiting for your answer', tool: 'Used a tool', note: 'Note' };
 const LIVE = new Set(['running', 'queued']);
-const WORDS = { running: 'Working', queued: 'Waiting to start', paused: 'Paused', failed: 'Could not finish', needs_approval: 'Needs your review', cancelled: 'Stopped', done: 'Finished' };
+const WORDS = { running: 'Working', queued: 'Waiting to start', paused: 'Paused', failed: 'Could not finish', needs_approval: 'Waiting for your answer', cancelled: 'Stopped', done: 'Finished' };
 let rendered = [], pinned = true, wasLive = new Map(), revealing = new Map(), eventsCache = new Map(), liveText = new Map(), openWork = new Map(), ratings = new Map();
 const jump = el('button', { class: 'nv-jump', type: 'button', 'aria-label': 'Jump to the latest message', data: { tip: 'Jump to the latest message' } }, icon('up'));
 document.querySelector('.composer-wrap').append(jump);
@@ -549,17 +583,32 @@ function plainWait(text) {
   if (/no agent available/i.test(text)) return 'No AI is free right now. This will start by itself when one is ready.';
   return text.slice(0, 200);
 }
+// A step as one short line: the job's own copy of the project is left out of paths ("cd C:/.../jobs/<id>/repo && npm test"
+// is "npm test"), and a step the agent took is told apart from what JARVIS itself did around it.
+function plainStep(text) {
+  return String(text || '').replace(/(?:cd\s+)?["']?[A-Za-z]:[\\/][^\s"']*?[\\/]jobs[\\/][^\\/\s"']+[\\/]repo[\\/]?["']?\s*(?:&&|;)?\s*/gi, '').replace(/\s+/g, ' ').trim() || 'Working';
+}
+const KINDS = [['command', /^(running|ran|run)\b|command/i, 'ran %n command', 'ran %n commands'], ['read', /^(reading|read|looking at|opening|opened)\b/i, 'read %n file', 'read %n files'],
+  ['edit', /^(editing|edited|changing|changed|updating|updated|writing|wrote|saving|saved)\b/i, 'edited %n file', 'edited %n files'], ['create', /^(creating|created|making|made|adding|added)\b/i, 'created %n file', 'created %n files'],
+  ['search', /^(searching|searched|finding|found|looking up|looked up|looking for)\b/i, 'searched %n time', 'searched %n times']];
+function tally(events) {
+  const counts = {};
+  for (const ev of events) if (ev.stage === 'tool') { const kind = KINDS.find(([, test]) => test.test(plainStep(ev.message))); if (kind) counts[kind[0]] = (counts[kind[0]] || 0) + 1; }
+  const parts = KINDS.filter(([kind]) => counts[kind]).map(([kind, , one, many]) => (counts[kind] === 1 ? one : many).replace('%n', counts[kind]));
+  return parts.length ? parts.join(', ').replace(/^./, c => c.toUpperCase()) : '';
+}
 function stepsHtml(rid, message) {
   const events = eventsCache.get(rid) || [];
-  if (!events.length) return '<li><b>' + (message.status === 'queued' ? 'Waiting its turn' : LIVE.has(message.status) ? 'Getting started' : 'No step-by-step record for this reply') + '</b>' + (LIVE.has(message.status) && message.content ? '<small>' + esc(plainWait(message.content)) + '</small>' : '') + '</li>';
-  return events.map(ev => ev.stage === 'tool' ? '<li><b>' + esc(ev.message) + '</b></li>' : '<li><b>' + esc(STAGES[ev.stage] || ev.stage) + '</b>' + (ev.agent ? ' · ' + esc(ev.agent === 'codex' ? 'GPT' : ev.agent[0].toUpperCase() + ev.agent.slice(1)) + (ev.model ? ' ' + esc(ev.model) : '') : '') + (ev.message ? '<small>' + esc(ev.message) + '</small>' : '') + '</li>').join('');
+  if (!events.length) return '<li>' + (message.status === 'queued' ? 'Waiting its turn' : LIVE.has(message.status) ? 'Getting started' : 'No step-by-step record for this reply') + (LIVE.has(message.status) && message.content ? '<small>' + esc(plainWait(message.content)) + '</small>' : '') + '</li>';
+  return events.map(ev => ev.stage === 'tool' ? '<li class="tool">' + esc(plainStep(ev.message)) + '</li>' : '<li class="stage">' + esc(STAGES[ev.stage] || ev.stage) + (ev.agent ? ' · ' + esc(ev.agent === 'codex' ? 'GPT' : ev.agent[0].toUpperCase() + ev.agent.slice(1)) + (ev.model ? ' ' + esc(ev.model) : '') : '') + '</li>').join('');
 }
 function workBlock(message) {
   const rid = message.receipt, live = LIVE.has(message.status), events = eventsCache.get(rid) || [];
-  const open = openWork.has(rid) ? openWork.get(rid) : live;
+  const open = openWork.has(rid) ? openWork.get(rid) : false;            // (one line until it is opened, as in Claude Code)
   const span = events.length > 1 ? events[events.length - 1].at - events[0].at : 0;
   const latest = events[events.length - 1];
-  const label = live ? (latest ? (latest.stage === 'tool' ? latest.message : STAGES[latest.stage] || 'Working') : (message.fast ? 'Thinking' : WORDS[message.status])) : message.status === 'done' ? (message.fast ? 'Did ' + events.length + (events.length === 1 ? ' thing' : ' things') : span ? 'Worked for ' + fmtTime(span) : 'How JARVIS did this') : WORDS[message.status] || 'Details';
+  const did = tally(events);
+  const label = live ? (latest ? (latest.stage === 'tool' ? plainStep(latest.message) : STAGES[latest.stage] || 'Working') : (message.fast ? 'Thinking' : WORDS[message.status])) : message.status === 'done' ? (did || (span ? 'Worked for ' + fmtTime(span) : message.fast ? 'Did ' + events.length + (events.length === 1 ? ' thing' : ' things') : 'Finished')) : WORDS[message.status] || 'Details';
   const mark = live ? '<i class="nv-spin"></i>' : '<i class="nv-done-dot ' + (message.status === 'done' ? '' : ['failed', 'cancelled'].includes(message.status) ? 'bad' : 'wait') + '"></i>';
   return '<details class="nv-work ' + (live ? 'live' : '') + '" data-rid="' + esc(rid) + '" ' + (open ? 'open' : '') + '><summary>' + mark + '<b>' + esc(label) + '</b>' + (live ? '<span data-since="' + (message.at || Date.now() / 1000) + '"></span>' : '') + '</summary><ol class="nv-steps">' + stepsHtml(rid, message) + '</ol>' +
     (live ? '<div class="nv-work-foot"><button class="plain" type="button" data-nv-stop="' + esc(rid) + '" data-tip="Stop this reply. Anything already finished is kept.">' + icon('stop') + 'Stop</button></div>' : message.fast ? '' : ['paused', 'failed'].includes(message.status) ? '<div class="nv-work-foot"><button class="plain" data-job-action="resume" data-job-id="' + esc(rid) + '" data-tip="Carry on from where it stopped">Continue</button></div>' : '') + '</details>';
@@ -574,6 +623,8 @@ function messageHtml(m, i, c) {
   if (m.fast && m.steps?.length && !eventsCache.has(m.receipt)) eventsCache.set(m.receipt, m.steps.map((t, n) => ({ stage: 'tool', message: t, at: n })));
   const live = LIVE.has(m.status), job = m.fast ? (LIVE.has(m.status) || !!m.steps?.length) : (!!m.agent || (m.status && m.status !== 'done')), streamed = liveText.get(m.receipt);
   let html = (m.receipt && (job || live)) ? workBlock(m) : '';
+  if (m.content?.startsWith('**From the planner**')) return '<details class="nv-planner"><summary>' + icon('note') + '<b>The planner wrote the next steps</b></summary><div class="content">' + rich(m.content.replace(/^\*\*From the planner\*\*\s*/, '')) + '</div></details>';
+  if (m.receipt && !m.fast && (m.job || m.agent) && !live && /^(done|needs_approval)$/.test(m.status || '')) html += '<details class="nv-changed" data-job="' + esc(m.receipt) + '"><summary>' + icon('edit') + '<b>See what changed</b></summary><div class="nv-changed-body">Reading the changes…</div></details>';
   if (m.fast && m.status === 'paused' && m.resumes) html += '<div class="nv-waits">' + icon('clock') + '<span>Waiting for an AI to be available again. JARVIS carries on with this by itself at about ' +
     esc(new Date(m.resumes * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })) + '.</span><button class="plain" type="button" data-nv-wait="now" data-rid="' + esc(m.receipt) + '">Try now</button>' +
     '<button class="plain" type="button" data-nv-wait="cancel" data-rid="' + esc(m.receipt) + '">Do not</button></div>';
@@ -660,7 +711,7 @@ async function refreshSteps(rid) {
   const block = box.querySelector('.nv-work[data-rid="' + rid + '"]'), message = chat?.messages.find(m => m.receipt === rid && m.role === 'assistant');
   if (block && message && events.length !== before) {
     block.querySelector('.nv-steps').innerHTML = stepsHtml(rid, message);
-    if (LIVE.has(message.status)) { const latest = events[events.length - 1]; block.querySelector('summary b').textContent = latest.stage === 'tool' ? latest.message : STAGES[latest.stage] || 'Working'; }
+    if (LIVE.has(message.status)) { const latest = events[events.length - 1]; block.querySelector('summary b').textContent = latest.stage === 'tool' ? plainStep(latest.message) : STAGES[latest.stage] || 'Working'; }
     stick();
   }
   if (live?.text && message && LIVE.has(message.status) && live.text !== liveText.get(rid)) {
@@ -676,7 +727,7 @@ function liveUpdate(rid, text, stepList) {
   if (text !== undefined) liveText.set(rid, text);
   const block = box.querySelector('.nv-work[data-rid="' + rid + '"]'), message = chat?.messages.find(m => m.receipt === rid && m.role === 'assistant');
   if (!block || !message) return;
-  if (stepList) { block.querySelector('.nv-steps').innerHTML = stepsHtml(rid, message); block.querySelector('summary b').textContent = stepList[stepList.length - 1]; }
+  if (stepList) { block.querySelector('.nv-steps').innerHTML = stepsHtml(rid, message); block.querySelector('summary b').textContent = plainStep(stepList[stepList.length - 1]); }
   if (text !== undefined) {
     const article = block.closest('.nv-msg'); let content = article.querySelector('.content');
     if (!content) { content = el('div', { class: 'content nv-caret' }); article.append(content); }
@@ -696,7 +747,19 @@ function fastPoll() {
   }, 700);
 }
 setInterval(() => { for (const node of box.querySelectorAll('[data-since]')) node.textContent = '· ' + fmtTime(Date.now() / 1000 - Number(node.dataset.since)); }, 1000);
-box.addEventListener('toggle', e => {
+box.addEventListener('toggle', async e => {
+  const changed = e.target.closest?.('.nv-changed[data-job]');
+  if (changed && changed.open && !changed.dataset.read) {
+    changed.dataset.read = '1'; const spot = changed.querySelector('.nv-changed-body');
+    try {
+      const d = await api('/api/job/details?id=' + encodeURIComponent(changed.dataset.job)), seen = window.Nova.changeSummary ? window.Nova.changeSummary(d) : { html: esc((d.files || []).join(', ')) };
+      const key = chat?.project || '';
+      spot.innerHTML = seen.html + '<div class="nv-changed-foot">' + (key ? '<button class="plain" type="button" data-nv-cmd="folder">' + icon('folder') + 'Open file location</button>' : '') +
+        (d.can_undo ? '<button class="plain" type="button" data-nv-undo="' + esc(changed.dataset.job) + '">' + icon('retry') + 'Undo these changes</button>' : '') + '</div>';
+      if (!(d.files || []).length) spot.textContent = 'No files were changed.';
+    } catch (error) { spot.textContent = 'The changes could not be read: ' + error.message; changed.dataset.read = ''; }
+    return;
+  }
   const block = e.target.closest?.('.nv-work[data-rid]'); if (!block || !block.dataset.rid) return;
   openWork.set(block.dataset.rid, block.open);
   if (block.open && !eventsCache.has(block.dataset.rid)) refreshSteps(block.dataset.rid).then(() => { const m = chat?.messages.find(x => x.receipt === block.dataset.rid && x.role === 'assistant'); if (m) block.querySelector('.nv-steps').innerHTML = stepsHtml(block.dataset.rid, m); });
@@ -708,8 +771,13 @@ async function stopReply(rid) {
   const d = await api('/api/job/control', { id: target, action: 'cancel' }); notify(d.requested ? 'Stopping. Anything already done is kept.' : 'Stopped.'); await refresh();
 }
 document.addEventListener('click', async e => {
-  const b = e.target.closest('[data-nv-act],[data-nv-stop],[data-nv-rate]'); if (!b) return;
+  const b = e.target.closest('[data-nv-act],[data-nv-stop],[data-nv-rate],[data-nv-undo],[data-nv-cmd]'); if (!b) return;
   try {
+    if (b.dataset.nvCmd) return void runCommand(b.dataset.nvCmd, b.dataset.arg || '');
+    if (b.dataset.nvUndo) {
+      if (!(await confirmBox({ title: 'Undo these changes?', text: 'JARVIS puts the project back as it was before them, after checking that its checks still pass. Later changes are kept.', ok: 'Undo' }))) return;
+      b.disabled = true; await api('/api/job/review', { id: b.dataset.nvUndo, action: 'undo' }); notify('Undone. The project is as it was before those changes.'); return void refresh();
+    }
     if (b.dataset.nvStop !== undefined) return await stopReply(b.dataset.nvStop);
     if (b.dataset.nvRate) {
       await api('/api/feedback', { id: b.dataset.rid, rating: b.dataset.nvRate }); ratings.set(b.dataset.rid, b.dataset.nvRate);
@@ -805,6 +873,10 @@ function chooseProject(then) {
     }, { tick: (chat?.project || selectedProject) === one.key });
     if (!(state?.projects || []).length) p.append(el('p', { class: 'nv-pop-note' }, 'No projects yet. Create one, or use a folder you already have.'));
     p.append(el('hr'));
+    if (chat?.project || selectedProject) {
+      item(p, 'Open file location', 'folder', () => revealProject(chat?.project || selectedProject), { note: 'Show this project’s folder' });
+      item(p, 'Delete this project', 'trash', () => deleteProject(chat?.project || selectedProject), { danger: true });
+    }
     item(p, 'Create a new project', 'plus', () => $('project-dialog').showModal(), { note: 'JARVIS sets up the folder for you' });
     item(p, 'Use a folder I already have', 'folder', () => legacyButton(sidebar, 'Open folder…')?.click(), { note: 'Pick a folder on this computer' });
   });
@@ -833,9 +905,12 @@ const secureB = el('button', { class: 'nv-chip nv-secure', type: 'button', data:
 secureB.onclick = () => window.Nova.openPane('security');
 const micB = el('button', { class: 'nv-icon', type: 'button', 'aria-label': 'Speak your message', data: { tip: 'Speak instead of typing' } }, icon('mic'));
 const stopB = el('button', { id: 'nv-stop', type: 'button', 'aria-label': 'Stop', data: { tip: 'Stop the reply in progress' } }, icon('stop'));
-bar.append(plusB, toolsB, researchG, projectB, ultraB, dryB, secureB, el('span', { class: 'nv-spacer' }), modelB, micB, stopB, $('send'));
+// One row, as in Claude: add, options, the mode (nova-permissions.js puts it after the options), the project in Code, and
+// on the right the AI, the microphone and Send. Research and Ultracode show here only while they are on; they, Dry run
+// and the security check are in the options menu and are /research, /ultracode, /dryrun and /security.
+bar.append(plusB, toolsB, projectB, researchG, ultraB, el('span', { class: 'nv-spacer' }), modelB, micB, stopB, $('send'));
 function setResearch(on) {
-  window.Nova.research = !!on; researchB.classList.toggle('on', !!on); researchB.setAttribute('aria-pressed', on ? 'true' : 'false');
+  window.Nova.research = !!on; researchB.classList.toggle('on', !!on); researchB.setAttribute('aria-pressed', on ? 'true' : 'false'); researchG.classList.toggle('active', !!on);
   message.placeholder = on ? 'What should I research?' : usualAsk();
 }
 researchB.onclick = () => { setResearch(!window.Nova.research); message.focus(); };
@@ -858,7 +933,7 @@ researchMoreB.onclick = async () => {
   });      // (it opens upwards or downwards, whichever has the room)
 };
 $('send').dataset.tip = 'Send your message'; $('send').dataset.key = 'Enter'; $('send').setAttribute('aria-label', 'Send');
-const suggest = el('div', { class: 'nv-suggest' }, '<p>Not sure where to start? Try one of these.</p><button type="button" data-easy-start="ask">' + icon('help') + 'Ask a question</button><button type="button" data-easy-start="create">' + icon('spark') + 'Create something</button><button type="button" data-easy-start="continue">' + icon('folder') + 'Continue a project</button>');
+const suggest = el('div', { class: 'nv-suggest' }, '<p>Just say what you want: JARVIS does the rest. Or start with one of these, or type <b>/</b> to see everything it can do.</p><button type="button" data-easy-start="ask">' + icon('help') + 'Ask a question</button><button type="button" data-easy-start="create">' + icon('spark') + 'Create something</button><button type="button" data-easy-start="continue">' + icon('folder') + 'Continue a project</button>');
 wrap.append(suggest);
 suggest.querySelectorAll('button')[0].dataset.tip = 'Get an explanation, a plan or ideas';
 suggest.querySelectorAll('button')[1].dataset.tip = 'Start a website, tool or automation. No coding needed.';
@@ -872,27 +947,46 @@ message.addEventListener('blur', () => { coreMood(); setTimeout(() => { if (home
 form.addEventListener('pointerdown', e => { if (e.target === form || e.target === bar) { e.preventDefault(); message.focus(); } });
 /* ---------- mods: the owner's own commands, hooks, panels and status line (jcc/mods.py) ---------- */
 let modsData = { commands: [], builtin: [], packs: [], hooks: [], panels: [], status: { on: false, items: [] } };
-// Typing "/" lists the commands: the owner's own first, then JARVIS's, then those of switched-on skill packs.
+// Typing "/" lists the commands, in two: JARVIS's own features, and the skills, plugins and mods (the owner's own
+// commands and those of switched-on skill packs). A switch at the top chooses which; ← and → switch too, and typing
+// finds a command in either (the side that has it is shown).
 const slash = el('div', { class: 'nv-slash hidden', role: 'listbox', 'aria-label': 'Commands' }); form.append(slash);
-let slashAt = 0;
-const slashFound = () => {
-  const typed = message.value.match(/^\/([\w-]*)$/); if (!typed) return [];
-  const q = typed[1].toLowerCase();
-  return [...modsData.commands.map(c => ({ ...c, from: 'Yours' })), ...modsData.builtin.map(c => ({ ...c, from: '', own: true })), ...modsData.packs.map(c => ({ ...c, from: 'Skill pack' }))]
-    .filter(c => c.name.startsWith(q)).slice(0, 9);
-};
+let slashAt = 0, slashTab = 'features';
+const slashLists = () => ({ features: modsData.builtin.map(c => ({ ...c, from: '', own: true })),
+  more: [...modsData.commands.map(c => ({ ...c, from: 'Yours' })), ...modsData.packs.map(c => ({ ...c, from: 'Skill pack' }))] });
+const slashQuery = () => { const typed = message.value.match(/^\/([\w-]*)$/); return typed ? typed[1].toLowerCase() : null; };
+const slashMatch = (list, q) => { const starts = list.filter(c => c.name.startsWith(q)); return q ? [...starts, ...list.filter(c => !starts.includes(c) && (c.name.includes(q) || (c.about || '').toLowerCase().includes(q)))] : list; };
+const slashFound = () => { const q = slashQuery(); return q === null ? [] : slashMatch(slashLists()[slashTab], q).slice(0, 80); };
 function drawSlash() {
+  const q = slashQuery();
+  if (q === null) { slash.classList.add('hidden'); return; }
+  const lists = slashLists(), here = slashMatch(lists[slashTab], q), there = slashMatch(lists[slashTab === 'features' ? 'more' : 'features'], q);
+  if (!here.length && there.length && q) { slashTab = slashTab === 'features' ? 'more' : 'features'; slashAt = 0; return drawSlash(); }
   const found = slashFound();
-  slash.classList.toggle('hidden', !found.length); if (!found.length) return;
-  slashAt = Math.min(slashAt, found.length - 1);
-  slash.replaceChildren(...found.map((c, i) => {
-    const b = el('button', { type: 'button', role: 'option', class: i === slashAt ? 'on' : '', 'aria-selected': String(i === slashAt) },
+  slash.classList.remove('hidden');
+  slashAt = Math.max(0, Math.min(slashAt, found.length - 1));
+  const seg = el('div', { class: 'nv-slash-seg', role: 'tablist' });
+  for (const [id, label] of [['features', 'Features'], ['more', 'Skills, plugins & mods']]) {
+    const count = slashMatch(lists[id], q).length;
+    const b = el('button', { type: 'button', role: 'tab', class: id === slashTab ? 'on' : '', 'aria-selected': String(id === slashTab) }, esc(label) + '<em>' + count + '</em>');
+    b.onpointerdown = event => { event.preventDefault(); slashTab = id; slashAt = 0; drawSlash(); };
+    seg.append(b);
+  }
+  const rows = found.map((c, i) => {
+    const b = el('button', { type: 'button', role: 'option', class: 'nv-slash-row' + (i === slashAt ? ' on' : ''), 'aria-selected': String(i === slashAt) },
       '<b>/' + esc(c.name) + '</b><span>' + esc(c.about || '') + '</span>' + (c.from ? '<small>' + c.from + '</small>' : ''));
     b.onpointerdown = event => { event.preventDefault(); takeSlash(c); };
     return b;
-  }));
+  });
+  const empty = !found.length ? el('div', { class: 'nv-slash-empty' }, slashTab === 'more'
+    ? 'No skills, plugins or mods yet. Make your own commands, or switch on a skill pack, in Settings.' : 'No feature is called that.') : null;
+  if (empty && slashTab === 'more') { const add = el('button', { type: 'button', class: 'plain' }, 'Open Settings, Customize'); add.onpointerdown = event => { event.preventDefault(); slash.classList.add('hidden'); window.Nova.voiceSettings?.('mods'); }; empty.append(add); }
+  const list = el('div', { class: 'nv-slash-list' }); list.append(...rows, ...(empty ? [empty] : []));
+  slash.replaceChildren(seg, list);
+  list.querySelector('.on')?.scrollIntoView?.({ block: 'nearest' });
 }
-const AT_ONCE = new Set(['chat', 'code', 'ultracode', 'new', 'usage', 'mods', 'help', 'compact']);      // nothing follows these: chosen, they are done
+const AT_ONCE = new Set(['activity', 'efficiency', 'tasks', 'recall', 'shared', 'control', 'folder', 'chat', 'code', 'ultracode', 'new', 'usage', 'mods', 'help', 'compact', 'work', 'mode', 'status', 'projects', 'undo', 'stop', 'settings', 'files', 'terminal', 'browser',
+  'artifacts', 'agents', 'pair', 'court', 'security', 'routines', 'voice', 'connections', 'models', 'updates']);      // nothing follows these: chosen, they are done
 function takeSlash(c) {
   slash.classList.add('hidden');
   if (c.own && AT_ONCE.has(c.name)) { message.value = '/' + c.name; grow(); form.requestSubmit(); return; }
@@ -902,20 +996,94 @@ message.addEventListener('input', () => { slashAt = 0; drawSlash(); });
 message.addEventListener('blur', () => setTimeout(() => slash.classList.add('hidden'), 150));
 message.addEventListener('keydown', e => {
   if (slash.classList.contains('hidden')) return;
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); slashTab = slashTab === 'features' ? 'more' : 'features'; slashAt = 0; drawSlash(); return; }
+  if (e.key === 'Escape') { e.stopPropagation(); slash.classList.add('hidden'); return; }
   const found = slashFound(); if (!found.length) return;
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); slashAt = (slashAt + (e.key === 'ArrowDown' ? 1 : found.length - 1)) % found.length; drawSlash(); }
   else if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && !e.isComposing)) { e.preventDefault(); e.stopImmediatePropagation(); takeSlash(found[slashAt]); }
   else if (e.key === 'Escape') { e.stopPropagation(); slash.classList.add('hidden'); }
 }, true);
+// What a command answers is shown in the chat on screen, as a reply of the window's own (it is not saved in the chat).
+function localReply(title, html) {
+  let thread = box.querySelector('.nv-thread');
+  if (!thread) { box.replaceChildren(); thread = el('div', { class: 'nv-thread' }); box.append(thread); body.classList.remove('nv-home'); }
+  const node = el('article', { class: 'nv-msg assistant nv-local' }, '<div class="nv-local-head">' + icon('slash') + '<b>' + esc(title) + '</b><button class="nv-icon" type="button" aria-label="Close" data-tip="Close">' + icon('x') + '</button></div><div class="content">' + html + '</div>');
+  node.querySelector('.nv-local-head button').onclick = () => node.remove();
+  thread.append(node); pinned = true; requestAnimationFrame(stick);
+  return node;
+}
+const PANE_COMMANDS = { files: 'files', terminal: 'terminal', browser: 'browser', artifacts: 'preview', agents: 'agents', pair: 'pair', court: 'court', security: 'security',
+  routines: 'routines', activity: 'activity', efficiency: 'insights', tasks: 'queue', recall: 'recall', shared: 'shared', control: 'computer' };
+const MODE_IDS = { auto: 'sending', manual: 'all', edits: 'edits', 'accept-edits': 'edits', plan: 'plan', bypass: 'bypass' };
+async function runCommand(name, words) {
+  try {
+    if (name === 'work') {
+      const [now, waiting] = await Promise.all([api('/api/agents', { action: 'now' }).catch(() => null), Promise.resolve(window.Nova.waiting?.() || [])]);
+      const row = r => '<li><span class="nv-dot ' + esc(r.state || '') + '"></span><b>' + esc(r.title || 'Working') + '</b>' + (r.project ? ' <small>' + esc(r.project) + '</small>' : '') + '<small>' + esc(r.doing || '') + '</small>' +
+        (r.chat ? '<button class="plain" type="button" data-open-chat="' + esc(r.chat) + '">Open</button>' : '') + '</li>';
+      const working = now?.working || [], recent = (now?.recent || []).slice(0, 6), held = now?.held || [];
+      const node = localReply('Work', (waiting.length ? '<h4>Waiting for you</h4>' + window.Nova.waitingCards(waiting) : '') +
+        '<h4>Working now</h4>' + (working.length ? '<ul class="nv-worklist">' + working.map(row).join('') + '</ul>' : '<p class="small">Nothing is running.</p>') +
+        (held.length ? '<h4>Waiting to start</h4><ul class="nv-worklist">' + held.map(row).join('') + '</ul>' : '') +
+        (recent.length ? '<h4>Finished lately</h4><ul class="nv-worklist">' + recent.map(row).join('') + '</ul>' : ''));
+      node.querySelectorAll('.nv-next[data-kind="review"]').forEach(card => window.Nova.fillChanges?.(card));
+      return;
+    }
+    if (name === 'mode' || name === 'permissions') {
+      const want = MODE_IDS[String(words || '').toLowerCase().replace(/\s+/g, '-')];
+      if (want) return void window.Nova.setPermissionMode?.(want);
+      const current = window.Nova.permissionMode?.() || 'sending';
+      return void localReply('Mode', '<ul class="nv-modelist">' + [['sending', 'Auto', 'JARVIS decides. It asks only before sending, deleting or paying.'], ['all', 'Manual', 'Always ask before making changes.'],
+        ['edits', 'Accept edits', 'File edits happen by themselves; commands and other changes ask first.'], ['plan', 'Plan', 'Make a plan first, and change nothing until you say go ahead.'], ['bypass', 'Bypass permissions', 'Never ask, except before paying.']]
+        .map(([id, label, about], i) => '<li><button class="' + (id === current ? 'primary' : 'plain') + '" type="button" data-set-mode="' + id + '">' + (i + 1) + '. ' + label + '</button><small>' + about + '</small></li>').join('') + '</ul><p class="small">Shift+Tab in the message box goes to the next mode.</p>');
+    }
+    if (name === 'status' || name === 'usage') {
+      let now = {}; try { now = await api('/api/mods', { action: 'status_now' }); } catch {}
+      const left = w => (w.minutes === 300 || /five hour|primary/i.test(w.name) ? '5 hours' : w.minutes === 10080 || /seven day$|secondary/i.test(w.name) ? 'week' : w.name) + ': ' + w.left + '% left';
+      const lines = [['Mode', ({ sending: 'Auto', all: 'Manual', edits: 'Accept edits', plan: 'Plan', bypass: 'Bypass permissions' })[window.Nova.permissionMode?.()] || 'Auto'], ['Answers with', now.brain || 'Auto'],
+        ['Claude', now.claude ? now.claude.slice(0, 2).map(left).join(' · ') : 'not measured yet'], ['Codex', now.codex ? now.codex.slice(0, 2).map(left).join(' · ') : 'not measured yet'],
+        ['Voice', now.voice ? Math.max(0, 100 - Math.round(now.voice.percent)) + '% left' : 'not measured yet'], ['Waiting for you', String((window.Nova.waiting?.() || []).length)]];
+      return void localReply(name === 'usage' ? 'Usage' : 'Status', '<dl class="nv-facts">' + lines.map(([k, v]) => '<dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd>').join('') + '</dl>' +
+        '<button class="plain" type="button" data-nv-cmd="settings" data-arg="usage">All the numbers</button>');
+    }
+    if (name === 'projects') {
+      return void localReply('Projects', (state?.projects || []).length ? '<ul class="nv-worklist">' + state.projects.map(p => '<li>' + icon('folder') + '<b>' + esc(p.name) + '</b><button class="plain" type="button" data-use-project="' + esc(p.key) + '">Work on this</button><button class="plain" type="button" data-reveal-project="' + esc(p.key) + '">Open file location</button><button class="plain" type="button" data-delete-project="' + esc(p.key) + '">Delete</button></li>').join('') + '</ul>'
+        : '<p>No projects yet. Say what you want built and JARVIS makes one.</p>');
+    }
+    if (name === 'undo') {
+      const job = [...(chat?.messages || [])].reverse().find(m => m.role === 'assistant' && m.receipt && !m.fast && m.status === 'done' && (m.job || m.agent));
+      if (!job) return void localReply('Undo', '<p>There is no finished change in this chat to undo.</p>');
+      if (!(await confirmBox({ title: 'Undo the last change in this chat?', text: 'JARVIS puts the project back as it was before it, after checking that its checks still pass.', ok: 'Undo' }))) return;
+      await api('/api/job/review', { id: job.receipt, action: 'undo' }); notify('Undone.'); return void refresh();
+    }
+    if (name === 'stop') return void stopReply();
+    if (name === 'folder') { const key = chat?.project || selectedProject; return void (key ? revealProject(key) : localReply('Open file location', '<p>Choose a project first: /projects.</p>')); }
+    if (name === 'settings') return void window.Nova.voiceSettings?.(words || undefined);
+    if (['voice', 'connections', 'models', 'updates'].includes(name)) return void window.Nova.voiceSettings?.(name === 'connections' ? 'connections' : name);
+    if (PANE_COMMANDS[name]) return void openPane(PANE_COMMANDS[name]);
+  } catch (error) { toast(error.message); }
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest?.('[data-set-mode],[data-open-chat],[data-use-project],[data-reveal-project],[data-delete-project]'); if (!b) return;
+  if (b.dataset.revealProject) return void revealProject(b.dataset.revealProject);
+  if (b.dataset.deleteProject) return void deleteProject(b.dataset.deleteProject).then(() => b.closest('.nv-local')?.remove());
+  if (b.dataset.setMode) { window.Nova.setPermissionMode?.(b.dataset.setMode); b.closest('.nv-local')?.remove(); }
+  else if (b.dataset.openChat) openChat(b.dataset.openChat).catch(error => toast(error.message));
+  else if (b.dataset.useProject) { setWorkMode('code', true); selectProject(b.dataset.useProject); projectChip(); b.closest('.nv-local')?.remove(); message.focus(); }
+});
 // JARVIS's own commands are done by the window. True: it was one of them, and it is done.
-function runBuiltin(name) {
+const IN_CHAT = new Set(['activity', 'efficiency', 'tasks', 'recall', 'shared', 'control', 'folder', 'work', 'mode', 'permissions', 'status', 'projects', 'undo', 'stop', 'settings', 'voice', 'connections', 'models', 'updates', 'artifacts', 'files', 'terminal', 'browser', 'agents', 'pair', 'court', 'security', 'routines']);
+function runBuiltin(name, words = '') {
+  if (IN_CHAT.has(name)) { runCommand(name, words); return true; }
   if (name === 'chat' || name === 'code') setWorkMode(name, true);
   else if (name === 'ultracode') { if (workMode !== 'code') { setWorkMode('code', true); setUltra(true); } else setUltra(!ultra); }
   else if (name === 'new') newChat.click();
-  else if (name === 'usage') window.Nova.voiceSettings?.('usage');
+  else if (name === 'usage') runCommand('usage');
   else if (name === 'mods') window.Nova.voiceSettings?.('mods');
   else if (name === 'research') { setResearch(true); message.focus(); }
-  else if (name === 'help') showCommands();
+  else if (name === 'help') { const line = (c, from) => '<li><b>/' + esc(c.name) + '</b><span>' + esc(c.about || '') + '</span>' + (from ? '<small>' + from + '</small>' : '') + '</li>';
+    localReply('Commands', '<p class="small">Type / in the message box to pick one.</p><ul class="nv-cmdlist">' + modsData.commands.map(c => line(c, 'Yours')).join('') + modsData.builtin.map(c => line(c, '')).join('') + modsData.packs.map(c => line(c, 'Skill pack')).join('') + '</ul>' +
+      '<button class="plain" type="button" data-nv-cmd="settings" data-arg="mods">Add or change your own</button>'); }
   else return false;
   return true;
 }
@@ -973,6 +1141,7 @@ form.onsubmit = async e => {
     const name = command[1].toLowerCase(), words = (command[2] || '').trim();
     if (name === 'research' && words) { setResearch(true); text = words; }
     else if (name === 'dryrun' || name === 'checklist') { message.value = words; grow(); beforeSending(name === 'dryrun' ? 'Dry run' : 'Checklist'); return; }   // what follows stays in the box, unsent
+    else if ((name === 'mode' || name === 'permissions') && words && runBuiltin(name, words)) { message.value = ''; grow(); return; }
     else if (!words && runBuiltin(name)) { message.value = ''; grow(); return; }
   }
   if (workMode === 'code' && !current && !selectedProject) {   // which project is this for? Then it is sent.
@@ -984,7 +1153,8 @@ form.onsubmit = async e => {
   try {
     if (window.preparePromptForSend) { const prepared = await window.preparePromptForSend(text); text = prepared.text; if (prepared.review) { setDraft(text); toast('JARVIS improved your message. Check it, then press Send again.'); return; } }
     if (!held.page && await window.Nova.pageForSend?.()) held.page = true;
-    if (window.Nova.assistantSend && window.Nova.assistantUsable(held)) {
+    const planning = window.Nova.permissionMode?.() === 'plan' && !(held.uploads || []).some(u => u.image_id);      // (the assistant plans; nothing is changed)
+    if (window.Nova.assistantSend && (window.Nova.assistantUsable(held) || planning)) {
       // Fast path: one warm AI answers straight away. The chat is created by the same request.
       message.value = ''; grow(); window.clearJarvisAttachments?.();
       if (current) { lastMessages = ''; renderChat({ ...chat, messages: [...(chat?.messages || []), { role: 'user', content: text }] }); }
@@ -1031,6 +1201,12 @@ function modeSeg(p) {
 }
 toolsB.onclick = () => openPop(toolsB, p => {
   modeSeg(p);
+  item(p, 'Research on the web', 'search', () => { setResearch(!window.Nova.research); message.focus(); }, { note: 'Answer with a report and its sources (/research)', tick: !!window.Nova.research });
+  if (workMode === 'code') {
+    item(p, 'Ultracode', 'spark', () => setUltra(!ultra), { note: 'The strongest AI, thinking hardest. Uses more allowance (/ultracode)', tick: ultra });
+    item(p, 'Security check', 'shield', () => window.Nova.openPane('security'), { note: 'Look for the usual holes in a project (/security)' });
+  }
+  p.append(el('hr'));
   const effort = el('label', {}, 'How carefully to think'); const select = el('select', { 'aria-label': 'How carefully to think' }); select.innerHTML = $('effort').innerHTML; select.value = $('effort').value;
   select.onchange = () => { $('effort').value = select.value; $('effort').dispatchEvent(new Event('change', { bubbles: true })); }; effort.append(select); p.append(effort, el('hr'));
   const options = $('easy-option-body');
@@ -1098,7 +1274,7 @@ if (!store.get('nv-welcomed', '')) {
 /* ---------- start ---------- */
 welcome = () => '<div class="welcome"></div>';
 setWorkMode(workMode, false);
-window.Nova = { loadMods, mods: () => modsData, hook: runHooks, unregisterPane, setFull, isFull, icon, el, openPop, closePop, item, dialog, confirmBox, ask, notify, registerPane, openPane, closePanel, rich, setDraft, store, panel, liveUpdate, applyLight, micButton: micB, refreshMode: () => updateMode(), newChat: () => newChat.click(),
+window.Nova = { command: (name, words) => runCommand(name, words || ''), loadMods, mods: () => modsData, hook: runHooks, unregisterPane, setFull, isFull, icon, el, openPop, closePop, item, dialog, confirmBox, ask, notify, registerPane, openPane, closePanel, rich, setDraft, store, panel, liveUpdate, applyLight, micButton: micB, refreshMode: () => updateMode(), newChat: () => newChat.click(),
   setTheme: name => { store.set('nv-theme', name); applyTheme(); }, get pane() { return currentPane; } };
 applyTheme(); drawTabs(); drawTopButtons();
 body.classList.add('nova', 'nv-home'); body.classList.remove('workspace-open');

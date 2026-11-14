@@ -43,7 +43,7 @@ from jcc.workbench import Workbench
 from jcc import project_policy, planning, evaluations, handoffs, operations, governor, budgets, restorepoints, library, provenance, prompt_preferences, documents, retrieval
 
 STATIC = Path(__file__).with_name("static") / "desktop.html"
-MAX_TEXT = 2000
+MAX_TEXT = 400_000              # (what is typed has no practical limit: a long paste, a whole spec)
 SCRIPTS = ("/workbench.js", "/assistant.js", "/horizon.js", "/horizon.css", "/delivery.js", "/reliability.js", "/operations.js", "/operations.css",
            "/everyday.js", "/everyday.css", "/nova.css", "/nova.js", "/nova-core.js", "/nova-rich.js", "/nova-panels.js", "/nova-voice.js",
            "/nova-audio.js", "/nova-mic.js", "/nova-work.js", "/nova-security.js", "/nova-permissions.js", "/nova-routines.js", "/nova-kinds.js", "/nova-gallery.js", "/vendor/xterm.js", "/vendor/xterm.css", "/vendor/addon-fit.js")
@@ -164,7 +164,10 @@ class GuiState:
                 f"&file={quote(rel.removesuffix('.md'))}")
 
     def send_chat(self, cid: str, text: str, agent: str = "auto", mode: str = "auto",
-                  manual_model: str = "auto", effort: str = "auto", files=None, use_browser=False, uploads=None) -> dict:
+                  manual_model: str = "auto", effort: str = "auto", files=None, use_browser=False, uploads=None,
+                  as_job: bool = False, project: str | None = None) -> dict:
+        """One message in a chat. as_job: a coding job started for a request that is already in this chat (by the
+        assistant, or by a planner): the job reports here, without the task being added as a second message of the owner's."""
         workspace.refresh(self.cfg)
         models.validate(self.cfg, manual_model, effort)
         chats = Chats(self.cfg)
@@ -183,7 +186,11 @@ class GuiState:
             from jcc.image_inputs import validate as validate_images
             validate_images(self.cfg,image_ids)
             message_text = text + ("\n\nAttached: " + ", ".join(labels) if labels else "")
-            chats.update(cid, archived=False, message={"role": "user", "content": message_text, "receipt": rid,"image_ids":image_ids})
+            if as_job:
+                chats.update(cid, archived=False, message={"role": "assistant", "content": "Starting the coding agents.", "receipt": rid, "status": "queued",
+                                                           "job": True, "task": text[:300]})
+            else:
+                chats.update(cid, archived=False, message={"role": "user", "content": message_text, "receipt": rid,"image_ids":image_ids})
             if mode not in ("auto", "code", "chat"):
                 raise ValueError("Choose Auto, Build or Ask mode.")
             from jcc import mods
@@ -202,14 +209,14 @@ class GuiState:
             with self.lock:
                 self.busy += 1
             try:
-                r = e.process(text, rid=rid, project=chat.get("project") or "none", agent=agent,
+                r = e.process(text, rid=rid, project=project or chat.get("project") or "none", agent=agent,
                               chat_id=cid, context=context, mode=mode, manual_model=manual_model, effort=effort,image_ids=image_ids)
             finally:
                 e.close()
                 with self.lock:
                     self.busy -= 1
             chats.update(cid, message={"role": "assistant", "content": r.answer or r.error or r.status,
-                                      "receipt": rid, "status": r.status, "model": r.model})
+                                      "receipt": rid, "status": r.status, "model": r.model, **({"job": True, "task": text[:300]} if as_job else {})})
             return chats.get(cid)
         finally:
             lock.discard()
@@ -286,10 +293,10 @@ class GuiState:
                 chats.update(cid, archived=False, message={"role": "assistant", "content": "**From the planner**\n\n" + context, "status": "done",
                                                            "agent": "claude", "model": pair["planner"].get("answered_by") or pair["planner"].get("model") or ""})
                 try:
-                    chat = state.send_chat(cid, task, mode="code", manual_model=str(pair["builder"].get("asked") or "auto"))
+                    chat = state.send_chat(cid, task, mode="code", manual_model=str(pair["builder"].get("asked") or "auto"), as_job=True, project=pair["project"])
                 except ValueError as problem:
                     raise pairing.PairError(str(problem)[:300]) from None
-                asked = [m for m in chat.get("messages") or [] if m.get("role") == "user" and m.get("receipt")]
+                asked = [m for m in chat.get("messages") or [] if m.get("job") and m.get("receipt")]
                 if not asked:
                     raise pairing.PairError("The builder's job could not be started.")
                 return asked[-1]["receipt"]
@@ -448,11 +455,18 @@ class GuiState:
             if project not in cfg.projects:
                 raise ValueError("That project does not exist. Use list_projects or create_project first.")
             if not task or len(task) > MAX_TEXT:
-                raise ValueError("Describe the task in up to 2,000 characters.")
-            chat = Chats(cfg).create(task[:70], project)
-            last = self.send_chat(chat["id"], task, mode="code", effort="ultra" if args.get("ultra") is True else "auto")["messages"][-1]
+                raise ValueError("Describe the task.")
+            # The job reports in the chat where it was asked for: one conversation for one request, however many jobs it takes.
+            target = str(getattr(turn, "chat", "") or "")
+            try:
+                Chats(cfg).get(target) if target else None
+            except (ValueError, OSError, KeyError):
+                target = ""
+            target = target or Chats(cfg).create(task[:70], project)["id"]
+            last = self.send_chat(target, task, mode="code", effort="ultra" if args.get("ultra") is True else "auto", as_job=True, project=project)["messages"][-1]
             return {"message": f"The coding agents are working on it in the project {cfg.projects[project].name} "
-                               f"({last.get('status')}). Progress is under My work in JARVIS.", "chat": chat["id"]}
+                               f"({last.get('status')}). Its progress shows in this chat, and its changes go into the project by themselves once its checks pass.",
+                    "chat": target}
         if tool == "make_image":
             from jcc import pictures
             ident = pictures.create(cfg, str(args.get("description", "")))
@@ -978,7 +992,7 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
             except ValueError:
                 length = -1
             route = urlparse(self.path).path
-            cap = history.MAX_BYTES if route == "/api/import" else 26_000_000 if route in ("/api/web/upload", "/api/speech/transcribe") else 4_100_000 if route == "/api/speech/stt" else 2_100_000 if route == "/api/preview" else 4_100_000 if route == "/api/artifacts" else 4_000_000 if route in ("/api/capture", "/api/browser/share") else 2_000_000 if route == "/api/attachments/extract" else 500_000 if route == "/api/chat/send" else 700_000 if route == "/api/files/save" else 250_000 if route in ("/api/pty", "/api/web") else 500_000 if route == "/api/voice" else 900_000 if route == "/api/mods" else 20_000
+            cap = history.MAX_BYTES if route == "/api/import" else 26_000_000 if route in ("/api/web/upload", "/api/speech/transcribe") else 4_100_000 if route == "/api/speech/stt" else 2_100_000 if route == "/api/preview" else 4_100_000 if route == "/api/artifacts" else 4_000_000 if route in ("/api/capture", "/api/browser/share") else 2_000_000 if route == "/api/attachments/extract" else 2_000_000 if route == "/api/chat/send" else 700_000 if route == "/api/files/save" else 250_000 if route in ("/api/pty", "/api/web") else 2_000_000 if route == "/api/voice" else 900_000 if route == "/api/mods" else 20_000
             if length < 0 or length > cap:
                 self.close_connection = True
                 left = length if 0 < length <= 64_000_000 else 0   # take in a moderately oversized upload so the window gets a clear answer
@@ -1098,7 +1112,7 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                 system.open_path(Path(__file__).resolve().parents[1] / "browser-sync")
                 self._json(HTTPStatus.OK, {"opened": True})
                 return
-            if self.path not in ("/api/updates", "/api/ask", "/api/mods", "/api/chats", "/api/chat/send", "/api/chat/update", "/api/projects", "/api/terminal", "/api/browser/open", "/api/routing", "/api/prompt-master", "/api/cloud", "/api/efficiency", "/api/job/control", '/api/assistant/settings','/api/feedback','/api/project/browse','/api/project/inspect','/api/project/connect','/api/job/review','/api/maintenance','/api/ui/activity','/api/context/inspect','/api/memory/resolve','/api/delivery/settings','/api/delivery/plan','/api/task-queue','/api/project/preferences','/api/dry-run','/api/evaluations','/api/handoff','/api/library','/api/provenance','/api/controls','/api/restorepoints','/api/diagnostics/export','/api/attachments/extract','/api/memory/search','/api/files/save','/api/pty','/api/web','/api/computer','/api/voice','/api/speech','/api/speech/tts','/api/mail','/api/assistants','/api/preview','/api/screenshot','/api/connections','/api/window','/api/providers','/api/usage','/api/skills','/api/pairs','/api/court','/api/agents','/api/artifacts','/api/security','/api/permissions','/api/routines'):
+            if self.path not in ("/api/project/remove", "/api/reveal", "/api/updates", "/api/ask", "/api/mods", "/api/chats", "/api/chat/send", "/api/chat/update", "/api/projects", "/api/terminal", "/api/browser/open", "/api/routing", "/api/prompt-master", "/api/cloud", "/api/efficiency", "/api/job/control", '/api/assistant/settings','/api/feedback','/api/project/browse','/api/project/inspect','/api/project/connect','/api/job/review','/api/maintenance','/api/ui/activity','/api/context/inspect','/api/memory/resolve','/api/delivery/settings','/api/delivery/plan','/api/task-queue','/api/project/preferences','/api/dry-run','/api/evaluations','/api/handoff','/api/library','/api/provenance','/api/controls','/api/restorepoints','/api/diagnostics/export','/api/attachments/extract','/api/memory/search','/api/files/save','/api/pty','/api/web','/api/computer','/api/voice','/api/speech','/api/speech/tts','/api/mail','/api/assistants','/api/preview','/api/screenshot','/api/connections','/api/window','/api/providers','/api/usage','/api/skills','/api/pairs','/api/court','/api/agents','/api/artifacts','/api/security','/api/permissions','/api/routines'):
                 self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
             if not self.headers.get("Content-Type", "").startswith("application/json"):
@@ -1227,7 +1241,7 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                         elif action == 'get': result = pairing.get(state.cfg, ident)
                         elif action == 'open':
                             made = pairing.open_pair(state.cfg, str(body.get('project', '')), str(body.get('goal', '')), str(body.get('planner') or 'auto'),
-                                                     str(body.get('builder') or 'auto'), str(body.get('effort') or 'auto'))
+                                                     str(body.get('builder') or 'auto'), str(body.get('effort') or 'auto'), chat=str(body.get('chat') or ''))
                             result = pairing.start(state.cfg, made['id'], state.pair_hands())
                         elif action == 'start': result = pairing.start(state.cfg, ident, state.pair_hands())
                         elif action == 'tell': result = pairing.tell(state.cfg, ident, str(body.get('text', '')))
@@ -1304,6 +1318,22 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                             result = review.undo(state.cfg, job)
                     else: raise ValueError('Unknown request.')
                     self._json(HTTPStatus.OK, result);return
+                if self.path == '/api/project/remove':        # "Delete project": out of JARVIS; its folder only to the Recycle Bin, if asked
+                    result = workspace.remove(state.cfg, str(body.get('project') or ''), trash=body.get('trash') is True)
+                    self._json(HTTPStatus.OK, result);return
+                if self.path == '/api/reveal':                # "Open file location": a project's folder, or a file in it, in Explorer / Finder
+                    from jcc import firstrun
+                    workspace.refresh(state.cfg)
+                    project = state.cfg.projects.get(str(body.get('project') or ''))
+                    if not project: raise ValueError('That project is not known.')
+                    target = project.path
+                    if body.get('file'):
+                        wanted = (project.path / str(body['file'])).resolve()
+                        if not wanted.is_relative_to(project.path.resolve()): raise ValueError('That file is not in the project.')
+                        target = wanted if wanted.exists() else wanted.parent
+                    if not target.exists(): raise ValueError('That folder is not there any more.')
+                    firstrun.reveal(target)
+                    self._json(HTTPStatus.OK, {'opened': True});return
                 if self.path == '/api/permissions':           # how much JARVIS asks, and what waits for a yes or no (jcc/permissions.py)
                     from jcc import permissions
                     action = body.get('action')
@@ -1313,7 +1343,20 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                         result = permissions.state(state.cfg, state.assistant, turns)
                     elif action == 'mode': result = permissions.set_mode(state.cfg, body.get('mode'))
                     elif action == 'decide':
-                        result = permissions.decide(state.cfg, state.assistant, body.get('kind'), body.get('id'), body.get('yes'), str(body.get('text') or '')[:2000], body.get('mark'))
+                        result = permissions.decide(state.cfg, state.assistant, body.get('kind'), body.get('id'), body.get('yes'), str(body.get('text') or '')[:20000],
+                                                    body.get('mark'), body.get('revision'))
+                        again = result.pop('rerun', None)
+                        if again and again['task']:
+                            # Go ahead: the same task, sent again as a job of the same chat (the guard lets it through once).
+                            target = again['chat']
+                            try:
+                                Chats(state.cfg).get(target) if target else None
+                            except (ValueError, OSError, KeyError):
+                                target = ''
+                            target = target or Chats(state.cfg).create(again['task'][:70], again['project'] or None)['id']
+                            chat = state.send_chat(target, again['task'], mode='code', as_job=True, project=again['project'] or None)
+                            result['chat'] = target
+                            result['started'] = next((m['receipt'] for m in reversed(chat['messages']) if m.get('job')), '')
                     else: raise ValueError('Unknown request.')
                     self._json(HTTPStatus.OK, result);return
                 if self.path == '/api/routines':              # what the owner wants done again and again (jcc/routines.py)
@@ -1732,6 +1775,7 @@ def serve(port: int = 8765, open_browser: bool = True, watch: bool = True,
         from jcc import updates
         updates.background(state.cfg, state.stop)
     threading.Thread(target=update_loop, name="updates", daemon=True).start()
+    threading.Thread(target=lambda: _quietly(review.tidy, state.cfg), name="tidy-reviews", daemon=True).start()
     watcher_thread = None
     if watch:
         def _run() -> None:

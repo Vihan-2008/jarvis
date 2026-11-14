@@ -24,17 +24,20 @@ class BudgetTests(EngineTestCase):
     def test_unknown_usage_is_not_reported_as_zero_and_projects_are_separate(self):
         cfg=config.load(overrides(make_repo(self.tmp)));self.metric(cfg,'a',tokens=None);self.metric(cfg,'b','other')
         row=budgets.usage(cfg,'trading');self.assertEqual(row['unmeasured_attempts'],1);self.assertEqual(row['measured_tokens'],0);self.assertEqual(row['jobs'],1)
-        budgets.configure(cfg,{**budgets.DEFAULTS,'projects':{'trading':{'daily_seconds':30,'daily_tokens':0}}});self.assertTrue(budgets.reason(cfg,'trading'));self.assertIsNone(budgets.reason(cfg,'other'))
+        self.metric(cfg,'c',tokens=500)
+        budgets.configure(cfg,{**budgets.DEFAULTS,'projects':{'trading':{'daily_seconds':0,'daily_tokens':100}}});self.assertTrue(budgets.reason(cfg,'trading'));self.assertIsNone(budgets.reason(cfg,'other'))
 
-    def test_resumed_job_is_not_double_counted_and_time_is_bounded(self):
-        cfg=config.load(overrides(make_repo(self.tmp)));self.metric(cfg,'job',seconds=80)
-        budgets.configure(cfg,{**budgets.DEFAULTS,'daily_seconds':100,'reserve_percent':0})
-        attempts=[{'seconds':80,'input_tokens':10,'output_tokens':1}]
-        self.assertIsNone(budgets.reason(cfg,attempts=attempts,exclude_id='job'));self.assertEqual(budgets.remaining_seconds(cfg,attempts=attempts,exclude_id='job'),20)
-        self.assertTrue(budgets.reason(cfg,attempts=attempts))
+    def test_time_is_never_a_budget_and_a_resumed_job_is_not_double_counted(self):
+        # The owner asked for no time budget: a job runs until it is done, whatever an older setting says.
+        cfg=config.load(overrides(make_repo(self.tmp)));self.metric(cfg,'job',seconds=80,tokens=60)
+        budgets.configure(cfg,{**budgets.DEFAULTS,'daily_seconds':100,'daily_tokens':100,'reserve_percent':0})
+        attempts=[{'seconds':80,'input_tokens':60,'output_tokens':10}]
+        self.assertIsNone(budgets.remaining_seconds(cfg,attempts=attempts))
+        self.assertIsNone(budgets.reason(cfg,attempts=attempts,exclude_id='job'),'the job itself is counted once')
+        self.assertTrue(budgets.reason(cfg,attempts=attempts),'counted twice it would be over the token budget')
 
     def test_exhausted_launch_queues_without_spawning(self):
-        cfg=config.load(overrides(make_repo(self.tmp)));self.metric(cfg,'used',seconds=100);budgets.configure(cfg,{**budgets.DEFAULTS,'daily_seconds':50})
+        cfg=config.load(overrides(make_repo(self.tmp)));self.metric(cfg,'used',seconds=100,tokens=100);budgets.configure(cfg,{**budgets.DEFAULTS,'daily_tokens':50})
         calls=[];result=JobLauncher(cfg,Vault(cfg.vault),spawner=lambda *args:calls.append(args)).launch('20261111-030000-abcd','job','Add a helper function','trading')
         self.assertEqual(result.status,'queued');self.assertEqual(calls,[])
 

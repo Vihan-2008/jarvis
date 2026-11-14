@@ -13,9 +13,12 @@ from tests.test_gui import GuiTestCase
 
 
 class DeliveryTests(EngineTestCase):
-    def run_delivery(self,report=True,enabled=False,verdict='clear',maximum=4,large_diff=False,model_available=True,implementer='codex',pause_review=False):
+    def run_delivery(self,report=True,enabled=False,verdict='clear',maximum=4,large_diff=False,model_available=True,implementer='codex',pause_review=False,manual=False):
         repo=make_repo(self.tmp);cfg=config.load(overrides(repo,levels=(implementer,'claude' if implementer=='codex' else 'codex')));rid='20261111-010000-abcd';work=cfg.jobs_root/rid;work.mkdir(parents=True)
         delivery.configure(cfg,{**delivery.DEFAULTS,'review_enabled':enabled})
+        if manual:
+            from jcc import assistant
+            assistant.configure(cfg,{'ask':'all'})        # Manual: a change waits for its owner
         if not model_available:cfg.agents['claude']=replace(cfg.agents['claude'],enabled=False)
         task='Add a helper. Preserve existing behavior.';items=delivery.criteria(task)
         spec={'id':rid,'task':task,'kind':'job','level':'large','vault':str(self.vault),'project':'trading','delivery_version':1,'acceptance':items,'max_attempts':maximum}
@@ -40,10 +43,21 @@ class DeliveryTests(EngineTestCase):
         self.assertEqual(len(many),12);self.assertIn('Requirement 19',many[-1]['requirement'])
 
     def test_missing_acceptance_waits_even_when_tests_pass(self):
-        cfg,rid,res,calls,repo=self.run_delivery(report=False)
+        cfg,rid,res,calls,repo=self.run_delivery(report=False,manual=True)
         self.assertEqual(res.status,'needs_approval');self.assertTrue(all(c.ok for c in res.checks))
         self.assertEqual((repo/'src/pkg/__init__.py').read_text(),'VALUE = 1\n')
         d=review.details(cfg,rid);self.assertEqual(d['acceptance']['items'][0]['claim'],'unreported')
+
+    def test_in_auto_a_change_with_missing_evidence_goes_in_and_says_so(self):
+        # Like Claude Code: nobody has to watch. The project's checks passed, so the change is put in, and what was not
+        # shown is said beside it (with Undo in the chat).
+        cfg,rid,res,calls,repo=self.run_delivery(report=False)
+        self.assertEqual(res.status,'done',res.merge_note);self.assertIn('Not every requirement',res.merge_note)
+        self.assertIn('# helper',(repo/'src/pkg/__init__.py').read_text())
+
+    def test_in_auto_a_second_looks_findings_are_said_beside_the_change(self):
+        cfg,rid,res,calls,repo=self.run_delivery(enabled=True,verdict='changes_needed')
+        self.assertEqual(res.status,'done',res.merge_note);self.assertIn('Requested behavior is incomplete.',res.merge_note)
 
     def test_evidence_is_kept_outside_code_and_review_is_off_by_default(self):
         cfg,rid,res,calls,repo=self.run_delivery()
@@ -61,21 +75,21 @@ class DeliveryTests(EngineTestCase):
         metrics=json.loads((cfg.jobs_root/rid/'metrics.json').read_text());self.assertEqual(metrics['retries'],0)
 
     def test_critical_findings_keep_branch_and_owner_can_review_revision(self):
-        cfg,rid,res,calls,repo=self.run_delivery(enabled=True,verdict='changes_needed')
+        cfg,rid,res,calls,repo=self.run_delivery(enabled=True,verdict='changes_needed',manual=True)
         self.assertEqual(res.status,'needs_approval')
         d=review.details(cfg,rid);review.approve(cfg,rid,d['revision'])
         self.assertIn('owner_approved_at',review.details(cfg,rid)['acceptance'])
 
     def test_review_never_exceeds_attempt_budget(self):
-        _,_,res,calls,_=self.run_delivery(enabled=True,maximum=1)
+        _,_,res,calls,_=self.run_delivery(enabled=True,maximum=1,manual=True)
         self.assertEqual(len(calls),1);self.assertEqual(res.status,'needs_approval')
 
     def test_unavailable_second_provider_does_not_silently_skip_required_review(self):
-        _,_,res,calls,_=self.run_delivery(enabled=True,model_available=False)
+        _,_,res,calls,_=self.run_delivery(enabled=True,model_available=False,manual=True)
         self.assertEqual(len(calls),1);self.assertEqual(res.status,'needs_approval')
 
     def test_truncated_diff_cannot_get_an_automatic_clear(self):
-        cfg,rid,res,calls,_=self.run_delivery(enabled=True,large_diff=True)
+        cfg,rid,res,calls,_=self.run_delivery(enabled=True,large_diff=True,manual=True)
         self.assertEqual(res.status,'needs_approval');self.assertTrue(review.details(cfg,rid)['peer_review']['diff_truncated'])
 
     def test_malformed_review_and_invalid_settings_do_not_pass(self):
