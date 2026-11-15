@@ -134,6 +134,18 @@ class TestAPairThroughTheRealJobPipeline(EngineTestCase):
         self.assertEqual(told["status"], "cancelled")
         self.assertIn("the owner said no: Not that file.", told["text"])
 
+    def test_a_job_jarvis_is_carrying_on_by_itself_is_still_working(self):
+        """Requirements left (or the project changed under it): between stopping and starting again, it is not stalled."""
+        rid = "20261114-020404-abcd"
+        (self.vault / "Jobs").mkdir(exist_ok=True)
+        note = self.vault / "Jobs" / (rid + ".md")
+        note.write_text(render_note({"id": rid, "status": "paused", "carrying_on": True, "unfinished": True}, "# Job"), "utf-8")
+        got = self.state.pair_hands().report(rid)
+        self.assertEqual(got["status"], "running")
+        self.assertIn(got["status"], pairing.WAITING)
+        note.write_text(render_note({"id": rid, "status": "paused", "carrying_on": False, "unfinished": True}, "# Job\n\nNot finished: 0 of 1"), "utf-8")
+        self.assertEqual(self.state.pair_hands().report(rid)["status"], "stalled", "after its rounds it waits for its owner")
+
     def test_the_planner_hears_what_was_established_and_the_builders_last_words_not_raw_output(self):
         """A real run gave the planner the tail of the agent's raw output, and it drew a wrong conclusion from it."""
         from jcc import live

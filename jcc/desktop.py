@@ -3,6 +3,7 @@ without a console."""
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import time
@@ -12,6 +13,7 @@ from jcc import system
 from jcc.config import ROOT, load
 
 URL = "http://127.0.0.1:8765/"
+MAIN_TITLE = re.compile("^JARVIS \u00b7 Workspace$")     # the app window's own title (jcc/static/desktop.html)
 
 
 def ready() -> bool:
@@ -31,6 +33,41 @@ def ready() -> bool:
         return False
     finally:
         conn.close()
+
+
+def open_window() -> int | None:
+    """JARVIS's own window, when one is open (minimised too): its handle. None when there is none, or it cannot be told.
+    The tests never look at this PC's real windows (tests/__init__.py)."""
+    if os.environ.get("JCC_NO_WINDOW_FIND"):
+        return None
+    try:
+        if system.kind() == "windows":
+            import ctypes
+            from ctypes import wintypes
+            user32, found = ctypes.windll.user32, []
+
+            @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+            def each(handle, _):
+                buffer = ctypes.create_unicode_buffer(200)
+                user32.GetWindowTextW(handle, buffer, 200)
+                if handle and MAIN_TITLE.match(buffer.value) and user32.IsWindowVisible(handle):
+                    found.append(int(handle))
+                return True
+
+            user32.EnumWindows(each, 0)
+            return found[0] if found else None
+        from jcc import winctl
+        return next((row["handle"] for row in winctl.windows() if MAIN_TITLE.match(row["title"])), None)
+    except Exception:  # noqa: BLE001 - when the windows cannot be listed, a window is opened as before
+        return None
+
+
+def bring_forward(handle: int) -> bool:
+    try:
+        from jcc import winctl
+        return winctl.focus(handle)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def edge_path() -> Path | None:
@@ -114,6 +151,14 @@ def main(background: bool = False, listen: bool = False) -> int:
                 tell(f"Could not start JARVIS. See {cfg.state_dir / 'service.log'}")
             return 1
     if background:
+        return 0
+    # One JARVIS window: opened again, the window that is open comes to the front (and listens, when that was asked).
+    handle = open_window()
+    if handle:
+        bring_forward(handle)
+        if listen:
+            from jcc import tray
+            tray.ask_service(cfg, "listen")
         return 0
     browser = window_browser()
     if browser:

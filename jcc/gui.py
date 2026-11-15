@@ -361,6 +361,9 @@ class GuiState:
                 if status == "cancelled" and fm.get("declined"):
                     return {"status": "cancelled", "text": "The builder stopped and asked its owner for something, and the owner said no: " + str(fm["declined"])[:600] +
                                                            "\nNothing was changed. Plan another way, or ask the owner what they would accept.\n" + self.told(rid, body)}
+                if status == "paused" and fm.get("carrying_on"):
+                    # JARVIS is carrying it on by itself (requirements left, or the project changed under it): still working.
+                    return {"status": "running", "why": "", "text": ""}
                 if status == "paused":
                     # Paused by its owner, it is waited for. A job that stopped itself (it could not make the checks pass, or
                     # ran out of the time or tries it is allowed) will not go on by itself: the planner is told.

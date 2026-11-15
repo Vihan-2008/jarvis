@@ -149,7 +149,7 @@ class TestPermissions(GuiTestCase):
         self.assertEqual((status, said["status"], said["answered"]), (200, "cancelled", "no"))
         fm, body = parse_frontmatter(Vault(self.state.cfg.vault).read(f"Jobs/{rid}.md"))
         self.assertEqual(fm["status"], "cancelled")
-        self.assertIn("Thrown away by its owner", body)
+        self.assertIn("Cancelled by you (thrown away)", body)
         self.assertEqual(self.call(action="state")[1]["pending"], [], "answered: it no longer waits")
         self.assertEqual(self.call(action="decide", kind="review", id=rid, yes=False)[0], 400, "an answer is taken once")
 

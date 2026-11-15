@@ -11,6 +11,15 @@ const DIRECT = document.querySelector('meta[name="jcc-direct"]')?.content !== '0
 const MINI = DIRECT && new URLSearchParams(location.search).has('mini'), KIND = MINI ? 'mini' : 'main';
 // (A second JARVIS on this PC, on another port, names its small window after the port: see jcc/mini.py.)
 if (MINI) { document.title = 'JARVIS \u00b7 Listening' + (location.port && location.port !== '8765' ? ' \u00b7 ' + location.port : ''); body.classList.add('nv-mini'); }
+// One JARVIS window. Opening JARVIS again brings the open window to the front (jcc/desktop.py); should a second one open
+// all the same, the newer one stays (it is the one in front) and the older one closes itself.
+if (DIRECT && !MINI && 'BroadcastChannel' in window) {
+  try {
+    const one = new BroadcastChannel('jarvis-one-window'), me = Date.now() + Math.random();
+    one.onmessage = e => { if (typeof e.data?.opened === 'number' && e.data.opened > me) { one.close(); window.close(); } };
+    one.postMessage({ opened: me });
+  } catch {}
+}
 const SHIELD = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.6-3.2 8-8 9-4.8-1-8-4.4-8-9V6z"/><path d="M9 12l2.2 2.2L15 10"/></svg>';
 let options = { model: 'haiku', speak: true, hands_free: true, ask: 'sending', pc_control: true, persona: '', light: 'auto', assistant: { id: 'jarvis', name: 'JARVIS', voice_id: '' } };
 let speech = { listen: Recognition ? 'browser' : '', speak: 'browser', configured: false, whisper: '', keys: {}, pcm_rate: 24000, socket: '', languages: {}, models: {},

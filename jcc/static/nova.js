@@ -598,9 +598,15 @@ document.addEventListener('click', async e => {
 /* ---------- conversation ---------- */
 const box = $('messages');
 let madeIn = { chat: '', count: 0 };              // how many artifacts the open conversation had when it was last looked at
-const STAGES = { planned: 'Chose the best AI for this', effort: 'Decided how deeply to think', working: 'Working on it', checking: 'Double-checking the result', waiting: 'Waiting for an AI to be free', switching: 'Switching to another AI', repair: 'Fixing a problem it found', baseline: 'Looking at the project first', context: 'Gathering more background', context_reused: 'Reusing what it already knows', acceptance: 'Noting the evidence', stalled: 'Stuck and needs you', done: 'Finished', failed: 'Could not finish', paused: 'Paused', queued: 'Waiting to start', cancelled: 'Stopped', needs_approval: 'Waiting for your answer', tool: 'Used a tool', note: 'Note' };
+const STAGES = { planned: 'Chose the best AI for this', effort: 'Decided how deeply to think', working: 'Working on it', checking: 'Double-checking the result', waiting: 'Waiting for an AI to be free', switching: 'Switching to another AI', repair: 'Fixing a problem it found', baseline: 'Looking at the project first', context: 'Gathering more background', context_reused: 'Reusing what it already knows', acceptance: 'Noting the evidence', stalled: 'Stuck and needs you', done: 'Finished', failed: 'Could not finish', paused: 'Paused', queued: 'Waiting to start', cancelled: 'Cancelled by you', needs_approval: 'Waiting for your answer', tool: 'Used a tool', note: 'Note' };
 const LIVE = new Set(['running', 'queued']);
-const WORDS = { running: 'Working', queued: 'Waiting to start', paused: 'Paused', failed: 'Could not finish', needs_approval: 'Waiting for your answer', cancelled: 'Stopped', done: 'Finished' };
+const WORDS = { running: 'Working', queued: 'Waiting to start', paused: 'Paused', failed: 'Could not finish', needs_approval: 'Waiting for your answer', cancelled: 'Cancelled by you', done: 'Finished' };
+// A job its owner stopped (Stop, Cancel, thrown away; a reply they stopped): "Cancelled by you", with a mark of its own.
+// (Its work is kept, and Continue or the next message carries a stopped job on.)
+const byYou = m => !!m && (m.status === 'cancelled' || (m.status === 'paused' && (m.stopped === true ||
+  (m.stopped === undefined && /^Job paused\./.test(m.content || '')))));      // (a stop from before jobs said so themselves)
+// A job that is not finished (requirements of its task not met yet) is never called finished.
+const wordFor = m => byYou(m) ? 'Cancelled by you' : m?.unfinished && m.status === 'paused' ? 'Not finished yet' : WORDS[m?.status] || m?.status || '';
 let rendered = [], pinned = true, wasLive = new Map(), revealing = new Map(), eventsCache = new Map(), liveText = new Map(), openWork = new Map(), ratings = new Map();
 const jump = el('button', { class: 'nv-jump', type: 'button', 'aria-label': 'Jump to the latest message', data: { tip: 'Jump to the latest message' } }, icon('up'));
 document.querySelector('.composer-wrap').append(jump);
@@ -629,8 +635,9 @@ function tally(events) {
 }
 function stepsHtml(rid, message) {
   const events = eventsCache.get(rid) || [];
-  if (!events.length) return '<li>' + (message.status === 'queued' ? 'Waiting its turn' : LIVE.has(message.status) ? 'Getting started' : 'No step-by-step record for this reply') + (LIVE.has(message.status) && message.content ? '<small>' + esc(plainWait(message.content)) + '</small>' : '') + '</li>';
-  return events.map(ev => ev.stage === 'tool' ? '<li class="tool">' + esc(plainStep(ev.message)) + '</li>' : '<li class="stage">' + esc(STAGES[ev.stage] || ev.stage) + (ev.agent ? ' · ' + esc(ev.agent === 'codex' ? 'GPT' : ev.agent[0].toUpperCase() + ev.agent.slice(1)) + (ev.model ? ' ' + esc(ev.model) : '') : '') + '</li>').join('');
+  const stopped = byYou(message), end = stopped ? '<li class="stage stopped">Cancelled by you</li>' : '';
+  if (!events.length) return stopped ? end : '<li>' + (message.status === 'queued' ? 'Waiting its turn' : LIVE.has(message.status) ? 'Getting started' : 'No step-by-step record for this reply') + (LIVE.has(message.status) && message.content ? '<small>' + esc(plainWait(message.content)) + '</small>' : '') + '</li>';
+  return (stopped ? events.filter(ev => !['paused', 'cancelled'].includes(ev.stage)) : events).map(ev => ev.stage === 'tool' ? '<li class="tool">' + esc(plainStep(ev.message)) + '</li>' : '<li class="stage">' + esc(STAGES[ev.stage] || ev.stage) + (ev.agent ? ' · ' + esc(ev.agent === 'codex' ? 'GPT' : ev.agent[0].toUpperCase() + ev.agent.slice(1)) + (ev.model ? ' ' + esc(ev.model) : '') : '') + '</li>').join('') + end;
 }
 function workBlock(message) {
   const rid = message.receipt, live = LIVE.has(message.status), events = eventsCache.get(rid) || [];
@@ -638,8 +645,8 @@ function workBlock(message) {
   const span = events.length > 1 ? events[events.length - 1].at - events[0].at : 0;
   const latest = events[events.length - 1];
   const did = tally(events);
-  const label = live ? (latest ? (latest.stage === 'tool' ? plainStep(latest.message) : STAGES[latest.stage] || 'Working') : (message.fast ? 'Thinking' : WORDS[message.status])) : message.status === 'done' ? (did || (span ? 'Worked for ' + fmtTime(span) : message.fast ? 'Did ' + events.length + (events.length === 1 ? ' thing' : ' things') : 'Finished')) : WORDS[message.status] || 'Details';
-  const mark = live ? '<i class="nv-spin"></i>' : '<i class="nv-done-dot ' + (message.status === 'done' ? '' : ['failed', 'cancelled'].includes(message.status) ? 'bad' : 'wait') + '"></i>';
+  const label = live ? (latest ? (latest.stage === 'tool' ? plainStep(latest.message) : STAGES[latest.stage] || 'Working') : (message.fast ? 'Thinking' : WORDS[message.status])) : message.status === 'done' ? (did || (span ? 'Worked for ' + fmtTime(span) : message.fast ? 'Did ' + events.length + (events.length === 1 ? ' thing' : ' things') : 'Finished')) : wordFor(message) || 'Details';
+  const mark = live ? '<i class="nv-spin"></i>' : '<i class="nv-done-dot ' + (message.status === 'done' ? '' : byYou(message) ? 'off' : message.status === 'failed' ? 'bad' : 'wait') + '"></i>';
   return '<details class="nv-work ' + (live ? 'live' : '') + '" data-rid="' + esc(rid) + '" ' + (open ? 'open' : '') + '><summary>' + mark + '<b>' + esc(label) + '</b>' + (live ? '<span data-since="' + (message.at || Date.now() / 1000) + '"></span>' : '') + '</summary><ol class="nv-steps">' + stepsHtml(rid, message) + '</ol>' +
     (live ? '<div class="nv-work-foot"><button class="plain" type="button" data-nv-stop="' + esc(rid) + '" data-tip="Stop this reply. Anything already finished is kept.">' + icon('stop') + 'Stop</button></div>' : message.fast ? '' : ['paused', 'failed'].includes(message.status) ? '<div class="nv-work-foot"><button class="plain" data-job-action="resume" data-job-id="' + esc(rid) + '" data-tip="Carry on from where it stopped">Continue</button></div>' : '') + '</details>';
 }
@@ -660,7 +667,8 @@ function messageHtml(m, i, c) {
     esc(new Date(m.resumes * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })) + '.</span><button class="plain" type="button" data-nv-wait="now" data-rid="' + esc(m.receipt) + '">Try now</button>' +
     '<button class="plain" type="button" data-nv-wait="cancel" data-rid="' + esc(m.receipt) + '">Do not</button></div>';
   if (m.receipt && !m.fast && /^(paused|failed)$/.test(m.status || '') && lastStatus(m.receipt) === m) html += '<div class="nv-carryon">' + icon('clock') + '<span>' +
-    (m.status === 'paused' ? 'Stopped. Its work so far is kept. Press Continue, or just say what to do next: your next message here carries this job on.'
+    (m.status === 'paused' ? (byYou(m) || m.unfinished ? 'Its work so far is kept. Your next message here carries this job on, or press Continue.'      // (the reply below says why it stopped)
+      : 'Stopped. Its work so far is kept. Press Continue, or just say what to do next: your next message here carries this job on.')
       : 'This job stopped before it finished. Its work so far is kept: Continue carries it on from where it stopped.') +
     '</span><button class="primary" type="button" data-nv-continue="' + esc(m.receipt) + '">Continue</button></div>';
   if (live) html += streamed ? '<div class="content nv-caret">' + rich(streamed) + '</div>' : '';
@@ -670,7 +678,7 @@ function messageHtml(m, i, c) {
     html += '<div class="nv-actions">' + act('copy', 'Copy this reply', 'copy', 'data-answer-action="copy" data-message-index="' + i + '"') + act('retry', 'Try again for a new reply', 'retry', 'data-nv-act="retry" data-i="' + i + '"') +
       act('speak', 'Read this reply aloud', 'speak', 'data-answer-action="speak" data-message-index="' + i + '"') + act('save', 'Save this reply as a file', 'down', 'data-answer-action="save" data-message-index="' + i + '"') +
       (m.agent && m.receipt && !m.fast ? '<button class="nv-icon ' + (rated === 'helpful' ? 'on' : '') + '" type="button" aria-label="Good reply" data-tip="Good reply. Helps JARVIS choose better next time." data-nv-rate="helpful" data-rid="' + esc(m.receipt) + '">' + icon('thumb') + '</button><button class="nv-icon nv-flip ' + (rated === 'needs_work' ? 'on' : '') + '" type="button" aria-label="Not helpful" data-tip="Not helpful. Helps JARVIS choose better next time." data-nv-rate="needs_work" data-rid="' + esc(m.receipt) + '">' + icon('thumb') + '</button>' : '') +
-      '<span class="nv-meta">' + (m.image_ids?.length ? '<span>' + m.image_ids.length + ' image' + (m.image_ids.length === 1 ? '' : 's') + '</span>' : '') + (m.status && m.status !== 'done' ? '<span class="status ' + esc(m.status) + '">' + esc(WORDS[m.status] || m.status) + '</span>' : '') +
+      '<span class="nv-meta">' + (m.image_ids?.length ? '<span>' + m.image_ids.length + ' image' + (m.image_ids.length === 1 ? '' : 's') + '</span>' : '') + (m.status && m.status !== 'done' ? '<span class="status ' + esc(byYou(m) ? 'cancelled' : m.status) + '">' + esc(wordFor(m)) + '</span>' : '') +
       (m.model && m.model !== 'none' && m.model !== 'compact' ? '<span data-tip="' + (m.switched?.length ? esc('Carried on here after ' + m.switched.join(' and ') + ' reached its limit') : 'The AI that wrote this reply') + '">' +
         esc((m.agent === 'codex' ? 'GPT ' : m.agent === 'claude' ? 'Claude ' : m.agent && m.agent !== 'jarvis' ? m.agent[0].toUpperCase() + m.agent.slice(1) + ' ' : '') + String(m.model).split('/').pop()) + (m.switched?.length ? ' ↺' : '') + '</span>' : '') +
       (m.receipt && !m.fast ? '<a href="' + esc(obsidian('Requests/' + m.receipt.slice(0, 4) + '/' + m.receipt.slice(4, 6) + '/' + m.receipt)) + '" data-tip="Open the saved record of this request in Obsidian">Record</a>' : '') + '</span></div>';
@@ -721,7 +729,7 @@ function draw(c) {
 /* ---------- the master chat's checklist: everything this chat set going, one line each, opening to its progress ---------- */
 const checklistOpen = new Set();
 const JOB_MARK = { running: '<i class="nv-spin"></i>', queued: '<i class="nv-ck wait"></i>', paused: '<i class="nv-ck wait"></i>', done: '<i class="nv-ck done"></i>',
-  failed: '<i class="nv-ck bad"></i>', cancelled: '<i class="nv-ck off"></i>', needs_approval: '<i class="nv-ck ask"></i>' };
+  failed: '<i class="nv-ck bad"></i>', cancelled: '<i class="nv-ck off"></i>', needs_approval: '<i class="nv-ck ask"></i>', stopped: '<i class="nv-ck off"></i>' };
 function jobsOf(c) {
   const messages = c?.messages || [];
   return messages.map((m, i) => ({ m, i })).filter(({ m }) => m.role === 'assistant' && m.receipt && !m.fast && (m.job || m.agent) && /^\d{8}-\d{6}-[a-z0-9]{4}$/.test(m.receipt))
@@ -738,13 +746,15 @@ function drawChecklist(c) {
   if (!spot) { spot = el('section', { class: 'nv-checklist', 'aria-label': 'Everything in this chat' }); }
   const asks = box.querySelector(':scope > .nv-asks');
   if (asks) asks.before(spot); else if (spot !== box.lastElementChild) box.append(spot);
-  const done = jobs.filter(j => j.status === 'done').length;
-  const sig = JSON.stringify(jobs.map(j => [j.rid, j.status, j.title])) + [...checklistOpen].join();
+  const done = jobs.filter(j => j.status === 'done').length, cancelled = jobs.filter(j => byYou(j.message)).length;
+  const sig = JSON.stringify(jobs.map(j => [j.rid, j.status, j.title, byYou(j.message)])) + [...checklistOpen].join();
   if (spot.dataset.sig === sig) { for (const rid of checklistOpen) fillChecklistRow(spot, rid); return; }
   spot.dataset.sig = sig;
-  spot.innerHTML = '<div class="nv-checklist-head"><b>Everything in this chat</b><span>' + done + ' of ' + jobs.length + ' done</span></div>' +
-    jobs.map(j => '<details class="nv-ck-row ' + esc(j.status) + '" data-ck="' + esc(j.rid) + '"' + (checklistOpen.has(j.rid) ? ' open' : '') + '><summary>' + (JOB_MARK[j.status] || JOB_MARK.queued) +
-      '<span>' + esc(j.title) + '</span><small>' + esc(WORDS[j.status] || j.status) + '</small></summary><div class="nv-ck-body">Reading its progress…</div></details>').join('');
+  spot.innerHTML = '<div class="nv-checklist-head"><b>Everything in this chat</b><span>' + done + ' of ' + (jobs.length - cancelled) + ' done' +
+    (cancelled ? ' · ' + cancelled + ' cancelled by you' : '') + '</span></div>' +
+    jobs.map(j => '<details class="nv-ck-row ' + esc(j.status) + (byYou(j.message) ? ' stopped' : '') + '" data-ck="' + esc(j.rid) + '"' + (checklistOpen.has(j.rid) ? ' open' : '') + '><summary>' +
+      (byYou(j.message) ? JOB_MARK.stopped : JOB_MARK[j.status] || JOB_MARK.queued) +
+      '<span>' + esc(j.title) + '</span><small>' + esc(wordFor(j.message)) + '</small></summary><div class="nv-ck-body">Reading its progress…</div></details>').join('');
   for (const rid of checklistOpen) fillChecklistRow(spot, rid);
   stick();
 }
@@ -872,7 +882,7 @@ async function stopReply(rid) {
   if (!target) return;
   if (await window.Nova.assistantStop?.()) { notify('Stopped.'); return; }
   const d = await api('/api/job/control', { id: target, action: 'pause' });
-  notify((d.requested ? 'Stopping. ' : 'Stopped. ') + 'Its work is kept: press Continue, or say what to do next.'); await refresh();
+  notify((d.requested ? 'Cancelling. ' : 'Cancelled by you. ') + 'Its work is kept: press Continue, or say what to do next.'); await refresh();
 }
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-nv-act],[data-nv-stop],[data-nv-rate],[data-nv-undo],[data-nv-cmd]'); if (!b) return;

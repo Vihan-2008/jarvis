@@ -18,6 +18,15 @@ if mode == "crash":
     sys.exit(2)
 if mode == "edit":
     init.write_text(init.read_text() + "\n\ndef added_by_agent():\n    return 42\n")
+    # As a real agent does when its task has an acceptance checklist: a report that covers every requirement.
+    import json
+    import re
+    asked = " ".join(sys.argv[1:])
+    report = re.search(r"\.jcc-acceptance-[\w-]+\.json", asked)
+    if report and os.environ.get("FAKEAGENT_REPORT", "met") != "none":
+        ids = sorted(set(re.findall(r"(?m)^(A\d+): ", asked)), key=lambda i: int(i[1:]))
+        (cwd / report.group(0)).write_text(json.dumps({"items": [{"id": i, "status": os.environ.get("FAKEAGENT_REPORT", "met"),
+                                                                  "evidence": "src/pkg/__init__.py; the project's tests pass"} for i in ids]}))
 elif mode == "fail_tests":
     init.write_text("VALUE = 2\n")
 elif mode == "risk":

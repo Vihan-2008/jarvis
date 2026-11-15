@@ -833,6 +833,8 @@ def fix_state(cfg, scan_id) -> dict:
             status = "undone" if fm.get("undone_by") else "applied" if fm.get("merged") else "failed"
         elif said in ("failed", "cancelled"):
             status = "failed"
+        elif said == "paused" and fm.get("unfinished") and not fm.get("carrying_on"):
+            status = "asked"            # (not finished after its rounds: it waits for its owner's word)
         else:
             status = "working"
     return {"status": status, "job": job, "chat": chat, "can_preview": status in ("ready", "applied")}

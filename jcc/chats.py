@@ -220,6 +220,7 @@ class Chats:
             try:
                 self.update(chat["parent"], message={"role": "assistant", "receipt": message["receipt"], "job": True, "child": cid,
                                                      **{k: message[k] for k in ("status", "agent", "model") if message.get(k)},
+                                                     **({"stopped": bool(message["stopped"])} if "stopped" in message else {}),
                                                      "content": content or "Working."})
             except (OSError, ValueError):
                 pass

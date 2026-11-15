@@ -42,18 +42,42 @@ class DeliveryTests(EngineTestCase):
         many=delivery.criteria('\n'.join('Requirement '+str(i) for i in range(20)))
         self.assertEqual(len(many),12);self.assertIn('Requirement 19',many[-1]['requirement'])
 
-    def test_missing_acceptance_waits_even_when_tests_pass(self):
-        cfg,rid,res,calls,repo=self.run_delivery(report=False,manual=True)
-        self.assertEqual(res.status,'needs_approval');self.assertTrue(all(c.ok for c in res.checks))
-        self.assertEqual((repo/'src/pkg/__init__.py').read_text(),'VALUE = 1\n')
-        d=review.details(cfg,rid);self.assertEqual(d['acceptance']['items'][0]['claim'],'unreported')
+    def finished_but_unshown(self,manual):
+        cfg,rid,res,calls,repo=self.run_delivery(report=False,manual=manual)
+        self.assertEqual((res.status,res.unfinished,res.carry_kind),('paused',True,'requirements'),res.merge_note)
+        self.assertTrue(all(c.ok for c in res.checks))
+        self.assertTrue(res.merge_note.startswith('Not finished yet: 0 of 2 requirements are shown met.'),res.merge_note)
+        self.assertNotIn('Done',res.merge_note)
+        self.assertIn('A1: Add a helper.',res.carry_on);self.assertIn('A2: Preserve existing behavior.',res.carry_on)
+        self.assertEqual((repo/'src/pkg/__init__.py').read_text(),'VALUE = 1\n','nothing is put into the project yet')
+        self.assertEqual(review.details(cfg,rid)['acceptance']['items'][0]['claim'],'unreported')
 
-    def test_in_auto_a_change_with_missing_evidence_goes_in_and_says_so(self):
-        # Like Claude Code: nobody has to watch. The project's checks passed, so the change is put in, and what was not
-        # shown is said beside it (with Undo in the chat).
-        cfg,rid,res,calls,repo=self.run_delivery(report=False)
-        self.assertEqual(res.status,'done',res.merge_note);self.assertIn('Not every requirement',res.merge_note)
-        self.assertIn('# helper',(repo/'src/pkg/__init__.py').read_text())
+    def test_missing_acceptance_is_not_finished_the_job_carries_on_with_what_is_left(self):
+        self.finished_but_unshown(manual=False)
+
+    def test_in_manual_too_the_job_carries_on_until_its_requirements_are_met(self):
+        self.finished_but_unshown(manual=True)
+
+    def test_after_its_rounds_it_says_what_is_left_and_is_never_called_done(self):
+        with patch('jcc.jobrunner.REQUIREMENT_ROUNDS',0):
+            cfg,rid,res,calls,repo=self.run_delivery(report=False)
+        self.assertEqual((res.status,res.unfinished,res.carry_on),('paused',True,''),res.merge_note)
+        self.assertTrue(res.merge_note.startswith('Not finished: 0 of 2 requirements are shown met. Still to do: A1: Add a helper.'),res.merge_note)
+        self.assertIn('press Continue',res.merge_note)
+        self.assertEqual((repo/'src/pkg/__init__.py').read_text(),'VALUE = 1\n','not put into the project unfinished')
+
+    def test_in_manual_after_its_rounds_its_owner_decides(self):
+        with patch('jcc.jobrunner.REQUIREMENT_ROUNDS',0):
+            cfg,rid,res,calls,repo=self.run_delivery(report=False,manual=True)
+        self.assertEqual(res.status,'needs_approval')
+
+    def test_a_remark_in_the_request_is_not_a_requirement_left_undone(self):
+        items=delivery.criteria('Fix the button. This is the error I get after clicking it.')
+        rows=[{**items[0],'claim':'met','evidence':'app.js; tests pass'},{**items[1],'claim':'not_a_requirement','evidence':'It describes the error A1 fixes.'}]
+        self.assertEqual(delivery.unmet({'items':rows}),[])
+        rows[1]['evidence']=''
+        self.assertEqual([r['id'] for r in delivery.unmet({'items':rows})],['A2'],'said why, or it is not taken')
+        self.assertIn('not_a_requirement',delivery.instructions(items));self.assertIn('blocked',delivery.instructions(items))
 
     def test_in_auto_a_second_looks_findings_are_said_beside_the_change(self):
         cfg,rid,res,calls,repo=self.run_delivery(enabled=True,verdict='changes_needed')

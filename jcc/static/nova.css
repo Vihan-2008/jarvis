@@ -306,6 +306,8 @@ body.large-text .nv-msg .content,body.large-text .nv-bubble{font-size:18px}
 .nv-spin{width:14px;height:14px;flex:none;border-radius:50%;border:2px solid var(--line-2);border-top-color:var(--accent);animation:nv-spin .8s linear infinite}
 @keyframes nv-spin{to{transform:rotate(360deg)}}
 .nv-done-dot{width:14px;height:14px;flex:none;border-radius:50%;background:var(--ok);display:grid;place-items:center}.nv-done-dot.bad{background:var(--bad)}.nv-done-dot.wait{background:var(--warn)}
+.nv-meta .status{text-transform:none}   /* (already in words: "Cancelled by you", "Not finished yet") */
+.nv-done-dot.off{background:var(--ink-3);position:relative}.nv-done-dot.off::before,.nv-done-dot.off::after{content:"";position:absolute;left:3.5px;top:6.2px;width:7px;height:1.6px;border-radius:1px;background:var(--bg);transform:rotate(45deg)}.nv-done-dot.off::after{transform:rotate(-45deg)}
 .nv-steps{list-style:none;margin:0;padding:2px 14px 12px 20px}
 .nv-steps li{position:relative;padding:5px 0 5px 20px;font-size:13px;color:var(--ink-2);line-height:1.5;animation:nv-rise .3s var(--ease) both}
 .nv-steps li::before{content:"";position:absolute;left:3px;top:11px;width:7px;height:7px;border-radius:50%;background:var(--line-2)}
@@ -1166,7 +1168,10 @@ dialog.nv-settings[open]{display:flex;flex-direction:column;height:min(88vh,820p
 .nv-ck-row.done>summary span{color:var(--ink-2)}
 .nv-ck{flex:none;width:16px;height:16px;border-radius:50%;border:1.6px dashed var(--ink-3);box-sizing:border-box;position:relative}
 .nv-ck.done{border:0;background:var(--ok)}.nv-ck.done::after{content:"";position:absolute;left:5px;top:2.5px;width:4px;height:8px;border:solid var(--bg);border-width:0 2px 2px 0;transform:rotate(45deg)}
-.nv-ck.bad{border:0;background:var(--bad)}.nv-ck.off{border-style:solid;opacity:.5}
+.nv-ck.bad{border:0;background:var(--bad)}
+.nv-ck.off{border:0;background:var(--ink-3)}.nv-ck.off::before,.nv-ck.off::after{content:"";position:absolute;left:4px;top:7.2px;width:8px;height:1.6px;border-radius:1px;background:var(--bg);transform:rotate(45deg)}.nv-ck.off::after{transform:rotate(-45deg)}
+.nv-ck-row.stopped>summary span{color:var(--ink-3)}.nv-ck-row.stopped>summary small{color:var(--ink-2)}
+.nv-steps li.stopped{color:var(--ink-2);font-weight:500}
 .nv-ck.ask{border:1.6px solid var(--warn);background:color-mix(in srgb,var(--warn) 25%,transparent)}
 .nv-ck-row .nv-spin{flex:none;width:16px;height:16px}
 .nv-ck-body{margin:2px 0 8px 26px;font-size:13px;color:var(--ink-2)}

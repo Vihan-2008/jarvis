@@ -206,7 +206,7 @@ def discard(cfg, rid):
     if work.exists() and not lock.acquire(): raise ValueError('The job is still running.')
     try:
         if proj and repo.exists(): projects.remove_worktree(proj,repo,rid,delete_branch=False)
-        _close(cfg,rid,fm,'cancelled','Thrown away by its owner: nothing was put into the project.'+(f' (Its branch {projects.branch_name(rid)} is kept in git.)' if proj else ''))
+        _close(cfg,rid,fm,'cancelled','Cancelled by you (thrown away): nothing was put into the project.'+(f' (Its branch {projects.branch_name(rid)} is kept in git.)' if proj else ''))
         return {'status':'cancelled'}
     finally: lock.release()
 
@@ -228,7 +228,7 @@ def _close(cfg, rid, fm, status, why):
     activity.emit(cfg,rid,status,why)
     if fm.get('chat_id'):
         from jcc.chats import Chats
-        try: Chats(cfg).update(fm['chat_id'],message={'role':'assistant','receipt':rid,'status':status,'content':why})
+        try: Chats(cfg).update(fm['chat_id'],message={'role':'assistant','receipt':rid,'status':status,'content':why,'stopped':status=='cancelled'})
         except (OSError,ValueError): pass
 
 

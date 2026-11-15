@@ -11,6 +11,20 @@ from jcc import receipts
 ASKED = "ASKED.md"                    # what a job that stopped to ask wrote down, kept in the job's own folder
 ANSWER = "owner-answer.json"          # its owner's yes, waiting to be read by the job when it carries on
 NEXT = "owner-next.json"              # what its owner said after stopping it, for the job to take in as it carries on
+# What a job its owner stopped says (in its chat, its steps and its line in the chat's checklist). Its work is kept.
+STOPPED = "Cancelled by you."
+STOPPED_KEPT = STOPPED + " Its work so far is kept; nothing was put into the project."
+STOPPED_GOES_ON = STOPPED + " Its work so far is kept: say what to do next, or press Continue, and it carries on from where it stopped."
+
+
+def _stopped_event(cfg, rid, status):
+    try:
+        from jcc import activity
+        activity.emit(cfg, rid, status, STOPPED)
+    except (OSError, ValueError):
+        pass
+
+
 ID = re.compile(r"\d{8}-\d{6}-[a-f0-9]{4}")
 SHOWN = 3000                          # characters of a question its owner is shown: a yes is a yes to exactly that much
 CUT = "\n(The job wrote more than can be shown. Only what is above was shown to its owner, and only that is answered.)"
@@ -143,7 +157,7 @@ def stopped_job(cfg, chat: dict) -> str | None:
     return None
 
 
-def carry_on(cfg, rid: str, text: str = "", by: str = "owner") -> dict:
+def carry_on(cfg, rid: str, text: str = "", by: str = "owner", said: str = "") -> dict:
     """Carry a stopped, interrupted or failed job on: the same job, in its own copy of the project, with the same agent
     conversation, from where it stopped. text: what its owner said since, which the job takes in as it carries on."""
     from jcc.redact import redact
@@ -168,6 +182,8 @@ def carry_on(cfg, rid: str, text: str = "", by: str = "owner") -> dict:
             atomic_write(work / NEXT, json.dumps({"text": words, "by": "jarvis" if by == "jarvis" else "owner", "at": time.time()}))
         atomic_write(work / "control.json", json.dumps({"action": "resume", "at": time.time()}))
         fm.update(status="queued", carried_on_at=time.time())
+        fm.pop("stopped_by", None)
+        fm.pop("carrying_on", None)
         vault.write(f"Jobs/{rid}.md", render_note(fm, body))
     finally:
         lock.release()
@@ -175,8 +191,9 @@ def carry_on(cfg, rid: str, text: str = "", by: str = "owner") -> dict:
     if fm.get("chat_id"):
         from jcc.chats import Chats
         try:
-            Chats(cfg).update(fm["chat_id"], message={"role": "assistant", "receipt": rid, "status": "queued", "resume_requested": True,
-                                                       "content": ("The project changed while this job worked: it carries on by itself to combine the two."
+            Chats(cfg).update(fm["chat_id"], message={"role": "assistant", "receipt": rid, "status": "queued", "resume_requested": True, "stopped": False,
+                                                       "unfinished": by == "jarvis" and "requirement" in said,
+                                                       "content": ((said or "The project changed while this job worked: it carries on by itself to combine the two.")
                                                                    if by == "jarvis" else "Carrying on from where it stopped" + (", with what you said." if words else "."))})
         except (ValueError, OSError):
             pass
@@ -217,12 +234,13 @@ def apply(cfg, rid, action):
     state = fm.get("status")
     if state == "needs_approval" and action == "cancel":
         # Waiting for its owner (a change to review, or a question): its owner may end it. Whatever it made is kept.
-        fm.update(status="cancelled", asked=False)
+        fm.update(status="cancelled", asked=False, stopped_by="you")
         vault.write(f"Jobs/{rid}.md", render_note(fm, body))
         receipts.update_status(vault, rid, "cancelled")
+        _stopped_event(cfg, rid, "cancelled")
         if fm.get("chat_id"):
             from jcc.chats import Chats
-            Chats(cfg).update(fm["chat_id"], message={"role": "assistant", "receipt": rid, "status": "cancelled", "content": "Job cancelled. Existing work is preserved."})
+            Chats(cfg).update(fm["chat_id"], message={"role": "assistant", "receipt": rid, "status": "cancelled", "stopped": True, "content": STOPPED_KEPT})
         return {"status": "cancelled"}
     if state in ("done", "cancelled", "needs_approval"):
         raise ValueError("This job cannot be controlled in its current state.")
@@ -239,18 +257,23 @@ def apply(cfg, rid, action):
         try:
             atomic_write(work / "control.json", json.dumps({"action": "resume", "at": time.time()}))
             fm["status"] = "queued"
+            fm.pop("stopped_by", None)
         finally:
             lock.release()
     else:
         work.mkdir(parents=True, exist_ok=True)
         atomic_write(work / "control.json", json.dumps({"action": action, "at": time.time()}))
         if state == "running":
-            return {"status": state, "requested": action}
+            return {"status": state, "requested": action}      # (the job stops itself in a moment, and says so: jcc/jobrunner.py)
         fm["status"] = "paused" if action == "pause" else "cancelled"
+        fm["stopped_by"] = "you"
     vault.write(f"Jobs/{rid}.md", render_note(fm, body))
     receipts.update_status(vault, rid, fm["status"])
+    if action != "resume":
+        _stopped_event(cfg, rid, fm["status"])
     if fm.get("chat_id"):
         from jcc.chats import Chats
-        Chats(cfg).update(fm["chat_id"], message={"role": "assistant", "receipt": rid, "status": fm["status"],
-            "content": "Job " + fm["status"] + ". Existing work is preserved.", "resume_requested": action == "resume"})
+        Chats(cfg).update(fm["chat_id"], message={"role": "assistant", "receipt": rid, "status": fm["status"], "stopped": action != "resume",
+            "content": "Carrying on from where it stopped." if action == "resume" else STOPPED_GOES_ON if action == "pause" else STOPPED_KEPT,
+            "resume_requested": action == "resume"})
     return {"status": fm["status"]}

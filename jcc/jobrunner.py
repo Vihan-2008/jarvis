@@ -169,6 +169,18 @@ class JobResult:
     outputs: list[str] = field(default_factory=list)
     asked: bool = False           # it stopped to ask its owner for something (what it asked is in ASKED.md in its folder)
     carry_on: str = ""            # JARVIS has more for this same job to do (the project changed under it): it carries on with this
+    carry_kind: str = ""          # why: "combined" (the project changed under it) or "requirements" (not every requirement is met yet)
+    unfinished: bool = False      # it stopped with requirements of its task still not met: it is not called finished
+
+
+# A job carries on by itself this many times at most to meet the rest of its requirements (then its owner says what next).
+REQUIREMENT_ROUNDS = 3
+
+
+def _will_carry_on(res) -> bool:
+    """JARVIS carries this job on by itself as soon as it is recorded (three times at most for each reason)."""
+    kind = res.carry_kind or "combined"
+    return bool(res.carry_on) and len([a for a in res.attempts if a.get(kind)]) < (REQUIREMENT_ROUNDS if kind == "requirements" else 3)
 
 
 def run_job(cfg: Config, spec: dict[str, Any], workdir: Path,
@@ -532,6 +544,23 @@ def run_job(cfg: Config, spec: dict[str, Any], workdir: Path,
                     implementation=next((a for a in reversed(res.attempts) if a.get('kind')!='review'),None)
                     if implementation:implementation['acceptance_failed']=True
                     atomic_write(workdir/'attempts.json',json.dumps(res.attempts))
+                    still=delivery.unmet(evidence)
+                    if still and evidence['checks_passed'] and res.status=='done':
+                        # Never "Done" while a requirement of the task is not shown met. The same job carries on by itself
+                        # with exactly what is left; after a few rounds, it says plainly what is left and waits for its owner.
+                        rounds=len([a for a in res.attempts if a.get('requirements')])
+                        if any(r['claim']!='blocked' for r in still) and rounds<REQUIREMENT_ROUNDS:
+                            res.status,res.unfinished,res.carry_kind='paused',True,'requirements'
+                            res.carry_on=delivery.still_to_do(still)
+                            res.merge_note=delivery.not_finished(evidence,still).replace('Not finished:','Not finished yet:',1)+' It carries on by itself with the rest.'
+                            _checkpoint(workdir,cwd,proj,res,res.log)
+                            return res
+                        if not (permissions.mode(cfg)=='all' or spec.get('project_review_policy')=='always'):
+                            res.status,res.unfinished='paused',True
+                            res.merge_note=(delivery.not_finished(evidence,still)+' Its work so far is kept, with its checks passing, but it is not put into '
+                                            'the project until every requirement is met: say what to do next (for example, to leave a part out), or press Continue.')
+                            _checkpoint(workdir,cwd,proj,res,res.log)
+                            return res
                     if permissions.mode(cfg)=='all' or spec.get('project_review_policy')=='always':
                         # Manual mode (or a project that asks for it): the change waits until its owner keeps it.
                         res.status='needs_approval';res.merge_note='Acceptance coverage or independent review needs your attention. Branch retained for review.'
@@ -539,7 +568,7 @@ def run_job(cfg: Config, spec: dict[str, Any], workdir: Path,
                         # Like Claude Code: the change goes in once the project's own checks pass, and what the second look
                         # found is said beside it, with Undo.
                         found=[str(f) for f in ((peer or {}).get('findings') or [])][:3]
-                        review_notes='A second look had notes: '+'; '.join(found)[:400] if found else 'Not every requirement was shown to be met; look it over.'
+                        review_notes='A second look had notes: '+'; '.join(found)[:400] if found else ''
 
             from jcc import security_check
             _finish_project(proj, rid, cwd, task, res, env,
@@ -581,7 +610,7 @@ def _checkpoint(workdir: Path, cwd: Path, proj: ProjectCfg | None, res: JobResul
 
 def _controlled(workdir, cwd, proj, res):
     res.status = "cancelled" if job_control.signal(workdir) == "cancel" else "paused"
-    res.merge_note = "Job " + res.status + ". Existing edits are preserved; no changes were merged."
+    res.merge_note = job_control.STOPPED_KEPT if res.status == "cancelled" else job_control.STOPPED_GOES_ON
     _checkpoint(workdir, cwd, proj, res, res.log)
     return res
 
@@ -619,7 +648,7 @@ def _finish_project(proj: ProjectCfg, rid: str, wt: Path, task: str, res: JobRes
     else:
         if env.get("JCC_CONTROL_FILE") and job_control.signal(Path(env["JCC_CONTROL_FILE"]).parent) in ("pause", "cancel"):
             res.status = "cancelled" if job_control.signal(Path(env["JCC_CONTROL_FILE"]).parent) == "cancel" else "paused"
-            res.merge_note = "Job " + res.status + ". Branch preserved without merging."
+            res.merge_note = job_control.STOPPED_KEPT if res.status == "cancelled" else job_control.STOPPED_GOES_ON
             return
         ok, msg = projects.merge(proj, rid)
         for _ in range(3):
@@ -684,7 +713,7 @@ def record(cfg: Config, spec: dict[str, Any], workdir: Path, res: JobResult,
                "task":spec['task'],"kind":spec['kind'],"project_key":spec.get('project') or spec.get('reference_project','none'),
                "input_tokens": metrics["input_tokens"], "cached_tokens": metrics["cached_tokens"], "attempts": len(res.attempts),
                "duration_s": round(seconds), "branch": res.branch, "merged": res.merged,
-               "files_changed": len(res.files), "asked": res.asked,
+               "files_changed": len(res.files), "asked": res.asked, "carrying_on": _will_carry_on(res), "unfinished": res.unfinished,
                "checks_passed": bool(res.checks) and all(c.ok for c in res.checks),
                "outputs": [f"[[{o}]]" for o in res.outputs]})
     body = [f"# Job {rid}: {res.status}", "",
@@ -738,8 +767,10 @@ def record(cfg: Config, spec: dict[str, Any], workdir: Path, res: JobResult,
         result = workdir / "RESULT.md"
         if not proj and res.status == "done" and result.exists():
             answer = result.read_text("utf-8", errors="replace")
+        # (a pause or cancel in its control file is only ever its owner's: Stop, Cancel)
+        stopped = res.status in ("paused", "cancelled") and job_control.signal(workdir) in ("pause", "cancel")
         Chats(cfg).update(spec["chat_id"], message={"role": "assistant", "receipt": rid,
-                         "status": res.status, "agent": res.agent, "model": res.model,
+                         "status": res.status, "agent": res.agent, "model": res.model, "stopped": stopped, "unfinished": res.unfinished,
                          "content": answer})
     summary = f"## Job finished: {res.status}\n\n" + (res.merge_note or "") + "\n" + \
         "\n".join(f"- [[{o}]]" for o in res.outputs)
@@ -774,17 +805,25 @@ def main(workdir_arg: str) -> int:
         record(cfg, spec, workdir, res, time.monotonic() - t0)
     finally:
         lock.release()
-    # It carries on by itself when JARVIS has more for it to do (the project changed under it; three times at most), and,
-    # with Bypass permissions, when its agent asked something: the answer is yes (the job's own hard rules still hold).
+    # It carries on by itself when JARVIS has more for it to do (the project changed under it, or requirements of its task
+    # are not met yet; three times at most each), and, with Bypass permissions, when its agent asked something: the answer
+    # is yes (the job's own hard rules still hold).
     try:
-        if res.carry_on and len([a for a in res.attempts if a.get("combined")]) < 3:
-            res.attempts.append({"combined": True, "at": time.time()})
+        if _will_carry_on(res):
+            res.attempts.append({res.carry_kind or "combined": True, "at": time.time()})
             atomic_write(workdir / "attempts.json", json.dumps(res.attempts))
-            job_control.carry_on(cfg, spec["id"], res.carry_on, by="jarvis")
+            job_control.carry_on(cfg, spec["id"], res.carry_on, by="jarvis", said=res.merge_note)
         elif res.asked and permissions.mode(cfg) == "bypass":
             job_control.answer(cfg, spec["id"], True, "Bypass permissions are on: yes, go ahead.")
     except (ValueError, OSError):
-        pass
+        try:                            # (it could not be carried on after all: it waits for its owner, and says so)
+            vault = Vault(Path(spec["vault"]))
+            fm, body = parse_frontmatter(vault.read(f"Jobs/{spec['id']}.md") or "")
+            if fm.get("carrying_on"):
+                fm["carrying_on"] = False
+                vault.write(f"Jobs/{spec['id']}.md", render_note(fm, body))
+        except (ValueError, OSError):
+            pass
     # The next job waiting for room starts now, not at the watcher's next look (and also where no watcher runs).
     try:
         from jcc.engine import Engine

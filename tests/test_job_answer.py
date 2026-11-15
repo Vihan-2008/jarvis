@@ -331,3 +331,65 @@ class StoppedJobOverTheWire(GuiTestCase):
         self.assertTrue(watcher.RETRY_SOON.is_set(), "it starts within seconds, not at the next half-minute round")
         said = [m for m in Chats(self.state.cfg).get(chat["id"])["messages"] if m.get("role") == "user"]
         self.assertEqual(said[-1]["content"], "make the title bigger")
+
+
+class StoppedByYou(AskingJob):
+    """A job its owner stopped says so: "Cancelled by you", in its chat, its steps and the chat's checklist (the window
+    gives it a mark of its own). Its work is kept, and carrying it on takes the mark away again."""
+
+    def chat_of_its_own(self, status):
+        from jcc.chats import Chats
+        cid = Chats(self.cfg).create("The app", None)["id"]
+        self.run_it("approval")
+        vault = Vault(self.cfg.vault)
+        fm, body = parse_frontmatter(vault.read(f"Jobs/{self.rid}.md"))
+        fm.update(status=status, chat_id=cid, asked=False)
+        vault.write(f"Jobs/{self.rid}.md", render_note(fm, body))
+        return cid
+
+    def said(self, cid):
+        from jcc.chats import Chats
+        return [m for m in Chats(self.cfg).get(cid)["messages"] if m.get("receipt") == self.rid][-1]
+
+    def steps(self):
+        from jcc import activity
+        return [(e["stage"], e["message"]) for e in activity.events(self.cfg, self.rid)]
+
+    def test_stop_says_cancelled_by_you_and_continue_takes_it_back(self):
+        cid = self.chat_of_its_own("queued")
+        self.assertEqual(job_control.apply(self.cfg, self.rid, "pause"), {"status": "paused"})
+        said = self.said(cid)
+        self.assertEqual((said["status"], said["stopped"]), ("paused", True))
+        self.assertTrue(said["content"].startswith("Cancelled by you."), said["content"])
+        self.assertIn("Continue", said["content"])
+        self.assertEqual(self.note()["stopped_by"], "you")
+        self.assertIn(("paused", "Cancelled by you."), self.steps())
+        job_control.carry_on(self.cfg, self.rid, "go on")
+        said = self.said(cid)
+        self.assertEqual((said["status"], said["stopped"]), ("queued", False), "carrying on: no longer cancelled")
+        self.assertNotIn("stopped_by", self.note())
+
+    def test_cancelling_a_change_that_waits_says_cancelled_by_you(self):
+        cid = self.chat_of_its_own("needs_approval")
+        job_control.apply(self.cfg, self.rid, "cancel")
+        said = self.said(cid)
+        self.assertEqual((said["status"], said["stopped"], said["content"]), ("cancelled", True, job_control.STOPPED_KEPT))
+        self.assertIn(("cancelled", "Cancelled by you."), self.steps())
+
+    def test_a_running_job_its_owner_stops_says_so_when_it_stops(self):
+        from jcc.chats import Chats
+        cid = Chats(self.cfg).create("The app", None)["id"]
+        self.spec["chat_id"] = cid
+        (self.work / "control.json").write_text(json.dumps({"action": "pause", "at": time.time()}), "utf-8")
+        res = self.run_it("edit")
+        self.assertEqual((res.status, res.merge_note), ("paused", job_control.STOPPED_GOES_ON))
+        said = self.said(cid)
+        self.assertEqual((said["status"], said["stopped"]), ("paused", True))
+        self.assertTrue(said["content"].startswith("Cancelled by you."), said["content"])
+
+    def test_a_job_that_stopped_by_itself_is_not_called_cancelled(self):
+        from jcc.chats import Chats
+        cid = Chats(self.cfg).create("The app", None)["id"]
+        self.spec["chat_id"] = cid
+        self.run_it("edit")
+        self.assertFalse(self.said(cid).get("stopped"), "finished on its own")

@@ -88,7 +88,7 @@ def _jobs(cfg, now: float, routine_chats: dict | None = None) -> tuple[list[dict
             except OSError:
                 continue
             if now - ended <= RECENT:
-                row.update(doing={"done": "Finished", "failed": "Did not finish", "cancelled": "Cancelled"}[status] +
+                row.update(doing={"done": "Finished", "failed": "Did not finish", "cancelled": "Cancelled by you"}[status] +
                            (": merged" if fm.get("merged") else ""), since=ended)
                 recent.append(row)
     return working, waiting, held, recent

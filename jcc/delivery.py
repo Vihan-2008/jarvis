@@ -37,7 +37,13 @@ def report_name(rid):
 
 def instructions(items,rid=None):
     filename=report_name(rid) if rid else '.jcc-acceptance-<job-id>.json'
-    return '\n\nAcceptance checklist (derived from the original task, not added scope):\n'+ '\n'.join(i['id']+': '+i['requirement'] for i in items)+ '\nBefore finishing write '+filename+' as {"items":[{"id":"A1","status":"met|not_met|uncertain","evidence":"specific files and tests"}]}. Cover every listed ID. Be honest about uncertainty. Your report is a claim; controller checks and owner review remain independent.\n'
+    return ('\n\nAcceptance checklist (derived from the original task, not added scope):\n'+ '\n'.join(i['id']+': '+i['requirement'] for i in items)+
+            '\nBefore finishing write '+filename+' as {"items":[{"id":"A1","status":"met|not_met|uncertain|not_a_requirement|blocked","evidence":"specific files and tests"}]}. '
+            'Cover every listed ID. Be honest about uncertainty. not_a_requirement is only for a line that asks for nothing to be built or changed '
+            '(a remark, a description of what the owner saw, a thank-you); say why. blocked is only for something that cannot be done in this '
+            'project at all (it is about another program, or needs something only the owner can give); say exactly what is needed. '
+            'Never use either to skip work that is merely hard: the job is not finished, and comes back to you, until every requirement is met. '
+            'Your report is a claim; controller checks and owner review remain independent.\n')
 
 
 def acceptance(work,cwd,items,checks):
@@ -51,11 +57,36 @@ def acceptance(work,cwd,items,checks):
     rows=[]
     for item in items:
         r=reported.get(item['id'],{});claim=r.get('status')
-        rows.append({**item,'claim':claim if claim in ('met','not_met','uncertain') else 'unreported','evidence':redact(str(r.get('evidence','')))[:1200]})
+        rows.append({**item,'claim':claim if claim in CLAIMS else 'unreported','evidence':redact(str(r.get('evidence','')))[:1200]})
     value={'items':rows,'checks_passed':bool(checks) and all(c.ok for c in checks),
         'scope':'Requirement coverage is agent-reported, not a semantic proof. Project checks are independent. Explicit owner approval can accept remaining uncertainty.'}
-    value['needs_review']=not rows or any(r['claim']!='met' or not r['evidence'].strip() for r in rows)
+    value['needs_review']=not rows or bool(unmet(value))
     atomic_write(work/'acceptance.json',json.dumps(value));return value
+
+
+CLAIMS=('met','not_met','uncertain','not_a_requirement','blocked')
+
+
+def unmet(evidence):
+    """The requirements not shown met: anything but "met" (or a line that asks for nothing, said why), or no evidence."""
+    return [r for r in evidence.get('items') or [] if r.get('claim') not in ('met','not_a_requirement') or not str(r.get('evidence') or '').strip()]
+
+
+def still_to_do(rows):
+    """What the job is told when it carries on to meet the rest of its requirements."""
+    said={'not_met':'you said not met','uncertain':'you were not sure','unreported':'not reported','blocked':'you said blocked'}
+    return ('Not every requirement of this task is shown met yet, so the task is not finished. Finish each of these, run the '
+            "project's checks, then write the acceptance report again covering every requirement:\n"+
+            '\n'.join('- '+r['id']+': '+r['requirement'][:300]+' ('+said.get(r['claim'],r['claim'])+(': '+r['evidence'][:300] if r['evidence'].strip() else '')+')' for r in rows)+
+            '\nA line that only remarks on something, and asks for nothing to be built, is marked not_a_requirement with the reason. '
+            'One that truly cannot be done in this project is marked blocked, with exactly what is needed.')
+
+
+def not_finished(evidence, rows):
+    """In plain words: how far the job got, and what is left (for its owner)."""
+    total=len(evidence.get('items') or []);done=total-len(rows)
+    left='; '.join(r['id']+': '+r['requirement'][:160]+(' (cannot be done in this project: '+r['evidence'][:200]+')' if r['claim']=='blocked' and r['evidence'].strip() else '') for r in rows[:6])
+    return f'Not finished: {done} of {total} requirements are shown met. Still to do: {left}.'
 
 
 def safe_files(repo):

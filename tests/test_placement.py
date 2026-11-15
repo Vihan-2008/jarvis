@@ -142,6 +142,27 @@ class TestRememberingIt(EngineTestCase):
         self.assertIn("--user-data-dir=" + str(self.cfg.state_dir / "window-profile"), window, "in JARVIS's own browser profile")
         self.assertIn("--autoplay-policy=no-user-gesture-required", window, "so it can speak the moment it opens, without a click")
 
+    def test_opened_again_the_open_window_comes_to_the_front_and_no_second_one_opens(self):
+        started, forward, told = [], [], []
+
+        class Process:
+            def __init__(self, command, **_):
+                started.append([str(part) for part in command])
+        with mock.patch.object(desktop, "ready", lambda: True), mock.patch.object(subprocess, "Popen", Process), \
+                mock.patch.object(desktop, "open_window", lambda: 4242), mock.patch.object(desktop, "bring_forward", forward.append), \
+                mock.patch("jcc.tray.ask_service", lambda cfg, action, text="": told.append(action)):
+            self.assertEqual(desktop.main(), 0)
+            self.assertEqual(desktop.main(listen=True), 0)
+        self.assertEqual(forward, [4242, 4242])
+        self.assertFalse([c for c in started if any(part.startswith("--app=") for part in c)], "no second window")
+        self.assertEqual(told, ["listen"], "asked to listen: the open window does")
+
+    def test_the_tests_never_look_at_this_pcs_own_windows(self):
+        self.assertIsNone(desktop.open_window())
+        self.assertTrue(desktop.MAIN_TITLE.match("JARVIS \u00b7 Workspace"))
+        self.assertFalse(desktop.MAIN_TITLE.match("JARVIS \u00b7 Listening"))
+        self.assertFalse(desktop.MAIN_TITLE.match("JARVIS \u00b7 Workspace and 2 more pages - Microsoft Edge"))
+
     def test_its_own_profile_lets_it_speak_and_listen_without_a_click(self):
         args = placement.profile(self.cfg, "http://127.0.0.1:8765/")
         folder = self.cfg.state_dir / "window-profile"
