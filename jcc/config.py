@@ -138,12 +138,19 @@ def _project(key: str, d: dict[str, Any]) -> ProjectCfg:
 
 def load(overrides: dict[str, Any] | None = None) -> Config:
     data: dict[str, Any] = tomllib.loads((ROOT / "config" / "default.toml").read_text("utf-8"))
+    usual = dict(data["paths"])
     local = ROOT / "config" / "local.toml"
     if local.exists() and not os.environ.get("JCC_NO_LOCAL_CONFIG"):       # (tests never read one PC's own settings)
         data = _merge(data, tomllib.loads(local.read_text("utf-8")))
     if overrides:
         data = _merge(data, overrides)
     p, r, t, b = data["paths"], data["router"], data["tier3"], data.get("bot") or {}
+    if p["state_dir"] != usual["state_dir"]:
+        # JARVIS's data was moved (a second copy, kept apart from the first): its jobs and projects go with it, unless
+        # they were moved too. (A development copy once ran its jobs in the folder of the JARVIS its owner uses.)
+        for key, folder in (("jobs_root", "jobs"), ("projects_root", "projects")):
+            if p.get(key) == usual.get(key):
+                p[key] = str(Path(p["state_dir"]) / folder)
     vault = os.environ.get("JCC_VAULT") or p["vault"]
     state = os.environ.get("JCC_STATE_DIR") or p["state_dir"]
     jobs = os.environ.get("JCC_JOBS_ROOT") or p["jobs_root"]

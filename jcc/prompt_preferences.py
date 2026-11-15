@@ -3,7 +3,7 @@ import difflib
 import json
 from jcc.vault import atomic_write
 
-DEFAULTS={'style':'concise','template':'','review_all':True}
+DEFAULTS={'style':'detailed','template':'','review_all':True}      # detailed: a full build brief for something to build
 
 
 def settings(cfg):
@@ -12,7 +12,7 @@ def settings(cfg):
 
 
 def configure(cfg,value):
-    if not isinstance(value,dict) or set(value)!=set(DEFAULTS) or value['style'] not in ('concise','coding','research') or not isinstance(value['template'],str) or len(value['template'])>1500 or not isinstance(value['review_all'],bool):raise ValueError('Invalid prompt preferences.')
+    if not isinstance(value,dict) or set(value)!=set(DEFAULTS) or value['style'] not in ('detailed','concise','coding','research') or not isinstance(value['template'],str) or len(value['template'])>1500 or not isinstance(value['review_all'],bool):raise ValueError('Invalid prompt preferences.')
     atomic_write(cfg.state_dir/'prompt-preferences.json',json.dumps(value));return value
 
 

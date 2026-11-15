@@ -1213,6 +1213,7 @@ body.nv-coding.nv-grouped #projects{display:none}
 .nv-in-chat .tool-heading{display:none}
 .nv-local-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
 .nv-local pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.nv-local pre.nv-brief{max-height:min(60vh,520px);overflow:auto;font:inherit;font-size:13.5px;line-height:1.55;padding:12px 14px;border-radius:var(--r-xs);background:var(--surface-2)}
 
 /* Accounts (Settings, AI models & accounts): signed in with your own subscription. */
 .nv-account .nv-account-state{color:var(--ink-3)}.nv-account .nv-account-state.ok{color:var(--ok)}

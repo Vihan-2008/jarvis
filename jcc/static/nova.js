@@ -1415,7 +1415,7 @@ async function improveInChat(original) {
   let d;
   try { d = await rewriteDraft(original); } catch (error) { return toast(error.message); }
   window.lastPromptRewrite = d;
-  const card = localReply('Improve message', '<p class="small">Your message, rewritten so the AI understands it better:</p><pre>' + esc(d.prompt || '') + '</pre>' +
+  const card = localReply('Improve message', '<p class="small">Your message, written out as a full brief, so the AI knows exactly what to build and how to check it:</p><pre class="nv-brief">' + esc(d.prompt || '') + '</pre>' +
     '<div class="nv-local-foot"><button class="plain" type="button" data-keep-mine>Keep mine</button><button class="plain" type="button" data-use-edit>Use it, I will edit</button><button class="primary" type="button" data-use-send>Use it and send</button></div>');
   card.querySelector('[data-keep-mine]').onclick = () => { card.remove(); message.focus(); };
   card.querySelector('[data-use-edit]').onclick = () => { card.remove(); setDraft(d.prompt || original); };
