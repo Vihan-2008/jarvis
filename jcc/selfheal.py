@@ -126,11 +126,17 @@ def failed_jobs(cfg, now: float, carry_on=None) -> list[dict]:
     return fixed
 
 
-def run(cfg, now: float | None = None, start=None, carry_on=None) -> list[dict]:
+def run(cfg, now: float | None = None, start=None, carry_on=None, keep=None) -> list[dict]:
     """One round: what was found and fixed (also kept in self-heal.json)."""
     now = time.time() if now is None else now
     data = _load(cfg)
     fixed = helpers(cfg, data, now, start) + failed_jobs(cfg, now, carry_on)
+    if keep is None:
+        from jcc.review import keep_by_itself as keep
+    for row in keep(cfg):
+        fixed.append({"at": now, "what": "A finished change was waiting for a Keep that your permission mode gives itself",
+                      "done": {"kept": "Kept it (its checks passed).", "combining": "The project had changed: it is combining the two.",
+                               "answered yes": "Answered its question yes (Bypass permissions)."}.get(row["did"], row["did"]), "job": row["job"]})
     if fixed or data["gave_up"]:
         data["fixed"] = (data["fixed"] + fixed)[-50:]
         cfg.state_dir.mkdir(parents=True, exist_ok=True)

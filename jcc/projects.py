@@ -147,6 +147,20 @@ def merge(project: ProjectCfg, job_id: str) -> tuple[bool, str]:
     return True, git(["rev-parse", "--short", "HEAD"], repo).strip()
 
 
+def update_from_base(project: ProjectCfg, wt: Path) -> tuple[bool, list[str]]:
+    """Bring the base branch's newer work (other jobs merged meanwhile) into this job's own copy: a merge in the job's
+    branch, never in the real checkout. (True, []) when it went in cleanly. (False, files) when files clash: the merge is
+    left in progress in the copy, the clashes marked in those files, for the job to resolve. (False, []) otherwise."""
+    p = subprocess.run(["git", *GIT_ID, "merge", "--no-edit", "-m", f"Combine with the newer {project.base_branch}", project.base_branch],
+                       cwd=wt, capture_output=True, text=True, encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL)
+    if p.returncode == 0:
+        return True, []
+    clashing = git(["diff", "--name-only", "--diff-filter=U"], wt, check=False).split()
+    if not clashing:
+        git(["merge", "--abort"], wt, check=False)
+    return False, clashing
+
+
 def remove_worktree(project: ProjectCfg, wt: Path, job_id: str, delete_branch: bool) -> None:
     git(["worktree", "remove", "--force", str(wt)], project.path, check=False)
     if delete_branch:

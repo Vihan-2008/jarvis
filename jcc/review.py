@@ -63,6 +63,25 @@ def details(cfg, rid):
 def approve(cfg, rid, expected):
     fm=note(cfg,rid);workspace.refresh(cfg);proj=project_policy.effective(cfg,cfg.projects.get(fm.get('project_key')));repo=cfg.jobs_root/rid/'repo'
     if not proj or not repo.is_dir() or fm.get('status')!='needs_approval': raise ValueError('This branch is not awaiting review.')
+    more=''
+    try:
+        return _approve(cfg,rid,expected,fm,proj,repo)
+    except _CarryOn as carry:
+        more=str(carry)
+    # (outside the job's lock) the same job carries on by itself, to combine its change with the project's newer work
+    from jcc import job_control
+    job_control.carry_on(cfg,rid,more,by='jarvis')
+    return {'status':'queued','combining':True}
+
+
+class _CarryOn(Exception):
+    """The change cannot go in as it is: the same job carries on with this to do."""
+
+
+def _approve(cfg,rid,expected,fm,proj,repo):
+    import os
+    from jcc.jobs import scrub_env
+    more=''
     lock=InstanceLock(cfg.jobs_root/rid/'job.lock')
     if not lock.acquire(): raise ValueError('The job is still running.')
     try:
@@ -76,6 +95,24 @@ def approve(cfg, rid, expected):
         if not checks or not all(c.ok for c in checks): raise ValueError('Checks did not pass; branch retained for review.')
         if projects.changed_files(repo): raise ValueError('The reviewed branch has uncommitted changes; review it again before merging.')
         ok,message=projects.merge(proj,rid)
+        for _ in range(3):
+            if ok or 'base branch changed' not in message: break
+            # Other work went into the project since: combined in this job's copy, checked again, then kept.
+            combined,clashing=projects.update_from_base(proj,repo)
+            if not combined:
+                if clashing: more=('Other work was merged into the project, and these files clash with this change: '+', '.join(clashing[:20])+
+                                   '. Resolve each clash keeping both sets of changes, make the checks pass, and finish the task.')
+                break
+            checks=projects.run_checks(proj,repo,scrub_env(dict(os.environ)),timeout_s=300)
+            if not checks or not all(c.ok for c in checks):
+                more=('Other work was merged into the project and combined with this change; now these checks fail: '+
+                      ', '.join(c.name for c in checks if not c.ok)+'. Make them pass, keeping both sets of changes, and finish the task.')
+                break
+            ok,message=projects.merge(proj,rid)
+        if not ok and more:
+            fm['status']='paused'
+            vault=Vault(cfg.vault);_,body=parse_frontmatter(vault.read(f'Jobs/{rid}.md'));vault.write(f'Jobs/{rid}.md',render_note(fm,body))
+            raise _CarryOn(more)
         if not ok: raise ValueError(message)
         fm.update({'status':'done','merged':message,'checks_passed':True})
         acceptance_path=cfg.jobs_root/rid/'acceptance.json'
@@ -120,6 +157,44 @@ def tidy(cfg):
         except (OSError, ValueError):
             continue
     return put_right
+
+
+def keep_by_itself(cfg) -> list[dict]:
+    """The mode decides: in Auto or Bypass, a finished change whose checks pass is kept by JARVIS itself (combined with the
+    project's newer work first, when there is any), and with Bypass a question from a job's agent is answered yes.
+    Manual mode, a project set to "always review", files that never merge by themselves, a change still being looked at
+    and a real check failure keep waiting for the owner."""
+    from jcc import job_control, permissions
+    mode = permissions.mode(cfg)
+    if mode in ('all', 'plan'):
+        return []
+    done = []
+    folder = cfg.vault / 'Jobs'
+    for path in sorted(folder.glob('*.md'))[-200:] if folder.exists() else []:
+        try:
+            fm, _ = parse_frontmatter(path.read_text('utf-8'))
+        except (OSError, ValueError):
+            continue
+        rid = path.stem
+        if fm.get('status') != 'needs_approval' or fm.get('blocked_by') or not fm.get('project_key'):
+            continue
+        try:
+            if fm.get('asked'):
+                if mode == 'bypass':
+                    job_control.answer(cfg, rid, True, 'Bypass permissions are on: yes, go ahead.')
+                    done.append({'job': rid, 'did': 'answered yes'})
+                continue
+            proj = project_policy.effective(cfg, cfg.projects.get(fm.get('project_key')))
+            repo = cfg.jobs_root / rid / 'repo'
+            if not proj or not repo.is_dir() or not proj.auto_merge or getattr(proj, 'review', None) == 'always':
+                continue
+            if projects.blocked_paths(projects.git(['diff', '--name-only', proj.base_branch + '...HEAD'], repo, check=False).splitlines(), proj.no_auto_merge):
+                continue
+            got = approve(cfg, rid, projects.git(['rev-parse', 'HEAD'], repo).strip())
+            done.append({'job': rid, 'did': 'kept' if got.get('status') == 'done' else 'combining'})
+        except (ValueError, OSError):
+            continue
+    return done
 
 
 def discard(cfg, rid):

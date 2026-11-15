@@ -143,7 +143,7 @@ def stopped_job(cfg, chat: dict) -> str | None:
     return None
 
 
-def carry_on(cfg, rid: str, text: str = "") -> dict:
+def carry_on(cfg, rid: str, text: str = "", by: str = "owner") -> dict:
     """Carry a stopped, interrupted or failed job on: the same job, in its own copy of the project, with the same agent
     conversation, from where it stopped. text: what its owner said since, which the job takes in as it carries on."""
     from jcc.redact import redact
@@ -165,7 +165,7 @@ def carry_on(cfg, rid: str, text: str = "") -> dict:
         if child_alive(work):
             raise ValueError("The job is still stopping. Try again in a moment.")
         if words:
-            atomic_write(work / NEXT, json.dumps({"text": words, "at": time.time()}))
+            atomic_write(work / NEXT, json.dumps({"text": words, "by": "jarvis" if by == "jarvis" else "owner", "at": time.time()}))
         atomic_write(work / "control.json", json.dumps({"action": "resume", "at": time.time()}))
         fm.update(status="queued", carried_on_at=time.time())
         vault.write(f"Jobs/{rid}.md", render_note(fm, body))
@@ -176,24 +176,26 @@ def carry_on(cfg, rid: str, text: str = "") -> dict:
         from jcc.chats import Chats
         try:
             Chats(cfg).update(fm["chat_id"], message={"role": "assistant", "receipt": rid, "status": "queued", "resume_requested": True,
-                                                       "content": "Carrying on from where it stopped" + (", with what you said." if words else ".")})
+                                                       "content": ("The project changed while this job worked: it carries on by itself to combine the two."
+                                                                   if by == "jarvis" else "Carrying on from where it stopped" + (", with what you said." if words else "."))})
         except (ValueError, OSError):
             pass
     return {"status": "queued", "carried_on": rid}
 
 
-def take_next(workdir) -> str:
-    """What its owner said after stopping this job (read once: put aside as it is taken), or ""."""
+def take_next(workdir) -> dict:
+    """What its owner said after stopping this job, or what JARVIS found left to do: {"text", "by": "owner"|"jarvis"}, or
+    {} (read once: put aside as it is taken)."""
     path = workdir / NEXT
     try:
         saved = json.loads(path.read_text("utf-8"))
     except (OSError, ValueError):
-        return ""
+        return {}
     try:
         path.replace(workdir / ("owner-next-read-%d.json" % int(time.time())))
     except OSError:
         path.unlink(missing_ok=True)
-    return str(saved.get("text") or "")[:4000]
+    return {"text": str(saved.get("text") or "")[:4000], "by": "jarvis" if saved.get("by") == "jarvis" else "owner"}
 
 
 def signal(workdir):

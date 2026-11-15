@@ -168,6 +168,7 @@ class JobResult:
     branch: str = ""
     outputs: list[str] = field(default_factory=list)
     asked: bool = False           # it stopped to ask its owner for something (what it asked is in ASKED.md in its folder)
+    carry_on: str = ""            # JARVIS has more for this same job to do (the project changed under it): it carries on with this
 
 
 def run_job(cfg: Config, spec: dict[str, Any], workdir: Path,
@@ -192,8 +193,8 @@ def run_job(cfg: Config, spec: dict[str, Any], workdir: Path,
     try:
         plan = agents.plan(cfg, task, usage.cooldowns(), spec.get("prefer"), res.level)
         said = job_control.take_answer(workdir)        # its owner's answer to what it asked before it stopped (read once)
-        heard = job_control.take_next(workdir)         # what its owner said after stopping it (read once)
-        carrying_on = bool(previous_attempts) or (workdir / "HANDOFF.md").exists() or bool(heard)
+        heard = job_control.take_next(workdir)         # what its owner said after stopping it, or what JARVIS found to do (read once)
+        carrying_on = bool(previous_attempts) or (workdir / "HANDOFF.md").exists() or bool(heard.get("text"))
         env = scrub_env(dict(os.environ))
         env["JCC_CONTROL_FILE"] = str(workdir / "control.json")
         if proj:
@@ -228,9 +229,11 @@ def run_job(cfg: Config, spec: dict[str, Any], workdir: Path,
             prompt += ("\nThis job stopped part way (its owner stopped it, or JARVIS was interrupted) and is now carrying on. Your work so far is in "
                        "this folder" + (" and in this conversation" if previous_attempts else "") + ": look at what is there and carry on from "
                        "exactly where it stopped. Do not start over, and do not redo what is already done.\n")
-        if heard:
+        if heard.get("text") and heard.get("by") == "jarvis":
+            prompt += "\nWhat is left to do (from JARVIS, which checked your work):\n" + heard["text"] + "\n"
+        elif heard.get("text"):
             prompt += ("\nAfter stopping this job, its owner said this. Take it in as you carry on (it is their instruction for this task; every rule "
-                       "above still holds):\n<owner-said>\n" + heard + "\n</owner-said>\n")
+                       "above still holds):\n<owner-said>\n" + heard["text"] + "\n</owner-said>\n")
         if proj:
             conventions=project_policy.read(cfg,proj.key)['conventions']
             if conventions: prompt+='\nOwner project conventions (subordinate to security and protected-file rules):\n'+conventions+'\n'
@@ -540,7 +543,7 @@ def run_job(cfg: Config, spec: dict[str, Any], workdir: Path,
 
             from jcc import security_check
             _finish_project(proj, rid, cwd, task, res, env,
-                            review_first=learning.settings(cfg)['review_before_merge'] or security_check.held(cfg, spec.get('chat_id')) or permissions.mode(cfg)=='all')
+                            review_first=permissions.mode(cfg)=='all' or permissions.mode(cfg)!='bypass' and (learning.settings(cfg)['review_before_merge'] or security_check.held(cfg, spec.get('chat_id'))))
             if review_notes and res.status=='done':
                 res.merge_note=(res.merge_note+' '+review_notes).strip()
         else:
@@ -619,6 +622,29 @@ def _finish_project(proj: ProjectCfg, rid: str, wt: Path, task: str, res: JobRes
             res.merge_note = "Job " + res.status + ". Branch preserved without merging."
             return
         ok, msg = projects.merge(proj, rid)
+        for _ in range(3):
+            if ok or "base branch changed" not in msg:
+                break
+            # Other work went into the project while this job worked. JARVIS combines the two in this job's copy, runs the
+            # checks again, and keeps the change: nothing for its owner to do.
+            combined, clashing = projects.update_from_base(proj, wt)
+            if not combined:
+                if clashing:
+                    res.status, res.carry_on = "paused", (
+                        "While you worked, other work was merged into the project. Its newer version has been merged into this copy, and these "
+                        "files clash: " + ", ".join(clashing[:20]) + ". Resolve each clash keeping both sets of changes, make the project's "
+                        "checks pass, and finish the task.")
+                    res.merge_note = "The project changed while this job worked, and some files clash: the job carries on by itself to combine them."
+                    return
+                break
+            res.checks = projects.run_checks(proj, wt, env)
+            if not all(c.ok for c in res.checks):
+                res.status, res.carry_on = "paused", (
+                    "While you worked, other work was merged into the project, and it has been merged into this copy. Now these checks fail: "
+                    + ", ".join(c.name for c in res.checks if not c.ok) + ". Make them pass, keeping both sets of changes, and finish the task.")
+                res.merge_note = "The project changed while this job worked; with both together a check fails, so the job carries on by itself to fix it."
+                return
+            ok, msg = projects.merge(proj, rid)
         if ok:
             res.merged = msg
             res.merge_note = f"All checks passed; merged into {proj.base_branch} ({msg}). Not pushed."
@@ -748,6 +774,17 @@ def main(workdir_arg: str) -> int:
         record(cfg, spec, workdir, res, time.monotonic() - t0)
     finally:
         lock.release()
+    # It carries on by itself when JARVIS has more for it to do (the project changed under it; three times at most), and,
+    # with Bypass permissions, when its agent asked something: the answer is yes (the job's own hard rules still hold).
+    try:
+        if res.carry_on and len([a for a in res.attempts if a.get("combined")]) < 3:
+            res.attempts.append({"combined": True, "at": time.time()})
+            atomic_write(workdir / "attempts.json", json.dumps(res.attempts))
+            job_control.carry_on(cfg, spec["id"], res.carry_on, by="jarvis")
+        elif res.asked and permissions.mode(cfg) == "bypass":
+            job_control.answer(cfg, spec["id"], True, "Bypass permissions are on: yes, go ahead.")
+    except (ValueError, OSError):
+        pass
     # The next job waiting for room starts now, not at the watcher's next look (and also where no watcher runs).
     try:
         from jcc.engine import Engine
