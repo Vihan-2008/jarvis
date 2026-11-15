@@ -12,7 +12,7 @@ The packages are on the project's GitHub **Releases** page:
 | `JARVIS-windows.zip` | Windows, if you prefer a zip: unpack it and run `install.ps1`. |
 | `JARVIS.dmg` or `JARVIS-mac.zip` | Mac: open it, double-click **Install JARVIS**, click **Install**. |
 
-Installers up to version 0.1.4 need Python 3.11 or newer on the computer already, and the Mac one runs in Terminal.
+(From version 0.1.5. Earlier installers needed Python 3.11 or newer on the computer already, and the Mac one ran in Terminal.)
 
 ## Your first command
 

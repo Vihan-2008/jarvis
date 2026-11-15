@@ -34,9 +34,6 @@ with your Claude or ChatGPT account, or add an API key. Opening apps, timers and
 **Uninstall:** in JARVIS, **Settings › Advanced › Uninstall JARVIS** (on Windows also **Settings › Apps › JARVIS**).
 Your notes are kept unless you choose to delete them.
 
-> Installers up to version 0.1.4 still need Python 3.11 on the computer (and the Mac one runs in Terminal); from
-> 0.1.5 JARVIS brings everything it needs. See [docs/INSTALL.md](docs/INSTALL.md).
-
 ## What it does
 
 - **Talk to it.** "Hey JARVIS", then say what you want. It can be interrupted, and it tells its own voice from yours.
