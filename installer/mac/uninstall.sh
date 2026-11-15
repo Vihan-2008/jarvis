@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
 # Removes JARVIS: the JARVIS.app the installer made and the install folder.
 #
-#   bash uninstall.sh [--quiet] [--install-dir DIR]
+#   bash uninstall.sh [--quiet] [--install-dir DIR] [--delete-data] [--delete-notes]
 #
-# It stops JARVIS if it is running, removes the start at login if the installer set one up, and never removes your
-# notes vault or the app's data folder (settings, chats, sessions); it says where they are so you can keep them, back
-# them up or delete them yourself. It is run on a real Mac at GitHub for every change.
+# It stops JARVIS if it is running, and removes the start at login if the installer set one up. Your notes vault and
+# the app's data folder (settings, chats, sessions) are kept unless --delete-notes / --delete-data say otherwise (JARVIS's
+# Settings > Advanced > Uninstall JARVIS asks); what is deleted goes to the Trash, so it can be put back. It is run on a
+# real Mac at GitHub for every change.
 set -euo pipefail
 
 INSTALL_DIR="$(cd "$(dirname "$0")" && pwd)"
 QUIET=0
+DELETE_DATA=0
+DELETE_NOTES=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --quiet) QUIET=1; shift ;;
+    --delete-data) DELETE_DATA=1; shift ;;
+    --delete-notes) DELETE_NOTES=1; shift ;;
     --install-dir) INSTALL_DIR="$(cd "${2:?--install-dir needs a folder}" && pwd)"; shift 2 ;;
     *) printf 'unknown option: %s\n' "$1" >&2; exit 1 ;;
   esac
@@ -65,7 +70,14 @@ esac
 cd /
 rm -rf "$INSTALL_DIR"
 printf 'Removed the app from %s.\n\n' "$INSTALL_DIR"
+to_trash() {   # to_trash <folder>: into the Trash under a name of its own, so it can be put back
+  [ -d "$1" ] || return 0
+  mkdir -p "$HOME/.Trash"
+  mv "$1" "$HOME/.Trash/$(basename "$1") $(date '+%Y-%m-%d %H.%M.%S')" && printf 'Moved to the Trash: %s\n' "$1"
+}
+if [ "$DELETE_DATA" = 1 ]; then to_trash "$data"; fi
+if [ "$DELETE_NOTES" = 1 ] && [ -n "$vault" ]; then to_trash "$vault"; fi
 printf 'Kept, for you to keep or delete yourself:\n'
-[ -n "$vault" ] && printf '  Your notes vault:      %s\n' "$vault"
-printf "  The app's data folder: %s\n" "$data"
+if [ -n "$vault" ] && [ -d "$vault" ]; then printf '  Your notes vault:      %s\n' "$vault"; fi
+if [ -d "$data" ]; then printf "  The app's data folder: %s\n" "$data"; fi
 printf '  Keys, if you saved any: in the Keychain.\n'

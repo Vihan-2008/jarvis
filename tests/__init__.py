@@ -2,6 +2,7 @@
 import os
 
 os.environ.setdefault("JCC_NO_LOCAL_CONFIG", "1")
+os.environ.setdefault("JCC_NO_DUCKING", "1")      # never turn the PC's real sound down
 
 # On GitHub's machines a run that hangs is cut off with nothing said. There, every thread's place is written out after
 # twenty minutes (the whole suite takes about six), and the run stops, so a hang says where it is.

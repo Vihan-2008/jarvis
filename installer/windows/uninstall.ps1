@@ -3,11 +3,10 @@
 Removes JARVIS: the shortcuts the installer made and the install folder.
 
 .DESCRIPTION
-It never removes your notes vault or the app's data folder (settings, chats, sessions); it says where they are so
-you can keep them, back them up or delete them yourself. Keys stay in Windows Credential Manager under
-"jarvis-command"; remove them there if you want them gone.
-
-Close JARVIS before running this.
+It stops JARVIS if it is running from this folder. Your notes vault and the app's data folder (settings, chats,
+history) are kept unless you choose otherwise: run on its own it asks about each, and -DeleteData / -DeleteNotes say
+so ahead. Whatever is deleted goes to the Recycle Bin, so it can still be put back. Keys stay in Windows Credential
+Manager under "jarvis-command"; remove them there if you want them gone.
 
 .EXAMPLE
 powershell -NoProfile -ExecutionPolicy Bypass -File uninstall.ps1
@@ -15,7 +14,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File uninstall.ps1
 [CmdletBinding()]
 param(
     [string]$InstallDir = '',
-    [switch]$Quiet
+    [switch]$Quiet,
+    [switch]$DeleteData,
+    [switch]$DeleteNotes
 )
 
 $ErrorActionPreference = 'Stop'
@@ -50,10 +51,35 @@ if ($vault) {
 $data = Join-Path $env:LOCALAPPDATA 'JarvisCommand'
 if ($env:JCC_STATE_DIR) { $data = $env:JCC_STATE_DIR }
 
-if (-not $Quiet) {
-    $answer = Read-Host "Remove JARVIS from $InstallDir and its shortcuts? Your notes and data are kept. [y/N]"
-    if (-not $answer.Trim().ToLower().StartsWith('y')) { Write-Host 'Nothing was removed.'; exit 0 }
+function To-RecycleBin([string]$Folder) {
+    Add-Type -AssemblyName Microsoft.VisualBasic
+    [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($Folder, 'OnlyErrorDialogs', 'SendToRecycleBin')
 }
+
+if (-not $Quiet) {
+    Write-Host 'This removes the JARVIS app, its shortcuts and its entry in Settings > Apps.'
+    Write-Host ''
+    $answer = Read-Host "Remove JARVIS from $InstallDir? [y/N]"
+    if (-not $answer.Trim().ToLower().StartsWith('y')) { Write-Host 'Nothing was removed.'; Read-Host 'Press Enter to close'; exit 0 }
+    Write-Host ''
+    Write-Host "JARVIS's data folder holds your settings, chats and history: $data"
+    $DeleteData = (Read-Host 'Delete it too? It goes to the Recycle Bin. [y/N]').Trim().ToLower().StartsWith('y')
+    if ($vault) {
+        Write-Host ''
+        Write-Host "Your notes vault holds the notes JARVIS keeps (and any you wrote there): $vault"
+        $DeleteNotes = (Read-Host 'Delete your notes too? They go to the Recycle Bin. [y/N]').Trim().ToLower().StartsWith('y')
+    }
+}
+
+# A JARVIS running from this folder (its own Python is in it) is stopped first.
+$prefix = $InstallDir + '\'
+foreach ($process in @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)) {
+    $exe = [string]$process.ExecutablePath
+    if ($exe -and $exe.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        try { Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop } catch { }
+    }
+}
+Start-Sleep -Milliseconds 800
 
 $list = Join-Path $InstallDir '.shortcuts'
 if (Test-Path -LiteralPath $list) {
@@ -68,10 +94,15 @@ if (Test-Path -LiteralPath $list) {
 
 Set-Location -LiteralPath ([IO.Path]::GetTempPath())
 Remove-Item -LiteralPath $InstallDir -Recurse -Force
+Remove-Item -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\JARVIS' -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host "Removed the app from $InstallDir."
+$kept = @()
+if ($DeleteData -and (Test-Path -LiteralPath $data)) { To-RecycleBin $data; Write-Host "Moved JARVIS's data folder to the Recycle Bin: $data" }
+elseif (Test-Path -LiteralPath $data) { $kept += "  JARVIS's data folder (settings, chats): $data" }
+if ($vault -and $DeleteNotes -and (Test-Path -LiteralPath $vaultFull)) { To-RecycleBin $vaultFull; Write-Host "Moved your notes vault to the Recycle Bin: $vaultFull" }
+elseif ($vault) { $kept += "  Your notes vault:      $vault" }
 Write-Host ''
-Write-Host 'Kept, for you to keep or delete yourself:'
-if ($vault) { Write-Host "  Your notes vault:      $vault" }
-Write-Host "  The app's data folder: $data"
+if ($kept) { Write-Host 'Kept, for you to keep or delete yourself:'; $kept | ForEach-Object { Write-Host $_ } }
 Write-Host '  Keys, if you saved any: Windows Credential Manager, entries starting with "jarvis-command".'
+if (-not $Quiet) { Read-Host 'JARVIS is removed. Press Enter to close' | Out-Null }
 exit 0

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Download · JARVIS</title>
-<meta name="description" content="Download JARVIS for Windows or macOS, or run it from source with Python 3.11 or newer. Free and open source.">
+<meta name="description" content="Download JARVIS for Windows or macOS: one installer, nothing else to install, your first command a minute later. Free and open source.">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0b0b0f">
 <meta name="referrer" content="no-referrer">
@@ -43,7 +43,8 @@
   </div>
 
   <div class="note">
-    <p><b>The installers are not code-signed yet.</b> Windows SmartScreen and macOS Gatekeeper will warn you the first time you open them. The steps under each download say what to click. If you would rather not, run JARVIS from source instead.</p>
+    <p><b>One download, nothing else to install.</b> The installer brings everything JARVIS needs (its own Python included), asks nothing, and opens JARVIS when it is done. Then type <b>open calculator</b> and press Enter: that is your first command. (Installers up to 0.1.4 still need Python 3.11 on the computer.)</p>
+    <p><b>The installers are not code-signed yet.</b> Windows SmartScreen and macOS Gatekeeper warn you the first time you open them. The steps under each download say what to click. If you would rather not, run JARVIS from source instead.</p>
   </div>
 
   <div class="dl-grid">
@@ -61,13 +62,15 @@
       <ol>
         <li>Open <b>JARVIS-Setup.exe</b>.</li>
         <li>If Windows says it protected your PC, click <b>More info</b>, then <b>Run anyway</b>.</li>
-        <li>Follow the installer's steps.</li>
+        <li>Wait about a minute: it installs for you alone (no administrator rights), adds JARVIS to the Start menu and opens it.</li>
+        <li>Type <b>open calculator</b> and press Enter.</li>
+        <li>To remove it later: <b>Settings › Apps › JARVIS</b>, or JARVIS's own <b>Settings › Advanced › Uninstall JARVIS</b>.</li>
       </ol>
     </section>
 
     <section class="dl-card" aria-labelledby="mac-h">
       <h2 id="mac-h">macOS <span class="tag">New</span></h2>
-      <p class="muted">The app with the wake word, an icon in the menu bar, shortcuts that work from any app, dictation into other apps, working in other apps' windows, step-by-step control and telling the Mac's own sound from your voice. The built-in browser panel and the small listening window are Windows-only for now. Every change is run by automated tests and, on a real Mac at GitHub, by a check that opens TextEdit, types, presses and dictates in it, takes a picture of the screen, presses each shortcut from another app, chooses from the menu-bar menu, plays "Hey Jarvis" to the wake word and measures a sound the Mac plays. Its owner has installed it on a real Mac and opens it from its icon; nobody has used it day to day yet. The installer offers to set up "Hey JARVIS" (two Python packages and a small model), and macOS asks you to allow Accessibility, Screen Recording and the microphone the first time each is needed.</p>
+      <p class="muted">The app with the wake word, an icon in the menu bar, shortcuts that work from any app, dictation into other apps, working in other apps' windows, step-by-step control and telling the Mac's own sound from your voice. The built-in browser panel and the small listening window are Windows-only for now. Every change is run by automated tests and, on a real Mac at GitHub, by a check that opens TextEdit, types, presses and dictates in it, takes a picture of the screen, presses each shortcut from another app, chooses from the menu-bar menu, plays "Hey Jarvis" to the wake word and measures a sound the Mac plays. Its owner has installed it on a real Mac and opens it from its icon; nobody has used it day to day yet. The installer sets up "Hey JARVIS" (two Python packages and a small model, downloaded while it installs), and macOS asks you to allow Accessibility, Screen Recording and the microphone the first time each is needed.</p>
       <div class="actions">
         <a class="btn primary" href="https://github.com/Vihan-2008/jarvis/releases/latest/download/JARVIS.dmg">
           <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg>
@@ -77,9 +80,10 @@
       </div>
       <h3 class="visually-hidden">If Gatekeeper warns</h3>
       <ol>
-        <li>Open <b>JARVIS.dmg</b> (or the unpacked zip). It shows two things: <b>Install JARVIS</b> and <b>Read me first</b>. Double-click <b>Install JARVIS</b> and press Return at each question.</li>
-        <li>If macOS says it cannot be opened, open <b>System Settings</b>, then <b>Privacy &amp; Security</b>, scroll down and click <b>Open Anyway</b> next to "Install JARVIS". (On older macOS, Control-click <b>Install JARVIS</b> and choose <b>Open</b>.) JARVIS is not signed with a paid Apple certificate.</li>
-        <li>Then open <b>JARVIS</b> from your Applications folder, Launchpad or Spotlight, like any app. The first time, allow it to use the microphone and your Documents folder.</li>
+        <li>Open <b>JARVIS.dmg</b> (or the unpacked zip). It shows two things: <b>Install JARVIS</b> and <b>Read me first</b>. Double-click <b>Install JARVIS</b>, then click <b>Install</b>. No Terminal window opens.</li>
+        <li>If macOS says it cannot be opened, click <b>Done</b>, open <b>System Settings</b>, then <b>Privacy &amp; Security</b>, scroll down and click <b>Open Anyway</b> next to "Install JARVIS", then open it again. (On macOS 14 or older, Control-click <b>Install JARVIS</b> and choose <b>Open</b>.) JARVIS is not signed with a paid Apple certificate.</li>
+        <li>JARVIS opens by itself when it is installed. Type <b>open calculator</b> and press Enter. Next time, open <b>JARVIS</b> from Applications, Launchpad or Spotlight.</li>
+        <li>To remove it later: JARVIS's <b>Settings › Advanced › Uninstall JARVIS</b>.</li>
       </ol>
     </section>
   </div>
@@ -91,7 +95,7 @@
     </div>
     <div class="grid">
       <div class="card"><h3>Your notes vault</h3><p>The installer creates the vault with its folders and starter notes. It never overwrites a note that is already there.</p></div>
-      <div class="card"><h3>Obsidian, if you want it</h3><p>The vault is plain Markdown, so any editor works. The installer can install Obsidian to read and edit it, if you choose.</p></div>
+      <div class="card"><h3>Everything it needs</h3><p>Its own Python, kept inside its folder, so nothing else on your computer changes. Updates keep your settings, chats and notes, and go back to the version before if a new one does not start.</p></div>
       <div class="card"><h3>Your own accounts</h3><p>JARVIS uses what you already have: the Claude Code and Codex command-line tools signed in with your subscriptions, a Groq key for listening and an ElevenLabs key for its voice. Add the ones you want; keys are kept in the system's key store.</p></div>
     </div>
   </section>

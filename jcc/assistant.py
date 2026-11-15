@@ -310,6 +310,7 @@ def settings(cfg) -> dict:
             "ask": saved.get("ask") if saved.get("ask") in policy.LEVELS else "sending",
             "speak": saved.get("speak", True) is not False,
             "hands_free": saved.get("hands_free", True) is not False,   # a natural back-and-forth unless switched off
+            "duck": saved.get("duck", True) is not False,               # other sounds made quieter while JARVIS listens (jcc/ducking.py)
             "light": saved.get("light") if saved.get("light") in ("on", "off") else "auto",
             # An idle voice session (no task running, nothing new asked) goes to sleep after this long; "Hey JARVIS" wakes it.
             # (0: never, only when it is told to. A yes or no in the file is not a number, though Python counts False as 0.)
@@ -328,7 +329,7 @@ def configure(cfg, values) -> dict:
             current[key] = value
         elif key == "research" and valid_research(value):
             current[key] = value
-        elif key in ("pc_control", "speak", "hands_free", "standin", "resume") and isinstance(value, bool):
+        elif key in ("pc_control", "speak", "hands_free", "standin", "resume", "duck") and isinstance(value, bool):
             current[key] = value
         elif key == "ask" and value in policy.LEVELS:
             current[key] = value
@@ -704,6 +705,7 @@ class Assistant:
         self.windows: dict[str, float] = {}           # each open window (by the name it gave itself) -> when it last asked for news
         self.sound = pcsound.shared                   # how loud the PC's own sound is, to tell it from the person in the room
         self.voices: dict[str, tuple[str, float]] = {}   # window -> (what its voice chat is doing, when it said so)
+        self._ducker = None                                # other sounds made quieter while JARVIS listens (jcc/ducking.py)
         self.hand_wait = 2.5                          # how long an open window gets to take something before another way is used
         self.reminders = Reminders(cfg, self._announce)
         self.apps = quick.Apps(cfg)
@@ -821,7 +823,22 @@ class Assistant:
             self.emit("phase", w=key, kind=self.kinds.get(key, "main"), phase="idle" if gone else phase)
         if not gone and phase != "idle":
             self._popup_kick()
+        self._duck()
         return {"ok": True}
+
+    def _duck(self) -> None:
+        """While a window is listening, other programs' sound is made quieter; it comes back as soon as JARVIS thinks,
+        works or speaks (or nothing says it is still listening)."""
+        from jcc import ducking
+        try:
+            if self._ducker is None:
+                self._ducker = ducking.Ducker(self.cfg.state_dir)
+                self._ducker.recover()
+            with self.lock:
+                listening = any(phase == "listening" and time.time() - at < ducking.STALE for phase, at in self.voices.values())
+            self._ducker.update(listening and settings(self.cfg).get("duck", True) is not False)
+        except Exception:  # noqa: BLE001 - sound that cannot be changed never stops a conversation
+            pass
 
     # ------------------------------------------------------------------ the small "listening" window
     def main_in_front(self) -> bool:

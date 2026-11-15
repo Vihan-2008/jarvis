@@ -37,6 +37,7 @@ OBSIDIAN="ask"
 WAKE="ask"
 LOGIN="ask"
 QUIET=0
+OPEN_AFTER=0
 SOURCE=""
 PYTHON=""
 
@@ -56,6 +57,7 @@ while [ $# -gt 0 ]; do
     --login) LOGIN="yes"; shift ;;
     --no-login) LOGIN="no"; shift ;;
     --quiet) QUIET=1; shift ;;
+    --open) OPEN_AFTER=1; shift ;;
     --source) SOURCE="${2:?--source needs a folder}"; shift 2 ;;
     --python) PYTHON="${2:?--python needs a path}"; shift 2 ;;
     -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
@@ -103,7 +105,18 @@ find_python() {
 }
 
 say "Installing JARVIS for this Mac user (no administrator password needed)."
-if ! PY="$(find_python)" || [ -z "$PY" ]; then
+# JARVIS brings its own Python (both kinds of Mac): the one for this Mac's chip is used, unless --python says otherwise.
+bundled=""
+if [ -z "$PYTHON" ] && [ -f "$SOURCE/runtime/VERSION" ]; then
+  chip="$(uname -m)"
+  [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = 1 ] && chip=arm64      # (an Apple-silicon Mac running this under Rosetta)
+  case "$chip" in arm64) bundled="$SOURCE/runtime/python-arm64.tar.gz" ;; *) bundled="$SOURCE/runtime/python-x86_64.tar.gz" ;; esac
+  [ -f "$bundled" ] || bundled=""
+fi
+if [ -n "$bundled" ]; then
+  PY="(JARVIS's own, for this Mac: $(basename "$bundled"))"
+  say "JARVIS brings its own Python, so nothing else needs to be installed."
+elif ! PY="$(find_python)" || [ -z "$PY" ]; then
   say "JARVIS needs Python 3.11 or newer, and none was found on this Mac."
   say "Get it from https://www.python.org/downloads/macos/ or, with Homebrew, run: brew install python"
   say "Then run this installer again."
@@ -126,11 +139,54 @@ if [ "$upgrade" = 0 ] && [ -n "$(ls -A "$INSTALL_DIR")" ]; then
   fail "the folder $INSTALL_DIR already has other files in it and is not a JARVIS install. Choose an empty folder with --install-dir."
 fi
 
+# Enough room for the app and its own Python?
+free_mb="$(df -Pm "$INSTALL_DIR" | awk 'NR==2 {print $4}')"
+if [ -n "$free_mb" ] && [ "$free_mb" -lt 300 ]; then
+  fail "JARVIS needs about 300 MB free, and there is ${free_mb} MB. Free some space (for example, empty the Trash), then run the installer again."
+fi
+# A JARVIS already running from this folder (installing again, or over an older version) is stopped first, so it does
+# not go on running the old files; it is opened again at the end.
+stopped=0
+if [ -f "$INSTALL_DIR/jcc/__init__.py" ]; then
+  for pid in $(pgrep -f 'jcc(\.| )(desktop|gui|tray|local_history|cloud_memory|maintenance)|jarvis-menu|jarvis-sound-level' 2>/dev/null || true); do
+    where="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1 || true)"
+    program="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+    case "$where/ $program" in
+      "$INSTALL_DIR"/*|*"$INSTALL_DIR/"*) kill "$pid" 2>/dev/null || true; stopped=1 ;;
+    esac
+  done
+  if [ "$stopped" = 1 ]; then say "Stopped the JARVIS that was running, so it can be replaced."; sleep 2; fi
+fi
+
+if [ -n "$bundled" ]; then
+  # Unpacked only when it is new or another version, beside the old one, then swapped in: a JARVIS (or an update) still
+  # running on the old one is never broken half-way.
+  target="$INSTALL_DIR/runtime/python"
+  want="$(head -n 1 "$SOURCE/runtime/VERSION")-$(basename "$bundled")"
+  have="$(head -n 1 "$target/.jarvis-runtime" 2>/dev/null || true)"
+  if [ "$have" = "$want" ] && [ -x "$target/bin/python3" ]; then
+    say "JARVIS's own Python is already in place."
+  else
+    say "Unpacking JARVIS's own Python..."
+    mkdir -p "$INSTALL_DIR/runtime"
+    rm -rf "$INSTALL_DIR/runtime/python.new" && mkdir -p "$INSTALL_DIR/runtime/python.new"
+    tar -xzf "$bundled" -C "$INSTALL_DIR/runtime/python.new" --strip-components 1 || fail "JARVIS's own Python could not be unpacked. Check there is free space, then run the installer again."
+    printf '%s\n' "$want" > "$INSTALL_DIR/runtime/python.new/.jarvis-runtime"
+    xattr -dr com.apple.quarantine "$INSTALL_DIR/runtime/python.new" 2>/dev/null || true
+    [ -d "$target" ] && mv "$target" "$INSTALL_DIR/runtime/python.old-$$"
+    mv "$INSTALL_DIR/runtime/python.new" "$target"
+    rm -rf "$INSTALL_DIR"/runtime/python.old-* 2>/dev/null || true
+  fi
+  PY="$target/bin/python3"
+  good_python "$PY" >/dev/null || fail "JARVIS's own Python does not start on this Mac ($(uname -m)). Please report this, with the macOS version."
+  say "Using Python: $PY"
+fi
+
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 # Files that are never copied: the person's own settings, build and test material, the owner's deployment tool.
 ( cd "$SOURCE" && find . -type f \
-    ! -path './.git/*' ! -path './.github/*' ! -path './.claude/*' ! -path './tests/*' ! -path './installer/*' \
+    ! -path './.git/*' ! -path './.github/*' ! -path './.claude/*' ! -path './tests/*' ! -path './installer/*' ! -path './runtime/*' \
     ! -path './website/*' ! -path './dist/*' ! -path '*/__pycache__/*' ! -name '*.pyc' ! -name '.DS_Store' \
     ! -path './LEDGER.md' ! -path './scripts/deploy.py' ! -path './config/local.toml' ! -path './.python' \
     ! -path './.jarvis-files' ! -path './.app-bundle' ! -path './install.sh' ! -path './uninstall.sh' \
@@ -394,5 +450,7 @@ say "Audio Recording, and Microphone. JARVIS's Connections page shows which are 
 if [ "$QUIET" = 0 ] && [ "$MAKE_APP" = 1 ]; then
   say ""
   if ask_yes "Open JARVIS now?" y; then open "$bundle" || true; fi
+elif [ "$MAKE_APP" = 1 ] && { [ "$OPEN_AFTER" = 1 ] || [ "$stopped" = 1 ]; }; then
+  open "$bundle" || true
 fi
 exit 0

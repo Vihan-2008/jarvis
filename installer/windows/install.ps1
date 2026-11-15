@@ -29,15 +29,19 @@ param(
     [switch]$Autostart,
     [switch]$Quiet,
     [string]$Source = '',
-    [string]$Python = ''
+    [string]$Python = '',
+    [switch]$Friendly
 )
+# -Friendly is how JARVIS-Setup.exe runs it: no questions (notes in Documents\JARVIS Vault, no Obsidian), JARVIS
+# listed in Settings > Apps so it can be removed from there, a running JARVIS restarted, and JARVIS opened at the end.
+if ($Friendly) { $Quiet = $true; $NoObsidian = $true }
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 
 # Files and folders that are never copied into the install folder: the person's own settings, the build and test
 # material, and the owner's own deployment tool. Paths are relative to the source folder, with backslashes.
-$NeverCopied = @('.git', '.github', '.claude', 'tests', 'installer', 'website', 'dist', 'LEDGER.md',
+$NeverCopied = @('runtime', '.git', '.github', '.claude', 'tests', 'installer', 'website', 'dist', 'LEDGER.md',
                  'scripts\deploy.py', 'config\local.toml', '.python', '.jarvis-files', '.shortcuts',
                  'install.ps1', 'uninstall.ps1', 'setup.cmd', 'jarvis.ico')
 
@@ -131,10 +135,89 @@ function New-Shortcut([string]$Path, [string]$Target, [string]$Arguments, [strin
     $link.Save()
 }
 
+function Assert-Space([string]$Folder, [int]$NeedMB) {
+    # Enough room on the drive for the app (and its own Python), or a plain message saying how much is missing.
+    $root = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($Folder))
+    try { $free = (New-Object IO.DriveInfo $root).AvailableFreeSpace } catch { return }
+    if ($free -lt [int64]$NeedMB * 1MB) {
+        throw ("JARVIS needs about $NeedMB MB free on $root, and there is only {0} MB. Free some space (for example, empty the Recycle Bin), then run Setup again." -f [math]::Round($free / 1MB))
+    }
+}
+
+function Stop-RunningJarvis([string]$Folder) {
+    # A JARVIS running from this folder is stopped before its files are replaced (and opened again at the end).
+    # With -Friendly (a person upgrading the JARVIS they use), the one answering on its usual port is stopped too.
+    $stopped = $false
+    $prefix = $Folder.TrimEnd('\') + '\'
+    $owners = @()
+    if ($Friendly) {
+        try { $owners = @(Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction Stop | ForEach-Object { $_.OwningProcess }) } catch { }
+    }
+    $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+    # The processes that started this installer (JARVIS's update helper, which runs on JARVIS's own Python in this
+    # folder) are never stopped: the update would be cut off half-way.
+    $spared = @{}
+    $id = $PID
+    for ($i = 0; $i -lt 16 -and $id; $i++) {
+        $spared[[int]$id] = $true
+        $parent = $all | Where-Object { $_.ProcessId -eq $id } | Select-Object -First 1
+        $id = if ($parent) { [int]$parent.ParentProcessId } else { 0 }
+    }
+    foreach ($process in $all) {
+        if ($spared.ContainsKey([int]$process.ProcessId)) { continue }
+        $exe = [string]$process.ExecutablePath
+        $mine = $exe -and $exe.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
+        $ours = ($owners -contains $process.ProcessId) -and ([string]$process.CommandLine -match 'jcc')
+        if ($mine -or $ours) {
+            try { Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop; $stopped = $true } catch { }
+        }
+    }
+    if ($stopped) { Start-Sleep -Seconds 2 }
+    return $stopped
+}
+
+function Install-Runtime([string]$From, [string]$To) {
+    # JARVIS's own Python: unpacked only when it is new or another version, beside the old one, then swapped in, so a
+    # JARVIS (or an update) still running on the old one is never broken half-way. Old copies are removed when free.
+    $zip = Join-Path $From 'runtime\python.zip'
+    $want = (Get-Content -LiteralPath (Join-Path $From 'runtime\VERSION') -ErrorAction SilentlyContinue | Select-Object -First 1)
+    $home_ = Join-Path $To 'runtime'
+    $target = Join-Path $home_ 'python'
+    $marker = Join-Path $target '.jarvis-runtime'
+    $have = if (Test-Path -LiteralPath $marker) { (Get-Content -LiteralPath $marker | Select-Object -First 1) } else { '' }
+    if ($have -and $have -eq $want -and (Test-Path -LiteralPath (Join-Path $target 'pythonw.exe'))) {
+        Say "JARVIS's own Python ($want) is already in place."
+    } else {
+        Say "Unpacking JARVIS's own Python ($want); nothing else needs to be installed..."
+        New-Item -ItemType Directory -Force -Path $home_ | Out-Null
+        $fresh = Join-Path $home_ 'python.new'
+        if (Test-Path -LiteralPath $fresh) { Remove-Item -LiteralPath $fresh -Recurse -Force }
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [IO.Compression.ZipFile]::ExtractToDirectory($zip, $fresh)
+        Write-TextFile (Join-Path $fresh '.jarvis-runtime') ($want + "`r`n")
+        $moved = $true
+        if (Test-Path -LiteralPath $target) {
+            try { Rename-Item -LiteralPath $target -NewName ('python.old-' + [DateTime]::Now.Ticks) -ErrorAction Stop }
+            catch { $moved = $false }
+        }
+        if ($moved) { Rename-Item -LiteralPath $fresh -NewName 'python' }
+        else {
+            # (In use: an update's helper runs on it. The one in place still works; the new one goes in next time.)
+            Remove-Item -LiteralPath $fresh -Recurse -Force -ErrorAction SilentlyContinue
+            Say "JARVIS's own Python is in use, so the one in place is kept for now."
+        }
+    }
+    foreach ($old in @(Get-ChildItem -LiteralPath $home_ -Directory -Filter 'python.old-*' -ErrorAction SilentlyContinue)) {
+        try { Remove-Item -LiteralPath $old.FullName -Recurse -Force -ErrorAction Stop } catch { }
+    }
+    return (Join-Path $target 'python.exe')
+}
+
 # ------------------------------------------------------------------------------------------------------- Python
 Say 'Installing JARVIS for this Windows user (no administrator rights needed).'
 $sourceDir = Find-Source
-$pythonExe = Find-Python
+$bundled = (-not $Python) -and (Test-Path -LiteralPath (Join-Path $sourceDir 'runtime\python.zip'))
+$pythonExe = if ($bundled) { 'bundled' } else { Find-Python }
 if (-not $pythonExe) {
     Say 'JARVIS needs Python 3.11 or newer, and none was found on this PC.'
     $winget = Get-Command winget -ErrorAction SilentlyContinue
@@ -150,12 +233,10 @@ if (-not $pythonExe) {
         exit 1
     }
 }
-$pythonw = Join-Path (Split-Path -Parent $pythonExe) 'pythonw.exe'
-if (-not (Test-Path -LiteralPath $pythonw)) { $pythonw = $pythonExe }
-Say "Using Python: $pythonExe"
-
 # ---------------------------------------------------------------------------------------------------- the files
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
+Assert-Space $InstallDir ($(if ($bundled) { 250 } else { 60 }))
+$restart = Stop-RunningJarvis $InstallDir
 $upgrade = Test-Path -LiteralPath (Join-Path $InstallDir 'jcc\__init__.py')
 if ((Test-Path -LiteralPath $InstallDir) -and -not $upgrade -and (Get-ChildItem -LiteralPath $InstallDir -Force | Select-Object -First 1)) {
     throw "The folder $InstallDir already has other files in it and is not a JARVIS install. Choose an empty folder with -InstallDir."
@@ -188,8 +269,12 @@ if (-not $sameFolder) {
     if (-not $uninstaller) { throw 'uninstall.ps1 is missing from the installer package.' }
     Copy-Item -LiteralPath $uninstaller -Destination (Join-Path $InstallDir 'uninstall.ps1') -Force
 }
-if ($upgrade) { Say "Upgraded the app in $InstallDir (your settings and your own files there were kept)." }
+if ($upgrade) { Say "Upgraded the app in $InstallDir (your settings, chats and your own files were kept)." }
 else { Say "Copied the app to $InstallDir." }
+if ($bundled) { $pythonExe = Install-Runtime $sourceDir $InstallDir }
+$pythonw = Join-Path (Split-Path -Parent $pythonExe) 'pythonw.exe'
+if (-not (Test-Path -LiteralPath $pythonw)) { $pythonw = $pythonExe }
+Say "Using Python: $pythonExe"
 Write-TextFile (Join-Path $InstallDir '.python') ($pythonw + "`r`n")
 
 # --------------------------------------------------------------------------------------------------- the vault
@@ -198,6 +283,8 @@ $hasVault = (Test-Path -LiteralPath $local) -and (Select-String -LiteralPath $lo
 $firstrun = @('-m', 'jcc.firstrun', '--app-dir', $InstallDir, '--yes')
 if ($Vault) {
     $firstrun += @('--vault', $Vault)
+} elseif (-not $hasVault -and $Friendly) {
+    $firstrun += @('--vault', (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'JARVIS Vault'))
 } elseif (-not $hasVault -and -not $Quiet) {
     $offered = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'JARVIS Vault'
     Say ''
@@ -263,10 +350,31 @@ if ($wantObsidian) {
     }
 }
 
+# ------------------------------------------------------------------------------------- Settings > Apps, and go
+if ($Friendly) {
+    # Listed in Settings > Apps (for this user only, no administrator rights), so it can be removed from there.
+    $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\JARVIS'
+    $version = (Get-Content -LiteralPath (Join-Path $InstallDir 'VERSION') -ErrorAction SilentlyContinue | Select-Object -First 1)
+    New-Item -Path $key -Force | Out-Null
+    $values = @{ DisplayName = 'JARVIS'; DisplayVersion = [string]$version; Publisher = 'JARVIS (open source)'; InstallLocation = $InstallDir
+                 DisplayIcon = $icon; NoModify = 1; NoRepair = 1
+                 UninstallString = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $InstallDir 'uninstall.ps1')`"" }
+    foreach ($name in $values.Keys) {
+        $kind = if ($values[$name] -is [int]) { 'DWord' } else { 'String' }
+        New-ItemProperty -Path $key -Name $name -Value $values[$name] -PropertyType $kind -Force | Out-Null
+    }
+}
+
 Say ''
 Say 'JARVIS is installed.'
 Say "  App:          $InstallDir"
-Say "  Uninstaller:  $(Join-Path $InstallDir 'uninstall.ps1')"
-Say '  Start it from the JARVIS shortcut, or run:'
-Say "    `"$pythonw`" -m jcc.desktop   (in $InstallDir)"
+Say "  Uninstaller:  Settings > Apps > JARVIS (or $(Join-Path $InstallDir 'uninstall.ps1'))"
+if ($Friendly) {
+    Say ''
+    Say 'Opening JARVIS now. Next time, open it from the JARVIS icon on your desktop or in the Start menu.'
+    Start-Process -FilePath $pythonw -ArgumentList '-m', 'jcc.desktop' -WorkingDirectory $InstallDir
+} else {
+    Say '  Start it from the JARVIS shortcut, or run:'
+    Say "    `"$pythonw`" -m jcc.desktop   (in $InstallDir)"
+}
 exit 0

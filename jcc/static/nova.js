@@ -1077,7 +1077,7 @@ function drawSlash() {
   list.querySelector('.on')?.scrollIntoView?.({ block: 'nearest' });
 }
 const AT_ONCE = new Set(['activity', 'efficiency', 'tasks', 'recall', 'shared', 'control', 'folder', 'chat', 'code', 'ultracode', 'new', 'usage', 'mods', 'help', 'compact', 'work', 'mode', 'status', 'projects', 'undo', 'stop', 'settings', 'files', 'terminal', 'browser',
-  'artifacts', 'agents', 'pair', 'court', 'security', 'routines', 'voice', 'connections', 'models', 'updates']);      // nothing follows these: chosen, they are done
+  'artifacts', 'agents', 'pair', 'court', 'security', 'routines', 'voice', 'connections', 'models', 'updates', 'setup']);      // nothing follows these: chosen, they are done
 function takeSlash(c) {
   slash.classList.add('hidden');
   if (c.own && AT_ONCE.has(c.name)) { message.value = '/' + c.name; grow(); form.requestSubmit(); return; }
@@ -1183,6 +1183,7 @@ async function runCommand(name, words) {
       await api('/api/job/review', { id: job.receipt, action: 'undo' }); notify('Undone.'); return void refresh();
     }
     if (name === 'stop') return void stopReply();
+    if (name === 'setup') return void window.Nova.gettingStarted?.();
     if (name === 'folder') { const key = chat?.project || selectedProject; return void (key ? revealProject(key) : localReply('Open file location', '<p>Choose a project first: /projects.</p>')); }
     if (name === 'settings') return void window.Nova.voiceSettings?.(words || undefined);
     if (['voice', 'connections', 'models', 'updates'].includes(name)) return void window.Nova.voiceSettings?.(name === 'connections' ? 'connections' : name);
@@ -1198,7 +1199,7 @@ document.addEventListener('click', e => {
   else if (b.dataset.useProject) { setWorkMode('code', true); selectProject(b.dataset.useProject); projectChip(); b.closest('.nv-local')?.remove(); message.focus(); }
 });
 // JARVIS's own commands are done by the window. True: it was one of them, and it is done.
-const IN_CHAT = new Set(['activity', 'efficiency', 'tasks', 'recall', 'shared', 'control', 'folder', 'work', 'mode', 'permissions', 'status', 'projects', 'undo', 'stop', 'settings', 'voice', 'connections', 'models', 'updates', 'artifacts', 'files', 'terminal', 'browser', 'agents', 'pair', 'court', 'security', 'routines']);
+const IN_CHAT = new Set(['setup', 'activity', 'efficiency', 'tasks', 'recall', 'shared', 'control', 'folder', 'work', 'mode', 'permissions', 'status', 'projects', 'undo', 'stop', 'settings', 'voice', 'connections', 'models', 'updates', 'artifacts', 'files', 'terminal', 'browser', 'agents', 'pair', 'court', 'security', 'routines']);
 function runBuiltin(name, words = '') {
   if (IN_CHAT.has(name)) { runCommand(name, words); return true; }
   if (name === 'chat' || name === 'code') setWorkMode(name, true);
@@ -1444,18 +1445,12 @@ document.addEventListener('keydown', e => {
   else if (e.key === '/') { e.preventDefault(); showShortcuts(); }
   else if (key === 'p' && e.shiftKey) { e.preventDefault(); legacyButton(topbar, 'Control')?.click(); }
 }, true);
-if (!store.get('nv-welcomed', '')) {
-  const guide = el('div', { class: 'nv-guide', role: 'note' }, '<h4>Welcome to JARVIS</h4><ol><li>Click the bar and type what you need, in plain words.</li><li>Press Enter. JARVIS picks the right AI and shows its progress.</li><li>Your chats are kept in the list on the left.</li><li>To talk to it, say “Hey JARVIS”. Under <b>Connections</b> you can see what is connected and add the rest.</li></ol><div class="actions"><button class="plain" data-more>Show me more</button><button class="plain" data-connect>Connections</button><button class="primary">Got it</button></div>');
-  body.append(guide);
-  const done = () => { store.set('nv-welcomed', '1'); guide.remove(); };
-  guide.querySelector('.primary').onclick = done; guide.querySelector('[data-more]').onclick = () => { done(); $('easy-help').click(); };
-  guide.querySelector('[data-connect]').onclick = () => { done(); window.Nova.voiceSettings?.('connect'); };
-}
+// (The first-run guide is in the chat: nova-start.js, also /setup.)
 
 /* ---------- start ---------- */
 welcome = () => '<div class="welcome"></div>';
 setWorkMode(workMode, false);
-window.Nova = { command: (name, words) => runCommand(name, words || ''), loadMods, mods: () => modsData, hook: runHooks, unregisterPane, setFull, isFull, icon, el, openPop, closePop, item, dialog, confirmBox, ask, notify, registerPane, openPane, closePanel, rich, setDraft, store, panel, liveUpdate, applyLight, micButton: micB, refreshMode: () => updateMode(), newChat: () => newChat.click(),
+window.Nova = { command: (name, words) => runCommand(name, words || ''), localReply, loadMods, mods: () => modsData, hook: runHooks, unregisterPane, setFull, isFull, icon, el, openPop, closePop, item, dialog, confirmBox, ask, notify, registerPane, openPane, closePanel, rich, setDraft, store, panel, liveUpdate, applyLight, micButton: micB, refreshMode: () => updateMode(), newChat: () => newChat.click(),
   setTheme: name => { store.set('nv-theme', name); applyTheme(); }, get pane() { return currentPane; } };
 applyTheme(); drawTabs(); drawTopButtons();
 body.classList.add('nova', 'nv-home'); body.classList.remove('workspace-open');

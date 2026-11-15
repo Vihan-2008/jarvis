@@ -55,6 +55,7 @@ BUILTIN = (("work", "What is running, waiting for you and finished, here in the 
            ("recall", "Search past decisions and work"),
            ("shared", "Web pages shared with JARVIS"),
            ("control", "Step-by-step control of this computer"),
+           ("setup", "Getting started: a first command, the microphone, \"Hey JARVIS\" and what to allow"),
            ("settings", "Open Settings"),
            ("voice", "Voice settings"),
            ("connections", "What JARVIS is connected to"),

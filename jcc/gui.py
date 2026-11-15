@@ -46,7 +46,7 @@ STATIC = Path(__file__).with_name("static") / "desktop.html"
 MAX_TEXT = 400_000              # (what is typed has no practical limit: a long paste, a whole spec)
 SCRIPTS = ("/workbench.js", "/assistant.js", "/horizon.js", "/horizon.css", "/delivery.js", "/reliability.js", "/operations.js", "/operations.css",
            "/everyday.js", "/everyday.css", "/nova.css", "/nova.js", "/nova-core.js", "/nova-rich.js", "/nova-panels.js", "/nova-voice.js",
-           "/nova-audio.js", "/nova-mic.js", "/nova-work.js", "/nova-security.js", "/nova-permissions.js", "/nova-routines.js", "/nova-kinds.js", "/nova-gallery.js", "/vendor/xterm.js", "/vendor/xterm.css", "/vendor/addon-fit.js")
+           "/nova-audio.js", "/nova-mic.js", "/nova-work.js", "/nova-security.js", "/nova-permissions.js", "/nova-routines.js", "/nova-kinds.js", "/nova-gallery.js", "/nova-start.js", "/vendor/xterm.js", "/vendor/xterm.css", "/vendor/addon-fit.js")
 # Tools the JARVIS app itself carries out for the assistant, each only with a one-time permit from the gate.
 APP_TOOLS = frozenset({"open_app", "list_projects", "create_project", "build_with_coding_agents", "make_image", "set_timer", "set_reminder",
                        "list_reminders", "cancel_reminder", "remember", "forget", "add_note", "send_email", "use_accounts"})
@@ -1125,7 +1125,7 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                 system.open_path(Path(__file__).resolve().parents[1] / "browser-sync")
                 self._json(HTTPStatus.OK, {"opened": True})
                 return
-            if self.path not in ("/api/accounts", "/api/project/remove", "/api/reveal", "/api/updates", "/api/ask", "/api/mods", "/api/chats", "/api/chat/send", "/api/chat/update", "/api/projects", "/api/terminal", "/api/browser/open", "/api/routing", "/api/prompt-master", "/api/cloud", "/api/efficiency", "/api/job/control", '/api/assistant/settings','/api/feedback','/api/project/browse','/api/project/inspect','/api/project/connect','/api/job/review','/api/maintenance','/api/ui/activity','/api/context/inspect','/api/memory/resolve','/api/delivery/settings','/api/delivery/plan','/api/task-queue','/api/project/preferences','/api/dry-run','/api/evaluations','/api/handoff','/api/library','/api/provenance','/api/controls','/api/restorepoints','/api/diagnostics/export','/api/attachments/extract','/api/memory/search','/api/files/save','/api/pty','/api/web','/api/computer','/api/voice','/api/speech','/api/speech/tts','/api/mail','/api/assistants','/api/preview','/api/screenshot','/api/connections','/api/window','/api/providers','/api/usage','/api/skills','/api/pairs','/api/court','/api/agents','/api/artifacts','/api/security','/api/permissions','/api/routines'):
+            if self.path not in ("/api/uninstall", "/api/accounts", "/api/project/remove", "/api/reveal", "/api/updates", "/api/ask", "/api/mods", "/api/chats", "/api/chat/send", "/api/chat/update", "/api/projects", "/api/terminal", "/api/browser/open", "/api/routing", "/api/prompt-master", "/api/cloud", "/api/efficiency", "/api/job/control", '/api/assistant/settings','/api/feedback','/api/project/browse','/api/project/inspect','/api/project/connect','/api/job/review','/api/maintenance','/api/ui/activity','/api/context/inspect','/api/memory/resolve','/api/delivery/settings','/api/delivery/plan','/api/task-queue','/api/project/preferences','/api/dry-run','/api/evaluations','/api/handoff','/api/library','/api/provenance','/api/controls','/api/restorepoints','/api/diagnostics/export','/api/attachments/extract','/api/memory/search','/api/files/save','/api/pty','/api/web','/api/computer','/api/voice','/api/speech','/api/speech/tts','/api/mail','/api/assistants','/api/preview','/api/screenshot','/api/connections','/api/window','/api/providers','/api/usage','/api/skills','/api/pairs','/api/court','/api/agents','/api/artifacts','/api/security','/api/permissions','/api/routines'):
                 self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
             if not self.headers.get("Content-Type", "").startswith("application/json"):
@@ -1197,6 +1197,10 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                     if body.get('action') == 'accounts_user':      # whose accounts at Composio are used (the name they were connected under)
                         from jcc import online
                         self._json(HTTPStatus.OK, online.configure(state.cfg, body.get('user')));return
+                    if body.get('action') == 'mac_settings':       # the page of System Settings where a permission is switched on
+                        from jcc import macdesk, system
+                        if system.kind() != 'mac': raise ValueError('That is on a Mac only.')
+                        self._json(HTTPStatus.OK, {'opened': macdesk.open_settings(str(body.get('which', '')))});return
                     if body.get('action') != 'check': raise ValueError('Unknown request.')
                     self._json(HTTPStatus.OK, connections.check(state.cfg, str(body.get('id', ''))));return
                 if self.path == '/api/mail':
@@ -1342,6 +1346,12 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                 if self.path == '/api/project/remove':        # "Delete project": out of JARVIS; its folder only to the Recycle Bin, if asked
                     result = workspace.remove(state.cfg, str(body.get('project') or ''), trash=body.get('trash') is True)
                     self._json(HTTPStatus.OK, result);return
+                if self.path == '/api/uninstall':             # Settings > Advanced > Uninstall JARVIS: what it would do, and doing it
+                    from jcc import uninstall
+                    if body.get('action') == 'start':
+                        if self.headers.get('X-JCC-Sure') != 'uninstall': raise ValueError('Uninstalling needs to be confirmed in JARVIS\'s own window.')
+                        self._json(HTTPStatus.OK, uninstall.start(state.cfg, bool(body.get('delete_data')), bool(body.get('delete_notes'))));return
+                    self._json(HTTPStatus.OK, uninstall.plan(state.cfg));return
                 if self.path == '/api/reveal':                # "Open file location": a project's folder, or a file in it, in Explorer / Finder
                     from jcc import firstrun
                     workspace.refresh(state.cfg)
@@ -1797,6 +1807,8 @@ def serve(port: int = 8765, open_browser: bool = True, watch: bool = True,
         updates.background(state.cfg, state.stop)
     threading.Thread(target=update_loop, name="updates", daemon=True).start()
     threading.Thread(target=lambda: _quietly(review.tidy, state.cfg), name="tidy-reviews", daemon=True).start()
+    # A sound left lowered by a crash while JARVIS was listening is put back.
+    threading.Thread(target=lambda: _quietly(lambda: __import__("jcc.ducking", fromlist=["Ducker"]).Ducker(state.cfg.state_dir).recover()), name="sound-back", daemon=True).start()
     watcher_thread = None
     if watch:
         def _run() -> None:

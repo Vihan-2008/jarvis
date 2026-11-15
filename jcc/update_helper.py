@@ -36,7 +36,7 @@ WINDOWS = os.name == "nt"
 MAC = sys.platform == "darwin"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 KEEP_BACKUPS = 3
-LEFT_OUT = (".venv", "__pycache__")
+LEFT_OUT = (".venv", "__pycache__", "runtime")      # (JARVIS's own Python is not copied: an update keeps it unless it is a new one)
 
 
 class Failed(Exception):

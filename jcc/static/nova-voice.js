@@ -1047,6 +1047,7 @@ async function openSettings(tab = 'assistant') {
       row('The language you speak', pick('vs-language', Object.entries(speech.languages || { en: 'English' }))) +
       row('Names and unusual words', '<input id="vs-words" maxlength="300" placeholder="For example: Asha, Jaipur, Zerodha">', 'Helps JARVIS spell them correctly') +
       '<h3>Speaking</h3>' + check('vs-speak', 'Speak replies out loud in voice chat') +
+      check('vs-duck', 'Lower other sounds while you talk to JARVIS', 'Other programs get quieter while JARVIS listens, and go back to normal as soon as it thinks, works or speaks. JARVIS’s own voice is never lowered.') +
       (speech.configured
         ? row('Voice', pick('vs-voice', [...(s.voice_id && !voices.some(v => v.id === s.voice_id) ? [[s.voice_id, s.voice_name || 'Your chosen voice']] : []), ...voices.map(v => [v.id, v.name + (v.about ? ' — ' + v.about : '')])])) +
           row('Or paste a voice ID', '<input id="vs-voiceid" maxlength="40" spellcheck="false" placeholder="From a voice’s page in ElevenLabs">', 'For a voice that is not in the list') + row('Style', pick('vs-model', Object.entries(speech.models || {}))) +
@@ -1098,7 +1099,7 @@ async function openSettings(tab = 'assistant') {
       }, 60);
     };
     pane.querySelector('[data-speaker-test]').onclick = () => { A.unlock(); speaker.hush(); speaker.retry(); chime('notice'); setTimeout(() => speaker.say('This is how I sound on these speakers.'), 700); };
-    bind('vs-speak', options.speak, 'speak', setAssistant); bind('vs-hands', options.hands_free, 'hands_free', setAssistant);
+    bind('vs-speak', options.speak, 'speak', setAssistant); bind('vs-duck', options.duck !== false, 'duck', setAssistant); bind('vs-hands', options.hands_free, 'hands_free', setAssistant);
     const sleep = pane.querySelector('#vs-sleep'); if (sleep) { sleep.value = String(options.sleep_minutes ?? 15); sleep.onchange = () => setAssistant({ sleep_minutes: Number(sleep.value) }); }
     bind('vs-barge', s.barge_in, 'barge_in', setSpeech); bind('vs-wake', s.wake, 'wake', setSpeech); bind('vs-sounds', s.sounds, 'sounds', setSpeech);
     bind('vs-duck', s.duck !== false, 'duck', setSpeech);
@@ -1584,23 +1585,52 @@ async function openSettings(tab = 'assistant') {
   const lent = { node: null, home: null, next: null };
   const giveBack = () => { if (!lent.node) return; lent.home?.insertBefore(lent.node, lent.next && lent.next.parentNode === lent.home ? lent.next : null); lent.node = null; };
   d.addEventListener('close', giveBack);
-  const olderTab = section => () => {
+  const olderTab = (section, before) => () => {
+    giveBack();
     const node = document.getElementById('settings-body'), dlg = document.getElementById('settings-dialog');
-    if (!node || !dlg || typeof window.openSettings !== 'function') { pane.innerHTML = '<p class="small">These settings are not available here.</p>'; return; }
-    if (!lent.node) { lent.node = node; lent.home = node.parentNode; lent.next = node.nextSibling; }
+    if (!node || !dlg || typeof window.openSettings !== 'function') { pane.innerHTML = '<p class="small">These settings could not be shown. Close Settings and open it again.</p>'; return; }
+    lent.node = node; lent.home = node.parentNode; lent.next = node.nextSibling;
     window.openSettings(section);
     if (dlg.open) dlg.close();
-    pane.replaceChildren(node);
+    pane.replaceChildren(...(before ? [before()] : []), node);
   };
-  function advancedTab() {
-    pane.innerHTML = '<div class="nv-field"><span>Advanced tools<small>The terminal, detailed diagnostics and every expert control, shown in the window.</small></span><div class="nv-account-do"><button class="primary" type="button" data-advanced>Show advanced tools</button></div></div>';
-    pane.querySelector('[data-advanced]').onclick = () => { d.close(); document.querySelector('[data-easy-advanced]')?.click(); };
+  // Advanced: the switch for the advanced tools in the window, and the expert controls themselves, here.
+  const advancedTab = olderTab('usage', () => {
+    const wrap = el('div', { class: 'nv-advanced' });
+    const row = el('label', { class: 'assistant-check' }, '<input type="checkbox" data-advanced> <span>Show advanced tools in the window<small>The terminal, detailed diagnostics and every expert control, beside the chat.</small></span>');
+    const box = row.querySelector('input'); box.checked = !document.body.classList.contains('everyday');
+    box.onchange = () => { const toggle = document.getElementById('easy-experience'); if (toggle && box.checked === document.body.classList.contains('everyday')) toggle.click(); saved(); };
+    const start = el('div', { class: 'nv-set-row' }, '<span><b>Getting started</b><small>A first command to try, a microphone test, how to talk to JARVIS and what to allow.</small></span><button class="plain" type="button">Show</button>');
+    start.querySelector('button').onclick = () => { d.close(); N.gettingStarted?.(); };
+    const remove = el('div', { class: 'nv-set-row' }, '<span><b>Uninstall JARVIS</b><small>Removes the app and its shortcuts. Your notes, settings and chats are kept unless you choose otherwise.</small></span><button class="plain nv-danger" type="button">Uninstall…</button>');
+    remove.querySelector('button').onclick = () => uninstall();
+    wrap.append(row, start, remove);
+    return wrap;
+  });
+  async function uninstall() {
+    let plan; try { plan = await api('/api/uninstall', { action: 'plan' }); } catch (error) { return toast(error.message); }
+    if (!plan.can) return toast(plan.why);
+    const ask = dialog('<h2>Uninstall JARVIS?</h2><p>The app and its shortcuts are removed, and JARVIS closes.</p>' +
+      '<label class="assistant-check"><input type="checkbox" data-del-data> <span>Also delete my settings and chats<small>' + esc(plan.data) + ' goes to the ' + esc(plan.bin) + '.</small></span></label>' +
+      (plan.vault ? '<label class="assistant-check"><input type="checkbox" data-del-notes> <span>Also delete my notes<small>' + esc(plan.vault) + ' goes to the ' + esc(plan.bin) + '.</small></span></label>' : '') +
+      '<p class="small">Keys you saved stay in ' + (plan.bin === 'Trash' ? 'the Keychain' : 'Windows Credential Manager') + '. To use JARVIS again, download and install it again.</p>' +
+      '<div class="actions"><button class="plain" data-no>Cancel</button><button class="primary nv-danger" data-yes>Uninstall</button></div>');
+    ask.querySelector('[data-no]').onclick = () => ask.close();
+    ask.querySelector('[data-yes]').onclick = async () => {
+      const yes = ask.querySelector('[data-yes]'); yes.disabled = true; yes.textContent = 'Uninstalling…';
+      try {
+        const r = await fetch('/api/uninstall', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-JCC-Token': TOKEN, 'X-JCC-Sure': 'uninstall' },
+          body: JSON.stringify({ action: 'start', delete_data: !!ask.querySelector('[data-del-data]')?.checked, delete_notes: !!ask.querySelector('[data-del-notes]')?.checked }) });
+        const answer = await r.json(); if (!r.ok) throw Error(answer.error || 'JARVIS could not be uninstalled.');
+        ask.querySelector('.actions').innerHTML = '<p>JARVIS is being removed and will close in a moment. Thank you for trying it.</p>';
+      } catch (error) { yes.disabled = false; yes.textContent = 'Uninstall'; toast(error.message); }
+    };
   }
   const tabs = { everyday: olderTab('app'), memory: olderTab('memory'), advanced: advancedTab, connect: connectTab, voice: voiceTab, models: modelsTab, skills: skillsTab, mods: modsTab, usage: usageTab, assistant: assistantTab, people: peopleTab, email: emailTab,
     updates: updatesTab, appearance: appearanceTab };
   // A tab that has to ask for something says so while it waits: no tab is ever simply empty.
   const show = name => {
-    if (lent.node && !['everyday', 'memory'].includes(name)) giveBack();
+    giveBack();                // (a section that borrows the older settings page borrows it again)
     showing = name; d.querySelectorAll('.nv-set-tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === name)); pane.replaceChildren(); pane.scrollTop = 0;
     d.querySelector('.nv-set-title').textContent = (SECTIONS.flat().find(([id]) => id === name) || [, ''])[1]; tabs[name]();
     setTimeout(() => { if (showing === name && pane.isConnected && !pane.firstChild) pane.innerHTML = '<p class="small nv-set-wait"><i class="nv-spin"></i>One moment…</p>'; }, 250);

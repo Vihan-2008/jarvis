@@ -41,6 +41,38 @@ jobs:
       - name: Windows installer (build, install, upgrade, uninstall in a temporary folder)
         if: ${{ !cancelled() && runner.os == 'Windows' }}
         run: python installer/windows/test_install.py
+      - name: JARVIS-Setup.exe as a new user runs it (no Python installed for it), then the first command, then removed from Settings > Apps
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        shell: pwsh
+        run: |
+          python installer/windows/build.py --out "$env:RUNNER_TEMP\pkg"
+          $setup = Join-Path $env:RUNNER_TEMP 'pkg\JARVIS-Setup.exe'
+          "JARVIS-Setup.exe: {0:N1} MB" -f ((Get-Item $setup).Length / 1MB)
+          $clock = [Diagnostics.Stopwatch]::StartNew()
+          Start-Process -FilePath $setup -ArgumentList '/Q' -Wait
+          "Setup finished after {0:N0} s" -f $clock.Elapsed.TotalSeconds
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\JARVIS'
+          if (-not (Test-Path (Join-Path $app 'jcc\__init__.py'))) { throw 'JARVIS is not in its usual folder after Setup.' }
+          $python = (Get-Content (Join-Path $app '.python') -Raw).Trim()
+          if (-not $python.StartsWith((Join-Path $app 'runtime\python'), [StringComparison]::OrdinalIgnoreCase)) { throw "JARVIS does not run on the Python it carries: $python" }
+          foreach ($link in @((Join-Path ([Environment]::GetFolderPath('Desktop')) 'JARVIS.lnk'), (Join-Path ([Environment]::GetFolderPath('Programs')) 'JARVIS.lnk'))) {
+            if (-not (Test-Path $link)) { throw "The shortcut $link is missing." }
+            $target = (New-Object -ComObject WScript.Shell).CreateShortcut($link).TargetPath
+            if (-not (Test-Path $target)) { throw "The shortcut $link points to $target, which is not there." }
+          }
+          $key = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\JARVIS'
+          "Settings > Apps lists: {0} {1}" -f $key.DisplayName, $key.DisplayVersion
+          $up = $false
+          for ($i = 0; $i -lt 120; $i++) { try { Invoke-WebRequest http://127.0.0.1:8765/ -UseBasicParsing -TimeoutSec 3 | Out-Null; $up = $true; break } catch { Start-Sleep 1 } }
+          if (-not $up) { throw 'JARVIS did not open itself at the end of Setup.' }
+          "JARVIS opened itself at the end of Setup and answers ({0:N0} s after Setup started)" -f $clock.Elapsed.TotalSeconds
+          python scripts/first_command_check.py --app-dir $app
+          # Removed the way a person removes it: the command Settings > Apps runs, told to keep their notes and data.
+          $remove = $key.UninstallString + ' -Quiet'
+          cmd /c $remove
+          if (Test-Path (Join-Path $app 'jcc')) { throw 'JARVIS is still there after removing it from Settings > Apps.' }
+          if (Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\JARVIS') { throw 'Settings > Apps still lists JARVIS.' }
+          'Removed: the app, its shortcuts and its Settings > Apps entry; the notes and data were kept.'
 
   mac-live:
     name: on a real Mac (other apps' windows, typing, the screen, the wake word, the Mac's own sound)
@@ -73,18 +105,31 @@ jobs:
         run: >
           python scripts/mac_live_check.py --sound-helper "$RUNNER_TEMP/helper/jarvis-sound-level"
           --menu-helper "$RUNNER_TEMP/helper/jarvis-menu" --wake-models "$RUNNER_TEMP/wake-models"
-      - name: From the downloaded package, as a person would (its questions answered), then opened and uninstalled
+      - name: From the downloaded package, as a person would (Install JARVIS, no Python on the Mac for it), then the first command, then uninstalled
         if: ${{ !cancelled() }}
         run: |
           mkdir -p dist && cp "$RUNNER_TEMP/helper/jarvis-menu" "$RUNNER_TEMP/helper/jarvis-sound-level" "$RUNNER_TEMP/helper/jarvis-launcher" dist/
+          cp -R "$RUNNER_TEMP/helper/Install JARVIS.app" dist/
           python installer/mac/build.py --out "$RUNNER_TEMP/package"
+          echo "JARVIS-mac.zip: $(du -m "$RUNNER_TEMP/package/JARVIS-mac.zip" | cut -f1) MB"
           ditto -x -k "$RUNNER_TEMP/package/JARVIS-mac.zip" "$RUNNER_TEMP/package/unpacked"
-          setup="$RUNNER_TEMP/package/unpacked/JARVIS Installer/Install JARVIS.command"
-          test -x "$setup"
-          echo "what the unpacked package shows:"; ls "$RUNNER_TEMP/package/unpacked/JARVIS Installer"
-          # The questions, in order: start at login? yes. Open JARVIS now? no. Then Return closes the window.
-          printf 'y\nn\n\n' | "$setup" --no-wake-word --no-obsidian --install-dir "$RUNNER_TEMP/JARVIS2" \
-            --bundle-dir "$RUNNER_TEMP/Apps2" --vault "$RUNNER_TEMP/Vault2"
+          shown="$RUNNER_TEMP/package/unpacked/JARVIS Installer"
+          echo "what the unpacked package shows:"; ls "$shown"
+          plutil -lint "$shown/Install JARVIS.app/Contents/Info.plist"
+          codesign --verify --deep --strict --verbose=1 "$shown/Install JARVIS.app" && echo "the download shows the Install JARVIS app, signed on this Mac with what it installs inside it"
+          ls -l "$shown/Install JARVIS.app/Contents/Resources/jarvis-app/runtime"
+          # Install JARVIS's own script, run as the app runs it; its dialogs need a person, so here they are taken as answered.
+          clock=$SECONDS
+          JARVIS_INSTALL_ANSWERED=yes \
+          JARVIS_INSTALL_ARGS="--install-dir '$RUNNER_TEMP/JARVIS2' --bundle-dir '$RUNNER_TEMP/Apps2' --vault '$RUNNER_TEMP/Vault2'" \
+            osascript "$shown/Install JARVIS.app/Contents/Resources/Scripts/main.scpt" || { cat /tmp/jarvis-install-*.log; exit 1; }
+          echo "installed in $((SECONDS - clock)) s; what the installer said:"; tail -n 12 /tmp/jarvis-install-*.log
+          py="$(head -n 1 "$RUNNER_TEMP/JARVIS2/.python")"
+          base="$("$py" -c 'import sys; print(sys.base_prefix)')"
+          case "$base" in "$RUNNER_TEMP/JARVIS2/runtime/python"*) echo "JARVIS runs on the Python it carries: $py (from $base)" ;; *) echo "not the carried Python: $py ($base)"; exit 1 ;; esac
+          "$py" -c "import platform, ssl, sqlite3, tkinter; print('carried Python', platform.python_version(), platform.machine())"
+          "$py" -c "import numpy, onnxruntime" && echo '"Hey JARVIS" was set up by Install JARVIS; its model:'
+          ls -l "$HOME/Library/Application Support/JarvisCommand/wake-models" || true
           app="$RUNNER_TEMP/Apps2/JARVIS.app"
           agent="$HOME/Library/LaunchAgents/local.jarvis.background.plist"
           plutil -lint "$app/Contents/Info.plist" "$agent"
@@ -120,13 +165,17 @@ jobs:
           grep -q "JARVIS opened from its app" "$HOME/Library/Logs/JARVIS/launcher.log" || { echo "the app's log says nothing"; exit 1; }
           for i in $(seq 1 20); do pgrep -f "JARVIS2/bin/jarvis-menu" >/dev/null && break; sleep 1; done
           pgrep -fl "JARVIS2/bin/jarvis-menu" && echo "the menu-bar icon is running"
-          bash "$RUNNER_TEMP/JARVIS2/uninstall.sh" --quiet
+          # The first command, as a new user gives it (typed; no AI account): JARVIS does it itself.
+          python scripts/first_command_check.py --app-dir "$RUNNER_TEMP/JARVIS2"
+          osascript -e 'quit app "Calculator"' || true
+          # Uninstalled as Settings > Advanced > Uninstall JARVIS does it, with "Also delete my notes" ticked.
+          bash "$RUNNER_TEMP/JARVIS2/uninstall.sh" --quiet --delete-notes
           sleep 2
           if curl -fsS -o /dev/null http://127.0.0.1:8765/; then echo "JARVIS is still running after the uninstall"; exit 1; fi
           if pgrep -f "JARVIS2/bin/jarvis-menu"; then echo "the menu-bar icon is still running"; exit 1; fi
           test ! -e "$RUNNER_TEMP/JARVIS2" && test ! -e "$app" && test ! -e "$agent"
-          test -f "$RUNNER_TEMP/Vault2/Start here.md"
-          echo "uninstalled: app, app bundle and login item gone; the notes vault kept"
+          test ! -e "$RUNNER_TEMP/Vault2" && ls "$HOME/.Trash" | grep -q '^Vault2 '
+          echo "uninstalled: app, app bundle and login item gone; the notes went to the Trash, as asked"
       - name: Opened from its icon with the notes in Documents (a folder macOS guards)
         if: ${{ !cancelled() }}
         run: |

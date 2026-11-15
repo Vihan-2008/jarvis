@@ -1220,3 +1220,22 @@ body.nv-coding.nv-grouped #projects{display:none}
 /* A "Before you send" box being worked out: kept out of sight, its answer goes in the chat. */
 dialog.nv-offscreen{opacity:0!important;pointer-events:none!important}
 dialog.nv-offscreen::backdrop{background:transparent!important}
+
+/* Getting started (nova-start.js): the first minute, as a card in the chat. */
+.nv-start-now{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px;font-size:14px}.nv-start-now span:last-child{color:var(--ink-2)}
+.nv-start .nv-dot,.nv-start-perms .nv-dot{width:9px;height:9px;flex:none;border-radius:50%;background:var(--ink-3);display:inline-block}
+.nv-start .nv-dot.ok{background:var(--ok)}.nv-start .nv-dot.busy{background:var(--accent)}.nv-start .nv-dot.wait{background:var(--warn)}
+.nv-start-steps{list-style:none;margin:0 0 10px;padding:0;display:grid;gap:10px}
+.nv-start-steps>li{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface-2)}
+.nv-start-steps>li p{margin:3px 0 8px;color:var(--ink-2);font-size:13.5px;line-height:1.55}
+.nv-start-tick{width:20px;height:20px;flex:none;border-radius:50%;border:1.5px solid var(--line-2);display:grid;place-items:center;color:transparent;margin-top:1px}
+.nv-start-tick svg{width:12px;height:12px}.nv-start-steps>li.done .nv-start-tick{background:var(--ok);border-color:var(--ok);color:#fff}
+.nv-start-do{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.nv-start-do .nv-meter{flex:1 1 140px}
+.nv-start kbd{font:12.5px var(--mono,ui-monospace,monospace);padding:1px 6px;border-radius:5px;background:var(--surface-3);border:1px solid var(--line)}
+.nv-start-perms{list-style:none;margin:0;padding:0;display:grid;gap:6px;width:100%}
+.nv-start-perms li{display:flex;flex-wrap:wrap;align-items:center;gap:8px}.nv-start-perms small{flex:1 1 220px;color:var(--ink-2)}
+.nv-start .actions{display:flex;justify-content:flex-end}
+.nv-advanced{display:grid;gap:12px;margin-bottom:16px}
+.nv-set-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 0;border-top:1px solid var(--line)}
+.nv-set-row span{display:flex;flex-direction:column;gap:3px}.nv-set-row small{color:var(--ink-2);font-size:12.5px}
+button.nv-danger{color:var(--bad)}button.primary.nv-danger{background:var(--bad);border-color:var(--bad);color:#fff}

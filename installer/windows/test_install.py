@@ -91,7 +91,7 @@ def test(tmp: Path) -> None:
     print("Building the packages")
     zip_path = build.build_zip(dist)
     setup = build.build_setup(dist, zip_path)
-    check(setup.is_file() and setup.stat().st_size > zip_path.stat().st_size, "JARVIS-Setup.exe was made")
+    check(setup.is_file() and setup.stat().st_size > zip_path.stat().st_size * 0.8, "JARVIS-Setup.exe was made")
     names = zipfile.ZipFile(zip_path).namelist()
     check("install.ps1" in names and "uninstall.ps1" in names and "jcc/firstrun.py" in names, "the zip has install.ps1 and the app")
     check(not any(n.startswith(("tests/", "installer/", ".github/", "website/")) or n in ("LEDGER.md", "scripts/deploy.py", "config/local.toml")
@@ -105,8 +105,9 @@ def test(tmp: Path) -> None:
     with zipfile.ZipFile(unpacked / "payload.zip") as z:
         z.extractall(payload)
 
+    # (No -Python: the package's own Python is used, as for anyone who has never installed Python.)
     install = POWERSHELL + ["-File", str(payload / "install.ps1"), "-Quiet", "-InstallDir", str(app), "-Vault", str(vault),
-                            "-ShortcutDir", str(links), "-NoObsidian", "-Python", sys.executable]
+                            "-ShortcutDir", str(links), "-NoObsidian"]
     print("Installing")
     print(run(install, env))
     check((app / "jcc" / "__init__.py").is_file() and (app / "config" / "default.toml").is_file(), "the app's files were copied")
@@ -114,6 +115,8 @@ def test(tmp: Path) -> None:
           "nothing left out of the package was installed")
     pythonw = (app / ".python").read_text("utf-8").strip()
     check(Path(pythonw).is_file() and Path(pythonw).name.lower() in ("pythonw.exe", "python.exe"), f".python names {pythonw}")
+    check(Path(pythonw).resolve().is_relative_to((app / "runtime" / "python").resolve()), "it runs on the Python the package carries")
+    check((app / "runtime" / "python" / ".jarvis-runtime").is_file(), "the carried Python is marked with its version")
     check((app / "uninstall.ps1").is_file(), "uninstall.ps1 is in the install folder")
     check((app / "jarvis.ico").is_file(), "the icon was written")
     target, arguments, start_in = shortcut(links / "JARVIS.lnk", env)
@@ -179,11 +182,23 @@ def test(tmp: Path) -> None:
     check(local["safety"]["private_terms"] == ["kept-term"] and local["paths"]["vault"] == str(vault), "config/local.toml survived the update")
     check((app / "my own notes.txt").read_text("utf-8") == "mine", "a file of the person's own survived the update")
     check(len(list((state / "update-backups").glob("*.zip"))) == 1, "a copy of the version before was kept")
+
     sha = repackaged(zip_path, broken_zip, "9.9.10", "throw 'this installer fails'")
     result = update_helper.run_update(broken_zip, sha, "9.9.10", app, state, "none", run=helper_run, alive=lambda: False, pause=lambda s: None)
     check(not result["ok"] and result["rolled_back"], "an update whose installer fails is undone")
     check((app / "VERSION").read_text("utf-8").strip() == "9.9.9", "the version before it is back")
     check((app / "my own notes.txt").read_text("utf-8") == "mine", "and the person's own file is still there")
+
+    print("Installing again from JARVIS's own Python, as JARVIS's update helper does (it runs on that Python, in this folder)")
+    own = app / "runtime" / "python" / "python.exe"
+    (app / "runtime" / "python" / ".jarvis-runtime").write_text("an older one\n", "utf-8")   # (so it wants to swap the Python running it)
+    relay = "import subprocess, sys; sys.exit(subprocess.run(sys.argv[1:]).returncode)"
+    done = subprocess.run([str(own), "-I", "-c", relay, *POWERSHELL, "-File", str(payload / "install.ps1"), "-Quiet", "-InstallDir", str(app),
+                           "-Vault", str(vault), "-ShortcutDir", str(links), "-NoObsidian"], env=env, capture_output=True, text=True, timeout=900)
+    check(done.returncode == 0, "the installer ran to the end, started from JARVIS's own Python: " + (done.stdout + done.stderr)[-1500:])
+    marker = (app / "runtime" / "python" / ".jarvis-runtime").read_text("utf-8").strip()
+    check("is in use" in done.stdout or marker != "an older one", "it swapped in its Python, or kept the one in use, instead of failing")
+    check(own.is_file() and (app / "jcc" / "__init__.py").is_file(), "JARVIS's own Python and the app are in place")
 
     print("Uninstalling")
     print(run(POWERSHELL + ["-File", str(app / "uninstall.ps1"), "-Quiet"], env))

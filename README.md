@@ -1,12 +1,41 @@
 # JARVIS
 
-An assistant that lives on your own computer. Talk to it or type; it answers, does things on your PC, and has coding
-agents build and fix software in a safe copy of your project. It asks before anything is sent, deleted or paid for.
+**An AI assistant that lives on your computer.** Type or say what you need: it opens apps, finds and writes files,
+answers questions, and has coding agents build software for you. It asks before anything is sent, deleted or paid
+for. Free and open source, for Windows and Mac.
 
-It is a local app: a small service on `127.0.0.1` and a window. There is no JARVIS account and no JARVIS server.
-The AI comes from the accounts you already have.
+**[Download for Windows](https://github.com/Vihan-2008/jarvis/releases/latest/download/JARVIS-Setup.exe)** · **[Download for Mac](https://github.com/Vihan-2008/jarvis/releases/latest/download/JARVIS.dmg)** · [Website](https://vihan-2008.github.io/jarvis/) · [All downloads](https://github.com/Vihan-2008/jarvis/releases/latest)
 
-**Website:** https://vihan-2008.github.io/jarvis/ · **Download:** [the latest release](https://github.com/Vihan-2008/jarvis/releases/latest)
+![JARVIS's window: a message box under the glowing JARVIS core](docs/images/home.png)
+
+## Quickstart: from download to your first command
+
+No terminal, no Python and no account needed.
+
+1. **Download** the installer for your computer: [Windows](https://github.com/Vihan-2008/jarvis/releases/latest/download/JARVIS-Setup.exe) or [Mac](https://github.com/Vihan-2008/jarvis/releases/latest/download/JARVIS.dmg).
+2. **Install it.**
+   - **Windows:** open `JARVIS-Setup.exe`. If Windows says "Windows protected your PC", click **More info**, then
+     **Run anyway** (JARVIS is not signed with a paid certificate yet). It installs in about a minute, asks nothing,
+     and opens JARVIS.
+   - **Mac:** open `JARVIS.dmg`, double-click **Install JARVIS**, then click **Install**. If macOS says it cannot be
+     opened, click **Done**, open **System Settings › Privacy & Security**, click **Open Anyway** beside
+     "Install JARVIS", and open it again. JARVIS opens by itself when it is installed.
+3. **Give it your first command:** type `open calculator` and press Enter. The Calculator opens.
+
+The first time, JARVIS shows a short **Getting started** card in the chat: that first command, a microphone test,
+how to talk to it (say "Hey JARVIS", then what you need; "Sleep JARVIS" when you are done) and, on a Mac, what macOS
+has to allow, each with a **Check again** button. Type `/setup` to see it again.
+
+![The Getting started card in JARVIS's chat](docs/images/getting-started.png)
+
+**Next:** to ask questions, write and build things, connect an AI in **Settings › AI models & accounts**: sign in
+with your Claude or ChatGPT account, or add an API key. Opening apps, timers and sums work without one.
+
+**Uninstall:** in JARVIS, **Settings › Advanced › Uninstall JARVIS** (on Windows also **Settings › Apps › JARVIS**).
+Your notes are kept unless you choose to delete them.
+
+> Installers up to version 0.1.4 still need Python 3.11 on the computer (and the Mac one runs in Terminal); from
+> 0.1.5 JARVIS brings everything it needs. See [docs/INSTALL.md](docs/INSTALL.md).
 
 ## What it does
 
@@ -43,25 +72,25 @@ feature, is in [docs/PARITY.md](docs/PARITY.md). From version 0.1.4 on, JARVIS u
 releases signed by its maker, and goes back to the version you had if a new one does not start (see
 [docs/INSTALL.md](docs/INSTALL.md#updates)).
 
-## Install
+## Other ways to install
 
 | | |
 |---|---|
-| **Windows** | Download `JARVIS-Setup.exe` from [Releases](https://github.com/Vihan-2008/jarvis/releases/latest) and run it. |
-| **macOS** | Download `JARVIS.dmg` or `JARVIS-mac.zip` from [Releases](https://github.com/Vihan-2008/jarvis/releases/latest). |
-| **From source** | `git clone https://github.com/Vihan-2008/jarvis`, then `python -m jcc.firstrun` and `python -m jcc.desktop`. |
+| **Windows** | `JARVIS-Setup.exe` (above), or `JARVIS-windows.zip` from [Releases](https://github.com/Vihan-2008/jarvis/releases/latest) and run `install.ps1`. |
+| **macOS** | `JARVIS.dmg` (above), or `JARVIS-mac.zip`: unzip it and double-click **Install JARVIS**. |
+| **From source** | `git clone https://github.com/Vihan-2008/jarvis`, then `python -m jcc.firstrun` and `python -m jcc.desktop` (Python 3.11 or newer). |
 
-The installer puts the app in your user folder (no administrator rights), sets up the notes vault, and can install
-Obsidian if you want it. Details, and how to uninstall: [docs/INSTALL.md](docs/INSTALL.md).
-
-The installers are not code-signed yet, so Windows SmartScreen and macOS Gatekeeper will warn before they run.
+The installers put the app in your user folder (no administrator rights) with a Python of its own, set up the notes
+vault, start JARVIS when you sign in (you can turn that off) and keep your settings, chats and notes on every update.
+Details: [docs/INSTALL.md](docs/INSTALL.md).
 
 ### What you need
 
-- Python 3.11 or newer. The app uses only Python's standard library: there is nothing to `pip install`.
-- A Chromium-family browser for the app's window (Edge, Chrome, Brave). Any browser works as a fallback.
-- For coding: the [Claude Code](https://code.claude.com) and/or Codex command-line tools, signed in with your own
-  subscription.
+- Windows 10 or 11, or macOS 12 or newer. Nothing else for the app itself.
+- A Chromium-family browser for the app's window (Edge, which every Windows PC has, Chrome, Brave). Any browser works
+  as a fallback.
+- For questions and coding: your own Claude or ChatGPT subscription (JARVIS signs in for you in Settings), or API
+  keys. For coding jobs, the [Claude Code](https://code.claude.com) and/or Codex command-line tools.
 - Optional keys of your own, kept in your system's key store, never in a file: Groq (speech-to-text), ElevenLabs
   (the voice), Gemini and others (see Settings, Connections).
 
@@ -94,7 +123,7 @@ Found a hole? See [SECURITY.md](SECURITY.md).
 ## Working on it
 
 ```
-python -m unittest discover -s tests -t .     # about 930 tests, standard library only
+python -m unittest discover -s tests -t .     # about 1130 tests, standard library only
 node --test tests/*.test.js                   # the window's own tests
 ```
 

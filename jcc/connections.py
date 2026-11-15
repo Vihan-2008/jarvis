@@ -113,8 +113,10 @@ def overview(cfg) -> list[dict]:
     options = assistant.settings(cfg)
     items.append(_item("pc", "hands", "Control of this PC", "Opening apps, clicking, typing and running commands for you.",
                        "ok" if options["pc_control"] else "off", "Allowed" if options["pc_control"] else "Switched off",
-                       detail={"sending": "JARVIS asks first only before sending, deleting or paying.", "risky": "JARVIS asks first before anything risky.",
-                               "all": "JARVIS asks first before every action."}[options["ask"]], open="assistant"))
+                       detail={"sending": "Auto: JARVIS asks first only before sending, deleting or paying.", "risky": "JARVIS asks first before anything risky.",
+                               "all": "Manual: JARVIS asks first before every action.", "edits": "Accept edits: file changes happen by themselves; other changes ask first.",
+                               "plan": "Plan: JARVIS makes a plan first and changes nothing until you say go ahead.",
+                               "bypass": "Bypass permissions: JARVIS asks nothing."}.get(options["ask"], ""), open="assistant"))
     if system.kind() == "mac":
         # What macOS itself must allow before JARVIS can work in other apps or see the screen. It is switched on by the
         # owner in System Settings and nowhere else.

@@ -1,22 +1,22 @@
 JARVIS for Mac
 ==============
 
-1. Double-click "Install JARVIS".
-   A Terminal window opens and asks a few questions. Press Return to accept each suggestion.
+1. Double-click "Install JARVIS", then click Install.
+   It takes about a minute. Nothing else needs to be installed: JARVIS brings everything it needs.
 
-   If macOS says it cannot be opened ("Apple could not verify..." or "unidentified developer"):
+   If macOS says "Install JARVIS" cannot be opened ("Apple could not verify..." or "unidentified developer"):
    JARVIS is free and open source, and is not signed with a paid Apple developer certificate.
-   Open System Settings > Privacy & Security, scroll down to "Install JARVIS" was blocked,
-   click "Open Anyway" and confirm. (On older macOS: Control-click "Install JARVIS" and choose Open.)
+   Click Done, open System Settings > Privacy & Security, scroll down to the line about "Install JARVIS",
+   click "Open Anyway" and confirm. Then double-click "Install JARVIS" again.
+   (On macOS 14 or older you can instead Control-click "Install JARVIS" and choose Open.)
 
-2. When it has finished, open JARVIS from your Applications folder (or Launchpad, or Spotlight).
-   The first time, macOS asks whether JARVIS may use the microphone and your Documents folder: allow both.
+2. JARVIS opens by itself when it is installed. Next time, open it from Applications (or Launchpad, or Spotlight).
+   Try your first command: type "open calculator" and press Return.
 
-JARVIS needs Python 3.11 or newer. If it is missing, the installer says where to get it
-(python.org, or "brew install python") and you run "Install JARVIS" again.
+3. When macOS asks whether JARVIS may use the microphone, or control your computer, choose Allow.
+   JARVIS asks only when it needs one, and its Settings show what is allowed.
 
-To remove JARVIS later, run uninstall.sh in its install folder (the installer says where).
-Your notes and settings are kept.
+To remove JARVIS later: in JARVIS, open Settings > Advanced and choose "Uninstall JARVIS".
+Your notes are kept unless you choose to delete them.
 
-The app's own files are in a hidden folder beside this note. You do not need to open it.
-More: https://github.com/Vihan-2008/jarvis/blob/main/docs/INSTALL.md
+More help: https://github.com/Vihan-2008/jarvis/blob/main/docs/INSTALL.md

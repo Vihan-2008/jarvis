@@ -26,6 +26,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 from payload import REPO, app_files, version  # noqa: E402
+import runtime  # noqa: E402  (installer/runtime.py: the Python the package carries)
 
 INSTALLER_FILES = ("install.ps1", "uninstall.ps1")
 
@@ -35,7 +36,7 @@ def crlf(path: Path) -> bytes:
     return path.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
 
 
-def build_zip(out: Path, repo: Path = REPO) -> Path:
+def build_zip(out: Path, repo: Path = REPO, with_python: bool = True) -> Path:
     """dist/JARVIS-windows.zip: the app's files plus install.ps1 and uninstall.ps1 at the top."""
     out.mkdir(parents=True, exist_ok=True)
     target = out / "JARVIS-windows.zip"
@@ -45,6 +46,14 @@ def build_zip(out: Path, repo: Path = REPO) -> Path:
             z.write(repo / name, name)
         for name in INSTALLER_FILES:
             z.writestr(name, crlf(HERE / name))
+        if with_python:
+            # JARVIS's own Python, as one inner zip that the installer unpacks in one go (see installer/runtime.py).
+            import io
+            inner = io.BytesIO()
+            with zipfile.ZipFile(inner, "w", zipfile.ZIP_DEFLATED) as rt:
+                runtime.add_to_zip(rt, runtime.fetch("windows"), "")
+            z.writestr("runtime/python.zip", inner.getvalue(), compress_type=zipfile.ZIP_STORED)
+            z.writestr("runtime/VERSION", runtime.VERSION + "+" + runtime.RELEASE + "\n")
     return target
 
 
@@ -104,10 +113,15 @@ def build_setup(out: Path, zip_path: Path, repo: Path = REPO) -> Path:
         sed = stage / "jarvis.sed"
         sed.write_text(SED.format(target=target, version=version(repo), stage=stage), "ascii")
         subprocess.run([str(iexpress), "/N", "/Q", str(sed)], check=True)
-        # IExpress can hand back before the file is fully written; wait for it to settle.
-        for _ in range(120):
-            if target.is_file() and target.stat().st_size > zip_path.stat().st_size:
+        # IExpress can hand back before the file is fully written; wait for it to settle (it compresses the package a
+        # little, so it can end up a little smaller than the zip: what counts is that it stops growing).
+        last, steady = -1, 0
+        for _ in range(600):
+            size = target.stat().st_size if target.is_file() else -1
+            steady = steady + 1 if size == last and size > zip_path.stat().st_size * 0.8 else 0
+            if steady >= 4:
                 break
+            last = size
             time.sleep(0.5)
     if not target.is_file():
         raise SystemExit("IExpress did not make JARVIS-Setup.exe.")

@@ -31,3 +31,19 @@ build() {   # build <program> <source>
 build jarvis-sound-level sound_level.swift
 build jarvis-menu menu_bar.swift
 build jarvis-launcher launcher.swift
+
+# "Install JARVIS": the app a person double-clicks in the download (install_app.applescript), so that installing
+# needs no Terminal window. Made with Apple's own osacompile, given JARVIS's icon, and signed like the programs above.
+app="$out/Install JARVIS.app"
+rm -rf "$app"
+osacompile -o "$app" "$here/install_app.applescript"
+if python3 -c 'import sys' 2>/dev/null; then
+  iconset="$work/installer.iconset"; mkdir -p "$iconset"
+  for size in 16 32 128 256 512; do
+    ( cd "$here/../.." && python3 -m jcc.icon "$iconset/icon_${size}x${size}.png" "$size" ) || true
+  done
+  if iconutil -c icns "$iconset" -o "$work/installer.icns" 2>/dev/null; then cp "$work/installer.icns" "$app/Contents/Resources/applet.icns"; fi
+fi
+codesign --force --deep -s - "$app"
+plutil -lint "$app/Contents/Info.plist"
+echo "made $app"
