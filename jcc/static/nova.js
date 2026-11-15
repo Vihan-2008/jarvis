@@ -741,6 +741,7 @@ function draw(c) {
   while (rendered.length > list.length) rendered.pop().node.remove();
   drawChecklist(c);
   countChanges();
+  setTimeout(() => drainQueue(c), 0);
   requestAnimationFrame(stick);
   // A chat opens at its latest message, as in Claude, even when pictures and cards finish drawing a moment later.
   if (fresh) for (const ms of [60, 250, 700]) setTimeout(() => { if (pinned && lastChatId === (c?.id || '')) box.scrollTop = box.scrollHeight; }, ms);
@@ -876,6 +877,24 @@ function fastPoll() {
   }, 700);
 }
 setInterval(() => { for (const node of box.querySelectorAll('[data-since]')) node.textContent = '· ' + fmtTime(Date.now() / 1000 - Number(node.dataset.since)); }, 1000);
+// A finished job's changes beside the chat, as Claude desktop's Diff pane shows them: each file with its own diff. It is
+// opened from the job (no tab of its own: the side panel's tabs stay Files, Terminal and Browser).
+const changesPane = el('section', { id: 'tool-nvchanges', class: 'tool-content nv-pane hidden nv-changes-pane' },
+  '<div class="nv-edit-head"><b data-changes-title>Changes</b></div><div class="nv-changes-body" data-changes-body></div>');
+panel.append(changesPane);
+registerPane({ id: 'changes', label: 'Changes', icon: 'edit', node: changesPane, tip: 'What a job changed, file by file' });
+async function changesBeside(rid) {
+  const spot = changesPane.querySelector('[data-changes-body]'); spot.innerHTML = '<p class="small nv-set-wait"><i class="nv-spin"></i>Reading the changes…</p>';
+  await openPane('changes');
+  try {
+    const d = await api('/api/job/details?id=' + encodeURIComponent(rid)), seen = window.Nova.changeSummary(d);
+    const m = chat?.messages.find(x => x.receipt === rid && x.role === 'assistant'), asked = [...(chat?.messages || [])].slice(0, (chat?.messages || []).indexOf(m)).reverse().find(x => x.role === 'user');
+    changesPane.querySelector('[data-changes-title]').textContent = 'Changes' + (asked ? ': ' + String(asked.content).split('\n')[0].slice(0, 60) : '');
+    spot.innerHTML = (seen.files ? seen.html.replace(/<details class="nv-diff-file">/g, '<details class="nv-diff-file" open>') : '<p class="small">No files were changed.</p>') +
+      (d.can_undo ? '<div class="nv-changed-foot"><button class="plain" type="button" data-nv-undo="' + esc(rid) + '">' + icon('retry') + 'Undo these changes</button></div>' : '');
+  } catch (error) { spot.innerHTML = '<p class="small">The changes could not be read: ' + esc(error.message) + '</p>'; }
+}
+document.addEventListener('click', e => { const b = e.target.closest?.('[data-changes-side]'); if (b) { e.preventDefault(); changesBeside(b.dataset.changesSide); } });
 // "3 files changed +45 -2", as Claude desktop says it, without opening anything: read once for each finished job shown.
 const changeCounts = new Map();
 const changedLabel = rid => { const c = changeCounts.get(rid); return !c ? 'See what changed' : c.files ? c.files + (c.files === 1 ? ' file changed' : ' files changed') +
@@ -898,7 +917,8 @@ box.addEventListener('toggle', async e => {
     try {
       const d = await api('/api/job/details?id=' + encodeURIComponent(changed.dataset.job)), seen = window.Nova.changeSummary ? window.Nova.changeSummary(d) : { html: esc((d.files || []).join(', ')) };
       const key = chat?.project || '';
-      spot.innerHTML = seen.html + '<div class="nv-changed-foot">' + (key ? '<button class="plain" type="button" data-nv-cmd="folder">' + icon('folder') + 'Open file location</button>' : '') +
+      spot.innerHTML = seen.html + '<div class="nv-changed-foot"><button class="plain" type="button" data-changes-side="' + esc(changed.dataset.job) + '">' + icon('side') + 'Open in side panel</button>' +
+        (key ? '<button class="plain" type="button" data-nv-cmd="folder">' + icon('folder') + 'Open file location</button>' : '') +
         (d.can_undo ? '<button class="plain" type="button" data-nv-undo="' + esc(changed.dataset.job) + '">' + icon('retry') + 'Undo these changes</button>' : '') + '</div>';
       if (!(d.files || []).length) spot.textContent = 'No files were changed.';
     } catch (error) { spot.textContent = 'The changes could not be read: ' + error.message; changed.dataset.read = ''; }
@@ -1342,6 +1362,35 @@ async function loadMods() {
   return modsData;
 }
 // Each chat sends on its own, so you can start a second request while the first is still running.
+/* ---------- messages sent while a coding job works wait their turn, as in Claude desktop ---------- */
+let sendNow = false;
+const queueKey = cid => 'nv-queue-' + cid;
+function queued(cid) { try { const rows = JSON.parse(store.get(queueKey(cid), '[]')); return Array.isArray(rows) ? rows : []; } catch { return []; } }
+function setQueued(cid, rows) { store.set(queueKey(cid), JSON.stringify(rows.slice(0, 20))); drawQueue(); }
+const jobWorking = c => (c?.messages || []).some(m => m.role === 'assistant' && m.receipt && !m.fast && LIVE.has(m.status));      // (a job just started is not marked as one yet)
+const queueStrip = el('div', { class: 'nv-queue hidden', 'aria-label': 'Messages waiting their turn' });
+form.before(queueStrip);
+function drawQueue() {
+  const rows = current ? queued(current) : [];
+  queueStrip.classList.toggle('hidden', !rows.length);
+  queueStrip.innerHTML = rows.length ? '<div class="nv-queue-head">' + icon('clock') + '<b>Queued</b><span>Sent when the job that is working finishes</span></div>' +
+    rows.map((r, i) => '<div class="nv-queue-row"><span>' + esc(r.text) + '</span><button class="plain" type="button" data-q-now="' + i + '">Send now</button>' +
+      '<button class="nv-icon" type="button" data-q-drop="' + i + '" aria-label="Remove from the queue" data-tip="Remove">' + icon('x') + '</button></div>').join('') : '';
+}
+queueStrip.addEventListener('click', e => {
+  const now = e.target.closest('[data-q-now]'), drop = e.target.closest('[data-q-drop]'); if (!current || !(now || drop)) return;
+  const rows = queued(current), at = Number((now || drop).dataset[now ? 'qNow' : 'qDrop']), [row] = rows.splice(at, 1);
+  setQueued(current, rows);
+  if (now && row) { sendNow = true; message.value = row.text; grow(); form.requestSubmit(); }
+});
+// The job finished: the next message waiting its turn goes, one at a time.
+function drainQueue(c) {
+  drawQueue();
+  if (!c || c.id !== current || jobWorking(c) || sending.size || message.value.trim()) return;
+  const rows = queued(c.id); if (!rows.length) return;
+  const [next, ...rest] = rows; setQueued(c.id, rest);
+  sendNow = true; message.value = next.text; grow(); form.requestSubmit();
+}
 form.onsubmit = async e => {
   e.preventDefault();
   let text = message.value.trim(), slot = current || 'new', cid = '';
@@ -1366,6 +1415,13 @@ form.onsubmit = async e => {
     body.classList.add('home-expanded'); message.focus();
     return setTimeout(() => chooseProject(() => form.requestSubmit()), 0);
   }
+  // A coding job is working in this chat: the message waits its turn, as in Claude desktop (Send now sends it at once).
+  const attached = (window.jarvisFiles || []).length || (window.pendingUploads || []).length;
+  if (!sendNow && current && workMode === 'code' && jobWorking(chat) && !attached) {
+    setQueued(current, [...queued(current), { text, at: Date.now() }]); message.value = ''; grow();
+    return notify('Queued. It is sent as soon as the job that is working finishes.');
+  }
+  sendNow = false;
   sending.add(slot); busy = true; $('send').disabled = true; window.NovaCore?.pulse();
   const held = { files: [...(window.jarvisFiles || [])], uploads: [...(window.pendingUploads || [])], page: $('attach-page')?.checked || false };
   try {
