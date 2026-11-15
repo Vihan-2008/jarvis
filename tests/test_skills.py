@@ -366,13 +366,14 @@ class TestSkillsApi(GuiTestCase):
             self.assertEqual(self.req("POST", "/api/skills", {"action": "add", "source": ""})[0], 400)
             status, job = self.req("POST", "/api/skills", {"action": "add", "source": str(pack), "name": "Demo"})
             self.assertEqual((status, job["status"]), (200, "working"))
-            deadline = time.time() + 10
+            deadline = time.time() + 60                 # (a slow machine copies and scans the pack slowly: GitHub's Windows one took over 10 s)
             while time.time() < deadline:
                 data = self.req("POST", "/api/skills", {"action": "list"})[1]
                 if data["adding"].get("status") != "working":
                     break
                 time.sleep(0.1)
-            self.assertEqual((data["adding"]["status"], len(data["packs"]), data["packs"][0]["on"]), ("done", 1, 0))
+            self.assertEqual(data["adding"].get("status"), "done", data["adding"])
+            self.assertEqual((len(data["packs"]), data["packs"][0]["on"]), (1, 0))
             self.assertEqual(self.req("POST", "/api/skills", {"action": "switch", "id": "demo", "on": True})[1]["on"], 4)
             self.assertEqual(self.req("POST", "/api/skills", {"action": "switch", "id": "demo", "names": ["auto-loop"], "on": True})[1]["on"], 4)
             items = self.req("POST", "/api/skills", {"action": "pack", "id": "demo"})[1]["items"]
