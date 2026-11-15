@@ -203,6 +203,7 @@ jobs:
           bash "$RUNNER_TEMP/JARVIS2/uninstall.sh" --quiet --delete-notes
           sleep 2
           if curl -fsS -o /dev/null http://127.0.0.1:8765/; then echo "JARVIS is still running after the uninstall"; exit 1; fi
+          for _ in 1 2 3 4 5; do pgrep -f "JARVIS2/bin/jarvis-menu" >/dev/null || break; sleep 1; done      # (a moment to end)
           if pgrep -f "JARVIS2/bin/jarvis-menu"; then echo "the menu-bar icon is still running"; exit 1; fi
           test ! -e "$RUNNER_TEMP/JARVIS2" && test ! -e "$app" && test ! -e "$agent"
           test ! -e "$RUNNER_TEMP/Vault2" && ls "$HOME/.Trash" | grep -q '^Vault2 '

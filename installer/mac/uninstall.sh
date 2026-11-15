@@ -43,13 +43,20 @@ if [ "$QUIET" = 0 ]; then
 fi
 
 # JARVIS's own programs that are running from this folder: stopped, so nothing is left running from removed files.
+# Looked for again until none is left: one of them can start another while they are being stopped (the helper behind
+# the menu-bar icon starts its icon again), and that one is stopped too.
 stopped=0
-for pid in $(pgrep -f 'jcc(\.| )(desktop|gui|tray|local_history|cloud_memory|maintenance)|jarvis-menu|jarvis-sound-level' 2>/dev/null || true); do
-  where="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1 || true)"      # (it may have ended by now)
-  program="$(ps -o command= -p "$pid" 2>/dev/null || true)"
-  case "$where/ $program" in
-    "$INSTALL_DIR"/*|*"$INSTALL_DIR/"*) kill "$pid" 2>/dev/null || true; stopped=1 ;;
-  esac
+for round in 1 2 3 4 5; do
+  found=0
+  for pid in $(pgrep -f 'jcc(\.| )(desktop|gui|tray|local_history|cloud_memory|maintenance)|jarvis-menu|jarvis-sound-level' 2>/dev/null || true); do
+    where="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1 || true)"      # (it may have ended by now)
+    program="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+    case "$where/ $program" in
+      "$INSTALL_DIR"/*|*"$INSTALL_DIR/"*) kill "$pid" 2>/dev/null || true; stopped=1; found=1 ;;
+    esac
+  done
+  [ "$found" = 1 ] || break
+  sleep 1
 done
 if [ "$stopped" = 1 ]; then printf 'Stopped JARVIS.
 '; sleep 2; fi      # (it ends before its files are removed)
