@@ -78,6 +78,14 @@ class OnThisPC(GuiTestCase):
         found = os.path.expanduser("~/.lmstudio/bin/lms")
         self.assertTrue(providers.installed("lmstudio", which=lambda c: None, exists=lambda p: os.path.normpath(p) == os.path.normpath(found)))
 
+    def test_a_pc_without_either_is_told_so_with_the_real_checks(self):
+        """(The real file checks, on a PC without Ollama or LM Studio: GitHub's Linux and Mac machines found this.)"""
+        with mock.patch("shutil.which", lambda c: None), mock.patch("os.path.exists", lambda p: False),                 mock.patch("pathlib.Path.exists", lambda self: False):
+            self.assertFalse(providers.installed("ollama"))
+            self.assertFalse(providers.installed("lmstudio"))
+            listed = {s["id"]: s for s in providers.listing(self.state.cfg)}
+        self.assertFalse(listed["ollama"]["on_pc"])
+
     def test_a_services_models_come_with_what_each_is_good_for(self):
         with mock.patch.object(providers, "models", lambda cfg, ident, refresh=False: ["gemini-2.5-flash", "gemini-2.5-pro"]):
             got = providers.models_about(self.state.cfg, "gemini")

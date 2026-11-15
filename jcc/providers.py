@@ -143,6 +143,7 @@ def installed(ident: str, which=None, exists=None) -> bool:
     that run on the PC are asked; every other service is not "on this PC"."""
     import os
     import shutil
+    from pathlib import Path
     which, exists = which or shutil.which, exists or (lambda p: Path(p).exists())
     known = INSTALLED.get(ident)
     if not known:

@@ -1750,7 +1750,13 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                         raise ValueError("Unknown cloud action.")
                     return
                 if self.path == "/api/prompt-master":
-                    self._json(HTTPStatus.OK, prompt_master.refine(state.cfg, text, project))
+                    # The fast way: started and followed (its words stream into the chat), or written at once.
+                    if body.get("follow"):
+                        self._json(HTTPStatus.OK, prompt_master.follow(str(body.get("follow"))))
+                    elif body.get("stream"):
+                        self._json(HTTPStatus.OK, prompt_master.start(state.cfg, text, project))
+                    else:
+                        self._json(HTTPStatus.OK, prompt_master.write(state.cfg, text, project))
                     return
                 if self.path == "/api/terminal":
                     action = body.get("action")

@@ -1451,11 +1451,26 @@ function arm(name) {
 armedB.onclick = () => { if (armed) arm(armed); };
 // "Improve message", answered in the chat: the rewrite, with the choice to use it.
 async function improveInChat(original) {
+  // Its words appear as they are written (one direct question to the AI, no job): the first ones in a few seconds.
+  const card = localReply('Improve message', '<p class="small">Your message, written out as a full brief, so the AI knows exactly what to build and how to check it:</p>' +
+    '<pre class="nv-brief"><span class="nv-set-wait"><i class="nv-spin"></i>Writing…</span></pre>' +
+    '<div class="nv-local-foot"><button class="plain" type="button" data-keep-mine>Keep mine</button><button class="plain" type="button" data-use-edit disabled>Use it, I will edit</button><button class="primary" type="button" data-use-send disabled>Use it and send</button></div>');
+  const brief = card.querySelector('.nv-brief');
   let d;
-  try { d = await rewriteDraft(original); } catch (error) { return toast(error.message); }
+  try {
+    const { id } = await api('/api/prompt-master', { text: original, project: chat?.project || null, stream: true });
+    for (let i = 0; i < 900; i++) {                                 // (up to six minutes; most take seconds)
+      await new Promise(resolve => setTimeout(resolve, 400));
+      if (!card.isConnected) return;
+      const now = await api('/api/prompt-master', { follow: id });
+      if (now.text) { brief.textContent = now.text; stick(); }
+      if (now.done) { if (now.error) throw new Error(now.error); d = now.result; break; }
+    }
+    if (!d) throw new Error('The rewrite is taking too long. Your message is unchanged.');
+  } catch (error) { card.remove(); return toast(error.message); }
   window.lastPromptRewrite = d;
-  const card = localReply('Improve message', '<p class="small">Your message, written out as a full brief, so the AI knows exactly what to build and how to check it:</p><pre class="nv-brief">' + esc(d.prompt || '') + '</pre>' +
-    '<div class="nv-local-foot"><button class="plain" type="button" data-keep-mine>Keep mine</button><button class="plain" type="button" data-use-edit>Use it, I will edit</button><button class="primary" type="button" data-use-send>Use it and send</button></div>');
+  brief.textContent = d.prompt || '';
+  card.querySelectorAll('[data-use-edit],[data-use-send]').forEach(b => { b.disabled = false; });
   card.querySelector('[data-keep-mine]').onclick = () => { card.remove(); message.focus(); };
   card.querySelector('[data-use-edit]').onclick = () => { card.remove(); setDraft(d.prompt || original); };
   card.querySelector('[data-use-send]').onclick = () => { card.remove(); setDraft(d.prompt || original); form.requestSubmit(); };

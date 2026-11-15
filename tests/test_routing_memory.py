@@ -138,3 +138,50 @@ class CloudApiTests(GuiTestCase):
         with patch.object(cloud_memory,'pairing',return_value={'env':'test-secret','query_key':'test-query'}):
             self.assertEqual(self.req('POST','/api/cloud',{'action':'pairing'})[1]['query_key'],'test-query')
             self.assertNotIn('test-secret',json.dumps(self.req('GET','/api/state')[1]))
+
+
+class ImproveMessageFast(EngineTestCase):
+    """Improve message asks one model directly (no job): its words stream as they are written; a connected AI service
+    answers when Claude cannot; the coding-job route only as a last resort."""
+
+    def test_claude_answers_directly_and_its_words_stream(self):
+        cfg = config.load()
+        seen = []
+
+        def claude(system, question, heard, timeout=240.0):
+            self.assertIn('The defining experience', system)
+            self.assertIn('make a party game', question)
+            for words in ('Build a party', 'Build a party game.'):
+                heard(words)
+            return 'Build a party game.'
+        with patch.object(prompt_master, '_ask_claude', claude), patch.object(prompt_master, 'run_job') as job:
+            got = prompt_master.write(cfg, 'make a party game', heard=seen.append)
+        self.assertEqual((got['prompt'], got['agent']), ('Build a party game.', 'claude'))
+        self.assertEqual(seen, ['Build a party', 'Build a party game.'])
+        job.assert_not_called()
+
+    def test_a_connected_service_when_claude_cannot_then_the_job_route(self):
+        cfg = config.load()
+        with patch.object(prompt_master, '_ask_claude', lambda *a, **k: ''), patch.object(prompt_master, '_ask_service', lambda *a, **k: 'Build it well.'):
+            self.assertEqual(prompt_master.write(cfg, 'build it')['agent'], 'service')
+        with patch.object(prompt_master, '_ask_claude', lambda *a, **k: ''), patch.object(prompt_master, '_ask_service', lambda *a, **k: ''), \
+                patch.object(prompt_master, 'refine', lambda cfg, text, project=None: {'prompt': 'from a job', 'agent': 'codex'}):
+            self.assertEqual(prompt_master.write(cfg, 'build it')['prompt'], 'from a job')
+
+    def test_started_in_the_background_and_followed(self):
+        import time as clock
+        cfg = config.load()
+
+        def claude(system, question, heard, timeout=240.0):
+            heard('﻿Half')
+            return 'Half and whole.'
+        with patch.object(prompt_master, '_ask_claude', claude):
+            ident = prompt_master.start(cfg, 'write it')['id']
+            for _ in range(100):
+                now = prompt_master.follow(ident)
+                if now['done']:
+                    break
+                clock.sleep(0.02)
+        self.assertEqual((now['done'], now['error'], now['text'], now['result']['prompt']), (True, '', 'Half and whole.', 'Half and whole.'))
+        with self.assertRaises(ValueError):
+            prompt_master.follow('nope')
