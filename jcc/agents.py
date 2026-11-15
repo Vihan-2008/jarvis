@@ -187,7 +187,7 @@ def claude_tools(kind: str, level: str, shell: bool, notebooks: bool = False) ->
 
 def build_argv(agent: AgentCfg, level: str, prompt: str, workdir: Path,
                permissions: dict[str, list[str]] | None = None, effort: str = "auto", session_id: str | None = None,
-               tools: str | None = None) -> list[str]:
+               tools: str | None = None, advisor: str = "") -> list[str]:
     exe = resolve_command(agent.command[0]) or agent.command[0]
     base = [exe, *agent.command[1:]]
     model = agent.models.get(level, "")
@@ -211,6 +211,10 @@ def build_argv(agent: AgentCfg, level: str, prompt: str, workdir: Path,
             argv += ["--allowedTools", *perms["allow"]]
         if perms.get("deny"):
             argv += ["--disallowedTools", *perms["deny"]]
+        if advisor:
+            # /advisor: as a setting, not --advisor, so a model Claude Code will not pair with the job's own is simply
+            # left out (the flag would stop the job at launch). (Its own settings files are not read: --setting-sources "".)
+            argv += ["--settings", json.dumps({"advisorModel": advisor})]
     elif agent.name == "codex":
         # workspace-write: commands may only write inside the job folder; network is off.
         argv = base + ["exec", "--json", "--ignore-user-config", "--sandbox", "workspace-write", "--skip-git-repo-check",

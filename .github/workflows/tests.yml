@@ -49,8 +49,11 @@ jobs:
           $setup = Join-Path $env:RUNNER_TEMP 'pkg\JARVIS-Setup.exe'
           "JARVIS-Setup.exe: {0:N1} MB" -f ((Get-Item $setup).Length / 1MB)
           $clock = [Diagnostics.Stopwatch]::StartNew()
-          Start-Process -FilePath $setup -ArgumentList '/Q' -Wait
-          "Setup finished after {0:N0} s" -f $clock.Elapsed.TotalSeconds
+          # (Not Start-Process -Wait: that waits for every process Setup starts, and Setup leaves JARVIS open.)
+          $proc = Start-Process -FilePath $setup -ArgumentList '/Q' -PassThru
+          $null = $proc.Handle
+          if (-not $proc.WaitForExit(900000)) { throw 'Setup did not finish within 15 minutes.' }
+          "Setup finished after {0:N0} s (exit code {1})" -f $clock.Elapsed.TotalSeconds, $proc.ExitCode
           $app = Join-Path $env:LOCALAPPDATA 'Programs\JARVIS'
           if (-not (Test-Path (Join-Path $app 'jcc\__init__.py'))) { throw 'JARVIS is not in its usual folder after Setup.' }
           $python = (Get-Content (Join-Path $app '.python') -Raw).Trim()
@@ -214,9 +217,9 @@ jobs:
               with zipfile.ZipFile(source) as old, zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as new:
                   for info in old.infolist():
                       data = old.read(info)
-                      if info.filename.endswith(".jarvis-app/VERSION"):
+                      if info.filename.endswith("jarvis-app/VERSION"):
                           data = (version + "\n").encode()
-                      elif broken and info.filename.endswith(".jarvis-app/jcc/__main__.py"):
+                      elif broken and info.filename.endswith("jarvis-app/jcc/__main__.py"):
                           data = b"raise SystemExit('this version never starts')\n"
                       new.writestr(info, data)
               open(target + ".sha256", "w").write(hashlib.sha256(open(target, "rb").read()).hexdigest())

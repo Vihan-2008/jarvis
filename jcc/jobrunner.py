@@ -330,9 +330,15 @@ def run_job(cfg: Config, spec: dict[str, Any], workdir: Path,
             if not proj and (cwd / "RESULT.md").exists():
                 (cwd / "RESULT.md").unlink()
             notebooks = bool(proj) and bool(projects.git(["ls-files", "--", "*.ipynb"], cwd, check=False).strip())
+            try:
+                from jcc import assistant as _assistant
+                advisor = _assistant.settings(cfg).get("advisor", "")
+            except Exception:                                    # (a setting that cannot be read never stops a job)
+                advisor = ""
             argv = agents.build_argv(agent, res.level, continuation, cwd, perms, effort=effort,
                                      session_id=previous_session["session_id"] if previous_session else None,
-                                     tools=agents.claude_tools(kind, res.level, shell=bool(proj), notebooks=notebooks) if name == "claude" else None)
+                                     tools=agents.claude_tools(kind, res.level, shell=bool(proj), notebooks=notebooks) if name == "claude" else None,
+                                     advisor=advisor)
             if images and name=='codex':
                 argv=argv[:-1]+[argument for path in images for argument in ('--image',str(path))]+['--']+argv[-1:]
             fm, _ = parse_frontmatter(vault.read(f"Jobs/{rid}.md") or "")

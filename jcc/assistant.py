@@ -287,6 +287,15 @@ def clock(when: float) -> str:
 SLEEP_MINUTES = (0, 1, 5, 15, 30, 60)      # 0: awake until it is told to sleep ("JARVIS, go to sleep")
 
 
+ADVISORS = ("opus", "fable", "sonnet")         # Claude Code's own names for its advisor models (or a full model id)
+ADVISOR_ID = re.compile(r"claude-[a-z0-9][a-z0-9.-]{2,60}")
+
+
+def valid_advisor(value) -> bool:
+    """"" (no advisor), one of ADVISORS, or a full Claude model id such as claude-opus-5-5."""
+    return isinstance(value, str) and (value in ("", *ADVISORS) or bool(ADVISOR_ID.fullmatch(value)))
+
+
 def settings(cfg) -> dict:
     path = cfg.state_dir / "assistant.json"
     try:
@@ -317,6 +326,8 @@ def settings(cfg) -> dict:
             "sleep_minutes": saved.get("sleep_minutes") if not isinstance(saved.get("sleep_minutes"), bool) and saved.get("sleep_minutes") in SLEEP_MINUTES else 15,
             # Where an email is written when no account is connected: "auto" (Gmail if that is what is used, else the PC's mail app), "gmail" or "app".
             "mail": saved.get("mail") if saved.get("mail") in ("auto", "gmail", "app") else "auto",
+            # /advisor: the stronger model Claude Code jobs consult at hard moments ("" for none). See jcc/agents.py.
+            "advisor": saved.get("advisor") if valid_advisor(saved.get("advisor")) else "",
             "persona": str(saved.get("persona", ""))[:1200]}
 
 
@@ -339,6 +350,8 @@ def configure(cfg, values) -> dict:
             current[key] = value
         elif key == "mail" and value in ("auto", "gmail", "app"):
             current[key] = value
+        elif key == "advisor" and (value == "off" or valid_advisor(value)):
+            current[key] = "" if value == "off" else value
         elif key == "persona" and isinstance(value, str):
             current[key] = redact(value.strip())[:1200]
         else:

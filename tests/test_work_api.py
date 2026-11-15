@@ -72,7 +72,8 @@ class TestAPairThroughTheRealJobPipeline(EngineTestCase):
         self.assertEqual((done["status"], len(done["handoffs"])), ("done", 2), done["now"])
         first = done["handoffs"][0]
         self.assertEqual(first["status"], "done", first["report"][:400])
-        self.assertEqual(self.approved, [h["job"] for h in done["handoffs"]], "each change waited for its owner's review, and the pair carried on once it was approved")
+        self.assertEqual(self.approved, [h["job"] for h in done["handoffs"]], "each change waited for its owner's review, and the pair carried on once it was approved; "
+                         + " | ".join(f"{h['job']}: {h.get('status')}: {str(h.get('report', ''))[:300]}" for h in done["handoffs"]))
         self.assertIn("Reviewed and merged with passing checks", first["report"], "the builder's own report: what the job did, and that the checks passed")
         self.assertIn("added_by_agent", git("show", "master:src/pkg/__init__.py", cwd=self.repo), "the change really is in the project")
         # The planner was given that report, as information, and revised the plan.

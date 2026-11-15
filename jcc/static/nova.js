@@ -1077,7 +1077,7 @@ function drawSlash() {
   list.querySelector('.on')?.scrollIntoView?.({ block: 'nearest' });
 }
 const AT_ONCE = new Set(['activity', 'efficiency', 'tasks', 'recall', 'shared', 'control', 'folder', 'chat', 'code', 'ultracode', 'new', 'usage', 'mods', 'help', 'compact', 'work', 'mode', 'status', 'projects', 'undo', 'stop', 'settings', 'files', 'terminal', 'browser',
-  'artifacts', 'agents', 'pair', 'court', 'security', 'routines', 'voice', 'connections', 'models', 'updates', 'setup']);      // nothing follows these: chosen, they are done
+  'artifacts', 'agents', 'pair', 'court', 'security', 'routines', 'voice', 'connections', 'models', 'updates', 'setup', 'advisor']);      // nothing follows these: chosen, they are done
 function takeSlash(c) {
   slash.classList.add('hidden');
   if (c.own && AT_ONCE.has(c.name)) { message.value = '/' + c.name; grow(); form.requestSubmit(); return; }
@@ -1184,11 +1184,30 @@ async function runCommand(name, words) {
     }
     if (name === 'stop') return void stopReply();
     if (name === 'setup') return void window.Nova.gettingStarted?.();
+    if (name === 'advisor') return void advisorCommand(String(words || '').trim().toLowerCase());
     if (name === 'folder') { const key = chat?.project || selectedProject; return void (key ? revealProject(key) : localReply('Open file location', '<p>Choose a project first: /projects.</p>')); }
     if (name === 'settings') return void window.Nova.voiceSettings?.(words || undefined);
     if (['voice', 'connections', 'models', 'updates'].includes(name)) return void window.Nova.voiceSettings?.(name === 'connections' ? 'connections' : name);
     if (PANE_COMMANDS[name]) return void paneInChat(PANE_COMMANDS[name]);
   } catch (error) { toast(error.message); }
+}
+// /advisor, as in Claude Code: the stronger model Claude Code jobs consult before choosing an approach, when an error
+// keeps coming back, and before saying a task is done. "/advisor opus" sets it, "/advisor off" turns it off, and
+// "/advisor" alone shows the choices. It is saved, and used by every Claude Code job from then on.
+const ADVISORS = [['', 'No advisor', 'Jobs work on their own.'], ['opus', 'Opus', 'The usual choice: strong planning and checking, at Opus rates.'],
+  ['fable', 'Fable', 'The strongest, where your account has Fable (on some plans it bills to usage credits).'], ['sonnet', 'Sonnet', 'A cheaper second opinion.']];
+const advisorName = id => (ADVISORS.find(([value]) => value === id) || [id, id])[1] || 'No advisor';
+async function advisorCommand(words) {
+  if (words) {
+    const value = words === 'off' || words === 'none' ? 'off' : words;
+    const saved = await api('/api/voice', { action: 'settings', settings: { advisor: value } });
+    return void localReply('Advisor', '<p>Advisor set to <b>' + esc(advisorName(saved.advisor || '')) + '</b>.' + (saved.advisor ? ' Claude Code jobs consult it at hard moments from now on; it uses more of your allowance.' : '') + '</p>');
+  }
+  let current = ''; try { current = (await api('/api/voice', { action: 'settings', settings: {} })).advisor || ''; } catch {}
+  const node = localReply('Advisor', '<p>A stronger model that Claude Code jobs consult at hard moments: before choosing an approach, when an error keeps coming back, and before saying a task is done. Claude decides when. Each consultation uses more of your allowance. Codex jobs have no advisor.</p>' +
+    '<ul class="nv-modelist">' + ADVISORS.map(([id, label, about], i) => '<li><button class="' + (id === current ? 'primary' : 'plain') + '" type="button" data-set-advisor="' + (id || 'off') + '">' + (i + 1) + '. ' + label + '</button><small>' + about + '</small></li>').join('') + '</ul>' +
+    '<p class="small">Or type <b>/advisor</b> with a model, for example <b>/advisor opus</b>, a full model id such as <b>/advisor claude-opus-5-5</b>, or <b>/advisor off</b>. An advisor weaker than a job\'s own model is not used.</p>');
+  node.querySelectorAll('[data-set-advisor]').forEach(b => b.onclick = async () => { node.remove(); try { await advisorCommand(b.dataset.setAdvisor); } catch (error) { toast(error.message); } });
 }
 document.addEventListener('click', e => {
   const b = e.target.closest?.('[data-set-mode],[data-open-chat],[data-use-project],[data-reveal-project],[data-delete-project]'); if (!b) return;
@@ -1199,7 +1218,7 @@ document.addEventListener('click', e => {
   else if (b.dataset.useProject) { setWorkMode('code', true); selectProject(b.dataset.useProject); projectChip(); b.closest('.nv-local')?.remove(); message.focus(); }
 });
 // JARVIS's own commands are done by the window. True: it was one of them, and it is done.
-const IN_CHAT = new Set(['setup', 'activity', 'efficiency', 'tasks', 'recall', 'shared', 'control', 'folder', 'work', 'mode', 'permissions', 'status', 'projects', 'undo', 'stop', 'settings', 'voice', 'connections', 'models', 'updates', 'artifacts', 'files', 'terminal', 'browser', 'agents', 'pair', 'court', 'security', 'routines']);
+const IN_CHAT = new Set(['setup', 'advisor', 'activity', 'efficiency', 'tasks', 'recall', 'shared', 'control', 'folder', 'work', 'mode', 'permissions', 'status', 'projects', 'undo', 'stop', 'settings', 'voice', 'connections', 'models', 'updates', 'artifacts', 'files', 'terminal', 'browser', 'agents', 'pair', 'court', 'security', 'routines']);
 function runBuiltin(name, words = '') {
   if (IN_CHAT.has(name)) { runCommand(name, words); return true; }
   if (name === 'chat' || name === 'code') setWorkMode(name, true);

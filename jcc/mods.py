@@ -31,6 +31,7 @@ BUILTIN = (("work", "What is running, waiting for you and finished, here in the 
            ("undo", "Undo the last change made in this chat"),
            ("stop", "Stop what is running in this chat"),
            ("status", "The mode, the AI and what is left of each allowance"),
+           ("advisor", "A stronger model Claude Code jobs consult at hard moments: Opus, Fable, Sonnet or none"),
            ("usage", "Show what has been used"),
            ("compact", "Shorten this conversation to a summary and carry on from it"),
            ("chat", "Switch to Chat"),

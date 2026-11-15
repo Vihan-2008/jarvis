@@ -54,7 +54,8 @@ Your notes are kept unless you choose to delete them.
   and ChatGPT (Codex) with your subscriptions. API keys for other services are still there.
 - **Everything else is a /command, answered in the chat.** Type `/` for two lists: Features (`/work`, `/mode`,
   `/status`, `/projects`, `/undo`, `/folder`, `/dryrun`, `/checklist`, `/context`, `/compare`, `/court`, `/pair`,
-  `/security`, `/routines`, `/agents`...) and Skills, plugins & mods. Each answers in the chat, the Court and the
+  `/security`, `/routines`, `/agents`, `/setup`, `/advisor`...) and Skills, plugins & mods. `/advisor` works as in
+  Claude Code: a stronger model (Opus, Fable or Sonnet) that coding jobs consult at hard moments. Each answers in the chat, the Court and the
   security check included; only Files, Terminal and Browser sit beside it. Projects can be opened in Explorer or Finder, and deleted
   (their folder goes to the Recycle Bin only if you tick the box).
 - **Security check.** Finds the usual holes in a project, has the ones you tick fixed in a copy, shows you the
