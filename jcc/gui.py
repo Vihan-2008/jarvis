@@ -1408,6 +1408,8 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                                                      str(body.get('user', '')), str(body.get('site_id', '')), str(body.get('name', '')))}
                         elif action == 'remove':
                             got = {'removed': sites.remove(state.cfg, str(body.get('id', '')))}
+                        elif action == 'rekey':
+                            got = {'site': sites.rekey(state.cfg, str(body.get('id', '')), str(body.get('key', '')))}
                         elif action == 'publish':
                             got = {'change': sites.publish(state.cfg, str(body.get('id', '')))}
                         elif action == 'discard':

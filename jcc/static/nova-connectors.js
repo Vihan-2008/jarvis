@@ -15,7 +15,7 @@ async function connectorsCommand() {
 function draw(node, data) {
   const box = node.querySelector('.content');
   const rows = (data.connectors || []).map(c => '<li><b>' + esc(c.name) + '</b><small>' + (c.kind === 'link' ? 'Link · ' : 'Program · ') + esc(c.where) +
-    (c.secrets ? ' · ' + c.secrets + (c.secrets === 1 ? ' key' : ' keys') + ' in the key store' : '') + '</small><span class="nv-conn-test" data-result="' + esc(c.name) + '"></span>' +
+    (c.secrets ? ' · ' + c.secrets + (c.secrets === 1 ? ' key' : ' keys') + ' in the key store' : '') + ' · stays until you remove it</small><span class="nv-conn-test" data-result="' + esc(c.name) + '"></span>' +
     '<button class="plain" type="button" data-test="' + esc(c.name) + '">Test</button><button class="plain" type="button" data-remove="' + esc(c.name) + '">Remove</button></li>').join('');
   box.innerHTML = '<p class="small">Connectors give the assistant more tools: a calendar, a database, GitHub, your notes app. Once one is added, just ask: “what is on my calendar tomorrow?”. JARVIS asks before using them in a chat that has read outside content.</p>' +
     '<h4>Added</h4>' + (rows ? '<ul class="nv-worklist">' + rows + '</ul>' : '<p class="small">None yet.</p>') +

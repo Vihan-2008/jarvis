@@ -1,6 +1,10 @@
 """Websites the owner connected (WordPress, Shopify, Wix, Squarespace), and changes to them that are shown on this computer
 first and go online only when the owner presses Publish.
 
+A site stays connected until the owner removes it: nothing JARVIS meets (an error, the site being down, an expired
+token) disconnects it. A Shopify app's token is renewed by itself; a key changed on the platform's side is replaced in
+place with Replace key.
+
 Only sites the owner added are ever touched, each through its own platform's API, with a key the owner created there
 and kept in the system's key store (never in a file, a note or a log). The assistant can read what is on a site, and
 it can stage a change: a new or edited post, page or product. A staged change is a preview on this computer, at
@@ -176,6 +180,22 @@ def add(cfg, platform: str, address: str, key: str, user: str = "", site_id: str
     return next(item for item in listing(cfg) if item["id"] == row["id"])
 
 
+def rekey(cfg, site_id: str, key: str) -> dict:
+    """A new key for a connected site (changed or withdrawn on the platform's side). Tried first; the old one stays if the
+    new one is refused. The site, its name and its changes are untouched."""
+    site = next((row for row in _saved(cfg) if row["id"] == site_id), None)
+    if not site:
+        raise SiteError("That site is not connected.")
+    key = str(key or "").strip()
+    if not key or len(key) > 400 or any(ch in key for ch in "\r\n"):
+        raise SiteError("Paste the new " + PLATFORMS[site["platform"]]["key"].split(",")[0].lower() + ".")
+    register_secret(key)
+    _TOKENS.pop(site_id, None)
+    Remote(site, key).check()
+    secrets.store(_key_name(site_id), key)
+    return next(item for item in listing(cfg) if item["id"] == site_id)
+
+
 def remove(cfg, site_id: str) -> bool:
     rows = _saved(cfg)
     kept = [row for row in rows if row["id"] != site_id]
@@ -230,9 +250,13 @@ class Remote:
     # -- plumbing
     def _call(self, method: str, url: str, body=None, form: bool = False, headers: dict | None = None) -> object:
         status, answer = FETCH(method, url, {**self._auth(), **(headers or {})}, body, form)
+        if status == 401 and self.platform == "shopify" and self.site["id"] in _TOKENS:
+            # The app's token ran out before Shopify said it would: a new one, and the same request once more.
+            _TOKENS.pop(self.site["id"], None)
+            status, answer = FETCH(method, url, {**self._auth(), **(headers or {})}, body, form)
         if status in (401, 403):
-            raise SiteError(f"{self.site.get('name') or 'The site'} refused JARVIS's key ({_said(status, answer)}). Check that the key is right and "
-                            "allowed to do this, then remove the site and add it again with a new key.")
+            raise SiteError(f"{self.site.get('name') or 'The site'} refused JARVIS's key ({_said(status, answer)}). The site stays connected: if the "
+                            "key was changed or withdrawn on the site, type /sites and use Replace key; if it lacks a permission, give it that there.")
         if status == 404:
             raise SiteError("The site has no such item (or its API is switched off).")
         if status >= 400:

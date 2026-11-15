@@ -281,3 +281,45 @@ class OverTheWire(GuiTestCase):
         self.assertIn("sites", [name for name, _ in mods.BUILTIN])
         page = (gui.STATIC.with_name("nova-sites.js")).read_text("utf-8")
         self.assertTrue(re.search(r"N\.siteCard = ", page) and "data-publish" in page and "data-discard" in page)
+
+
+class StaysConnected(SitesCase):
+    """A site stays connected until its owner removes it: nothing JARVIS meets disconnects it."""
+
+    def test_it_is_still_there_after_a_restart(self):
+        site = self.wordpress()
+        from jcc import config
+        again = config.load()                                     # (JARVIS started again: everything read afresh)
+        self.assertEqual([s["id"] for s in sites.listing(again)], [site["id"]])
+        self.assertEqual(sites.read(again, site["id"], "post")["items"][0]["title"], "Hello", "and its key still works")
+
+    def test_errors_a_site_that_is_down_or_a_refused_key_never_disconnect_it(self):
+        site = self.wordpress()
+
+        def down(*_a, **_k):
+            raise sites.SiteError("The site could not be reached: timed out")
+        sites.FETCH = down
+        with self.assertRaises(sites.SiteError):
+            sites.read(self.cfg, site["id"], "post")
+        sites.FETCH = lambda *a, **k: (401, {"message": "Sorry, you are not allowed to do that."})
+        with self.assertRaisesRegex(sites.SiteError, "stays connected"):
+            sites.read(self.cfg, site["id"], "post")
+        self.assertEqual([s["id"] for s in sites.listing(self.cfg)], [site["id"]])
+        self.assertEqual(secrets._cred_read("site-" + site["id"]), "abcd efgh ijkl")
+
+    def test_a_new_key_replaces_the_old_one_in_place_and_a_wrong_one_is_not_kept(self):
+        site = self.wordpress()
+        with self.assertRaisesRegex(sites.SiteError, "refused"):
+            sites.rekey(self.cfg, site["id"], "wrong key")
+        self.assertEqual(secrets._cred_read("site-" + site["id"]), "abcd efgh ijkl", "the old key is kept")
+        made = sites.stage(self.cfg, site["id"], "post", "x", title="Kept")
+        sites.FETCH = lambda method, url, headers, body=None, form=False: (200, []) if method == "GET" else (201, {"id": 9, "link": ""})
+        sites.rekey(self.cfg, site["id"], "new key 1234")
+        self.assertEqual(secrets._cred_read("site-" + site["id"]), "new key 1234")
+        self.assertEqual(sites.pending(self.cfg)[0]["id"], made["id"], "its waiting changes are untouched")
+
+    def test_an_expired_shopify_app_token_is_renewed_by_itself(self):
+        site = sites.add(self.cfg, "shopify", "shop.myshopify.com", "client123:s3cret")
+        sites._TOKENS[site["id"]] = ("shpat_expired", 9e12)        # (Shopify let it run out early)
+        self.assertEqual(sites.read(self.cfg, site["id"], "product", "11")["item"]["title"], "Mug")
+        self.assertEqual(sites._TOKENS[site["id"]][0], "shpat_exchanged")

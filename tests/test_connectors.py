@@ -173,3 +173,34 @@ class OverTheWire(GuiTestCase):
         self.assertEqual(self.req("POST", "/api/connectors", {"action": "list"}, token=False)[0], 401)
         self.assertEqual(self.req("POST", "/api/connectors", {"action": "remove", "name": "github"})[1]["connectors"], [])
         self.assertEqual(self.req("POST", "/api/connectors", {"action": "add", "text": "{bad"})[0], 400)
+
+
+class StaysAdded(Case):
+    """A connector stays until its owner removes it."""
+
+    def test_it_and_its_keys_are_still_there_after_a_restart_and_a_failed_test(self):
+        connectors.add(self.cfg, "https://api.githubcopilot.com/mcp/", name="github", token="ghp_abcdefghijklmnopqrstuvwxyz0123")
+        connectors.add(self.cfg, "no-such-program-xyz --serve", name="ghost")
+        self.assertFalse(connectors.test(self.cfg, "ghost", timeout=5)["ok"])
+        from jcc import config
+        again = config.load()
+        self.assertEqual(sorted(c["name"] for c in connectors.listing(again)), ["ghost", "github"])
+        self.assertEqual(connectors.secret_env(again), {"JCC_CONNECTOR_GITHUB_AUTHORIZATION": "Bearer ghp_abcdefghijklmnopqrstuvwxyz0123"})
+
+
+class OtherConnections(Case):
+    """Email and online accounts count as connected while their key is kept: no failed check, and no missing internet,
+    makes them look disconnected."""
+
+    def test_mail_and_online_accounts_stay_connected_without_the_internet(self):
+        import socket
+        from unittest import mock
+        from jcc import mailer, online
+        secrets.store("mail", "app-password")
+        self.cfg.state_dir.mkdir(parents=True, exist_ok=True)
+        (self.cfg.state_dir / "mail.json").write_text(json.dumps({"address": "ann@example.com", "host": "smtp.example.com"}), "utf-8")
+        secrets.store("composio", "ak_test")
+        with mock.patch.object(socket, "create_connection", side_effect=OSError("no internet")):
+            self.assertTrue(online.connected(self.cfg))
+            status = mailer.status(self.cfg)
+        self.assertTrue(status["connected"], status)

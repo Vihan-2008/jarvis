@@ -8,7 +8,8 @@ file keeps a placeholder, ${JCC_CONNECTOR_...}, which Claude Code fills in from 
 starts the connector. JARVIS puts those values in that environment only (jcc/assistant.py), and its own tool server takes
 them out again before it runs anything (jcc/voice_tools.py), so a command the assistant runs never sees them.
 
-Test starts a connector the way the assistant would and lists its tools.
+Test starts a connector the way the assistant would and lists its tools. A connector stays until the owner removes it:
+a failed test, or a connector that does not start, never removes it.
 """
 from __future__ import annotations
 

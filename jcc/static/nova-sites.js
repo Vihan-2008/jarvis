@@ -67,7 +67,8 @@ function draw(node, data) {
   const box = node.querySelector('.content');
   const platforms = data.platforms || {};
   const rows = (data.sites || []).map(s => '<li><b>' + esc(s.name) + '</b> <small>' + esc(s.label) + ' · ' + esc(s.address) + ' · ' +
-    s.kinds.map(k => k + 's').join(', ') + (s.edits ? '' : ' (new ones only)') + '</small><button class="plain" type="button" data-remove="' + esc(s.id) + '">Remove</button></li>').join('');
+    s.kinds.map(k => k + 's').join(', ') + (s.edits ? '' : ' (new ones only)') + ' · stays connected until you remove it</small>' +
+    '<button class="plain" type="button" data-rekey="' + esc(s.id) + '">Replace key</button><button class="plain" type="button" data-remove="' + esc(s.id) + '">Remove</button></li>').join('');
   const waiting = (data.pending || []).map(c => '<li><b>' + esc(what(c)) + '</b> <small>' + esc(c.site_name) + ' · ' + esc(c.summary || '') +
     '</small><button class="plain" type="button" data-show="' + esc(c.id) + '">Preview</button></li>').join('');
   box.innerHTML = '<p class="small">Tell JARVIS what to change, for example “add a blog post about our summer sale to my WordPress site”. Every change is shown here first, on this computer; it goes online only when you press Publish.</p>' +
@@ -105,6 +106,18 @@ function draw(node, data) {
     const site = (data.sites || []).find(s => s.id === b.dataset.remove);
     if (!(await N.confirmBox({ title: 'Remove ' + (site ? site.name : 'this site') + '?', text: 'JARVIS forgets the site and deletes its key from this computer. Nothing on the site changes.', ok: 'Remove' }))) return;
     try { draw(node, await api('/api/sites', { action: 'remove', id: b.dataset.remove })); } catch (error) { say(error.message); }
+  });
+  box.querySelectorAll('[data-rekey]').forEach(b => b.onclick = async () => {
+    const site = (data.sites || []).find(s => s.id === b.dataset.rekey) || {};
+    const label = ((data.platforms || {})[site.platform] || {}).key || 'key';
+    const ask = N.dialog('<h2>A new key for ' + esc(site.name || 'this site') + '</h2><p>The site stays connected; only its key changes. The new key is tried first.</p>' +
+      '<label class="nv-field"><span>' + esc(label) + '</span><input type="password" autocomplete="off" spellcheck="false"></label>' +
+      '<div class="actions"><button class="plain" data-no>Cancel</button><button class="primary" data-yes>Replace key</button></div>');
+    ask.querySelector('[data-no]').onclick = () => ask.close();
+    ask.querySelector('[data-yes]').onclick = async () => {
+      try { const got = await api('/api/sites', { action: 'rekey', id: site.id, key: ask.querySelector('input').value }); ask.close(); notify('New key kept for ' + got.site.name + '.'); draw(node, got); }
+      catch (error) { say(error.message); }
+    };
   });
   box.querySelectorAll('[data-show]').forEach(b => b.onclick = async () => {
     try { const got = await api('/api/sites', { action: 'change', id: b.dataset.show }); N.siteCard({ ...got.change, view: (data.pending || []).find(c => c.id === b.dataset.show)?.view }); }
