@@ -1511,6 +1511,8 @@ def main() -> int:
     # The connection details are taken out of the environment at once, so nothing this helper starts
     # (a command, an app) can read them and talk to JARVIS on its own.
     port, key, session = (os.environ.pop(name, "") for name in ("JCC_VOICE_PORT", "JCC_VOICE_KEY", "JCC_VOICE_SESSION"))
+    from jcc import connectors
+    connectors.strip_env(os.environ)        # (the connectors' keys are for the connectors: never for a command run here)
     if key:
         from jcc.redact import register_secret
         register_secret(key)

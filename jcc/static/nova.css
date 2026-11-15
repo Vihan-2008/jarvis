@@ -1245,3 +1245,8 @@ button.nv-danger{color:var(--bad)}button.primary.nv-danger{background:var(--bad)
 .nv-site-state{margin:6px 0;font-size:13.5px}.nv-site-state.ok{color:var(--ok)}.nv-site-state.wait{color:var(--warn)}.nv-site-state.bad{color:var(--bad)}
 .nv-site-card .actions,.nv-site-add .actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
 .nv-site-add{display:grid;gap:8px}.nv-site-add .hidden{display:none}
+
+/* Connectors (nova-connectors.js) */
+.nv-conn-add{display:grid;gap:8px}.nv-conn-add textarea{width:100%;font:13px var(--mono,ui-monospace,monospace);resize:vertical}
+.nv-conn-add .actions,.nv-conn-source .actions{display:flex;justify-content:flex-end}
+.nv-conn-test{font-size:12.5px;color:var(--ink-2)}.nv-conn-test.ok{color:var(--ok)}.nv-conn-test.bad{color:var(--bad)}

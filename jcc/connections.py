@@ -149,7 +149,7 @@ def overview(cfg) -> list[dict]:
     names = sorted(str(name) for name in added) if isinstance(added, dict) else []
     items.append(_item("connectors", "hands", "Connectors", "Extra tools you have added yourself (a calendar, Gmail, a database).",
                        "ok" if names else "off", (", ".join(names)[:120]) if names else "None added",
-                       how="Put them in connectors.json in JARVIS's settings folder, in the same format as Claude's MCP settings. JARVIS asks before using them in a chat that has read outside content."))
+                       how="Type /connectors in the chat: paste a connector's link, its command or the setup from its instructions, or bring in the ones you use in Claude. Keys go into this computer's key store. JARVIS asks before using them in a chat that has read outside content."))
     for label, ident, file, about in (("ChatGPT website", "chatgpt", "capture-chatgpt-status.json", "Saves your ChatGPT conversations into your notes."),
                                       ("Claude website", "claude-web", "capture-claude-status.json", "Saves your Claude conversations into your notes.")):
         seen = read_json(cfg.state_dir / file, {})

@@ -1077,7 +1077,7 @@ function drawSlash() {
   list.querySelector('.on')?.scrollIntoView?.({ block: 'nearest' });
 }
 const AT_ONCE = new Set(['activity', 'efficiency', 'tasks', 'recall', 'shared', 'control', 'folder', 'chat', 'code', 'ultracode', 'new', 'usage', 'mods', 'help', 'compact', 'work', 'mode', 'status', 'projects', 'undo', 'stop', 'settings', 'files', 'terminal', 'browser',
-  'artifacts', 'agents', 'pair', 'court', 'security', 'routines', 'voice', 'connections', 'models', 'updates', 'setup', 'advisor', 'sites']);      // nothing follows these: chosen, they are done
+  'artifacts', 'agents', 'pair', 'court', 'security', 'routines', 'voice', 'connections', 'models', 'updates', 'setup', 'advisor', 'sites', 'connectors']);      // nothing follows these: chosen, they are done
 function takeSlash(c) {
   slash.classList.add('hidden');
   if (c.own && AT_ONCE.has(c.name)) { message.value = '/' + c.name; grow(); form.requestSubmit(); return; }
@@ -1186,6 +1186,7 @@ async function runCommand(name, words) {
     if (name === 'setup') return void window.Nova.gettingStarted?.();
     if (name === 'advisor') return void advisorCommand(String(words || '').trim().toLowerCase());
     if (name === 'sites') return void window.Nova.sitesCommand?.();
+    if (name === 'connectors') return void window.Nova.connectorsCommand?.();
     if (name === 'folder') { const key = chat?.project || selectedProject; return void (key ? revealProject(key) : localReply('Open file location', '<p>Choose a project first: /projects.</p>')); }
     if (name === 'settings') return void window.Nova.voiceSettings?.(words || undefined);
     if (['voice', 'connections', 'models', 'updates'].includes(name)) return void window.Nova.voiceSettings?.(name === 'connections' ? 'connections' : name);
@@ -1219,7 +1220,7 @@ document.addEventListener('click', e => {
   else if (b.dataset.useProject) { setWorkMode('code', true); selectProject(b.dataset.useProject); projectChip(); b.closest('.nv-local')?.remove(); message.focus(); }
 });
 // JARVIS's own commands are done by the window. True: it was one of them, and it is done.
-const IN_CHAT = new Set(['setup', 'advisor', 'sites', 'activity', 'efficiency', 'tasks', 'recall', 'shared', 'control', 'folder', 'work', 'mode', 'permissions', 'status', 'projects', 'undo', 'stop', 'settings', 'voice', 'connections', 'models', 'updates', 'artifacts', 'files', 'terminal', 'browser', 'agents', 'pair', 'court', 'security', 'routines']);
+const IN_CHAT = new Set(['setup', 'advisor', 'sites', 'connectors', 'activity', 'efficiency', 'tasks', 'recall', 'shared', 'control', 'folder', 'work', 'mode', 'permissions', 'status', 'projects', 'undo', 'stop', 'settings', 'voice', 'connections', 'models', 'updates', 'artifacts', 'files', 'terminal', 'browser', 'agents', 'pair', 'court', 'security', 'routines']);
 function runBuiltin(name, words = '') {
   if (IN_CHAT.has(name)) { runCommand(name, words); return true; }
   if (name === 'chat' || name === 'code') setWorkMode(name, true);

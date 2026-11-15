@@ -1122,7 +1122,10 @@ class Assistant:
                 # JARVIS's own tools check themselves. Anything else (a connector's tool) is sent to JARVIS for approval first.
                 "--permission-prompt-tool", "mcp__jarvis__approve", "--allowedTools", "mcp__jarvis", "WebSearch",
                 "--system-prompt", system_prompt(self.cfg, options, helper)]
-        session = Session(argv, work, scrub_env(dict(os.environ)), self.popen, ident, config)
+        env = scrub_env(dict(os.environ))
+        from jcc import connectors
+        env.update(connectors.secret_env(self.cfg))           # (filled into connectors.json's ${JCC_CONNECTOR_...} placeholders)
+        session = Session(argv, work, env, self.popen, ident, config)
         session.signature, session.spec, session.key = self._signature(spec, options, helper), spec, spec_key(spec)
         return session
 

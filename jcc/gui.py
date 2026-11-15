@@ -46,7 +46,7 @@ STATIC = Path(__file__).with_name("static") / "desktop.html"
 MAX_TEXT = 400_000              # (what is typed has no practical limit: a long paste, a whole spec)
 SCRIPTS = ("/workbench.js", "/assistant.js", "/horizon.js", "/horizon.css", "/delivery.js", "/reliability.js", "/operations.js", "/operations.css",
            "/everyday.js", "/everyday.css", "/nova.css", "/nova.js", "/nova-core.js", "/nova-rich.js", "/nova-panels.js", "/nova-voice.js",
-           "/nova-audio.js", "/nova-mic.js", "/nova-work.js", "/nova-security.js", "/nova-permissions.js", "/nova-routines.js", "/nova-kinds.js", "/nova-gallery.js", "/nova-start.js", "/nova-sites.js", "/vendor/xterm.js", "/vendor/xterm.css", "/vendor/addon-fit.js")
+           "/nova-audio.js", "/nova-mic.js", "/nova-work.js", "/nova-security.js", "/nova-permissions.js", "/nova-routines.js", "/nova-kinds.js", "/nova-gallery.js", "/nova-start.js", "/nova-sites.js", "/nova-connectors.js", "/vendor/xterm.js", "/vendor/xterm.css", "/vendor/addon-fit.js")
 # Tools the JARVIS app itself carries out for the assistant, each only with a one-time permit from the gate.
 APP_TOOLS = frozenset({"open_app", "list_projects", "create_project", "build_with_coding_agents", "make_image", "set_timer", "set_reminder",
                        "list_reminders", "cancel_reminder", "remember", "forget", "add_note", "send_email", "use_accounts",
@@ -1158,7 +1158,7 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                 system.open_path(Path(__file__).resolve().parents[1] / "browser-sync")
                 self._json(HTTPStatus.OK, {"opened": True})
                 return
-            if self.path not in ("/api/sites", "/api/uninstall", "/api/accounts", "/api/project/remove", "/api/reveal", "/api/updates", "/api/ask", "/api/mods", "/api/chats", "/api/chat/send", "/api/chat/update", "/api/projects", "/api/terminal", "/api/browser/open", "/api/routing", "/api/prompt-master", "/api/cloud", "/api/efficiency", "/api/job/control", '/api/assistant/settings','/api/feedback','/api/project/browse','/api/project/inspect','/api/project/connect','/api/job/review','/api/maintenance','/api/ui/activity','/api/context/inspect','/api/memory/resolve','/api/delivery/settings','/api/delivery/plan','/api/task-queue','/api/project/preferences','/api/dry-run','/api/evaluations','/api/handoff','/api/library','/api/provenance','/api/controls','/api/restorepoints','/api/diagnostics/export','/api/attachments/extract','/api/memory/search','/api/files/save','/api/pty','/api/web','/api/computer','/api/voice','/api/speech','/api/speech/tts','/api/mail','/api/assistants','/api/preview','/api/screenshot','/api/connections','/api/window','/api/providers','/api/usage','/api/skills','/api/pairs','/api/court','/api/agents','/api/artifacts','/api/security','/api/permissions','/api/routines'):
+            if self.path not in ("/api/connectors", "/api/sites", "/api/uninstall", "/api/accounts", "/api/project/remove", "/api/reveal", "/api/updates", "/api/ask", "/api/mods", "/api/chats", "/api/chat/send", "/api/chat/update", "/api/projects", "/api/terminal", "/api/browser/open", "/api/routing", "/api/prompt-master", "/api/cloud", "/api/efficiency", "/api/job/control", '/api/assistant/settings','/api/feedback','/api/project/browse','/api/project/inspect','/api/project/connect','/api/job/review','/api/maintenance','/api/ui/activity','/api/context/inspect','/api/memory/resolve','/api/delivery/settings','/api/delivery/plan','/api/task-queue','/api/project/preferences','/api/dry-run','/api/evaluations','/api/handoff','/api/library','/api/provenance','/api/controls','/api/restorepoints','/api/diagnostics/export','/api/attachments/extract','/api/memory/search','/api/files/save','/api/pty','/api/web','/api/computer','/api/voice','/api/speech','/api/speech/tts','/api/mail','/api/assistants','/api/preview','/api/screenshot','/api/connections','/api/window','/api/providers','/api/usage','/api/skills','/api/pairs','/api/court','/api/agents','/api/artifacts','/api/security','/api/permissions','/api/routines'):
                 self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
             if not self.headers.get("Content-Type", "").startswith("application/json"):
@@ -1379,6 +1379,26 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                 if self.path == '/api/project/remove':        # "Delete project": out of JARVIS; its folder only to the Recycle Bin, if asked
                     result = workspace.remove(state.cfg, str(body.get('project') or ''), trash=body.get('trash') is True)
                     self._json(HTTPStatus.OK, result);return
+                if self.path == '/api/connectors':            # /connectors: extra tools for the assistant, added without editing a file
+                    from jcc import connectors
+                    action = body.get('action')
+                    try:
+                        if action == 'add':
+                            got = {'added': connectors.add(state.cfg, str(body.get('text', '')), str(body.get('name', '')), str(body.get('token', '')))}
+                        elif action == 'remove':
+                            got = {'removed': connectors.remove(state.cfg, str(body.get('name', '')))}
+                        elif action == 'test':
+                            got = {'test': connectors.test(state.cfg, str(body.get('name', '')))}
+                        elif action == 'claude':
+                            got = {'claude': connectors.in_claude(state.cfg)}
+                        elif action == 'import':
+                            names = body.get('names') if isinstance(body.get('names'), list) else []
+                            got = {'added': connectors.bring_in(state.cfg, str(body.get('source', '')), [str(n) for n in names][:50])}
+                        else:
+                            got = {}
+                    except connectors.ConnectorError as problem:
+                        raise ValueError(str(problem)) from None
+                    self._json(HTTPStatus.OK, {**got, 'connectors': connectors.listing(state.cfg)});return
                 if self.path == '/api/sites':                 # /sites: the owner's websites, and the changes waiting for them
                     from jcc import sites
                     action = body.get('action')

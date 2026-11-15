@@ -33,6 +33,7 @@ BUILTIN = (("work", "What is running, waiting for you and finished, here in the 
            ("status", "The mode, the AI and what is left of each allowance"),
            ("advisor", "A stronger model Claude Code jobs consult at hard moments: Opus, Fable, Sonnet or none"),
            ("sites", "Your websites (WordPress, Shopify, Wix, Squarespace): connect one, and changes waiting to be published"),
+           ("connectors", "Extra tools for the assistant (a calendar, a database...): paste a link or command, or bring in Claude's"),
            ("usage", "Show what has been used"),
            ("compact", "Shorten this conversation to a summary and carry on from it"),
            ("chat", "Switch to Chat"),

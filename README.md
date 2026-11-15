@@ -47,7 +47,7 @@ Your notes are kept unless you choose to delete them.
   named after what it does, under the Master in the sidebar. Jobs run for Claude Code or Codex in their own copy of
   your project (a git worktree), four at a time; when the project's checks pass, the change goes in by itself, with
   Undo, and there is no time limit. In Manual mode a change waits for you to keep it.
-- **Sign in with your own account,** as in T3 Code: Settings, AI models & accounts signs in to Claude (Claude Code)
+- **Sign in with your own account:** Settings, AI models & accounts signs in to Claude (Claude Code)
   and ChatGPT (Codex) with your subscriptions. API keys for other services are still there.
 - **Everything else is a /command, answered in the chat.** Type `/` for two lists: Features (`/work`, `/mode`,
   `/status`, `/projects`, `/undo`, `/folder`, `/dryrun`, `/checklist`, `/context`, `/compare`, `/court`, `/pair`,
@@ -70,8 +70,7 @@ Your notes are kept unless you choose to delete them.
 - **Your notes are its memory.** It keeps what it learns in a folder of Markdown notes (an Obsidian vault): your
   second brain, readable and editable by you.
 
-Every feature is described in [the guide](docs/GUIDE.md). How JARVIS compares with T3 Code and Cursor, feature by
-feature, is in [docs/PARITY.md](docs/PARITY.md). From version 0.1.4 on, JARVIS updates itself: it installs only
+Every feature is described in [the guide](docs/GUIDE.md). From version 0.1.4 on, JARVIS updates itself: it installs only
 releases signed by its maker, and goes back to the version you had if a new one does not start (see
 [docs/INSTALL.md](docs/INSTALL.md#updates)).
 
