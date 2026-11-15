@@ -89,6 +89,9 @@ BUILT_IN = {  # things Windows can always open, whatever the Start menu calls th
     "wi-fi settings": ["explorer.exe", "ms-settings:network-wifi"], "display settings": ["explorer.exe", "ms-settings:display"],
     "sound settings": ["explorer.exe", "ms-settings:sound"],
 }
+# Opened this way only when the Start menu does not list them (Windows Server, a trimmed-down Windows): every
+# Windows has these programs, so "open notepad" never needs an AI.
+FALLBACK = {"notepad": ["notepad.exe"]}
 ALIASES = {"chrome": "google chrome", "edge": "microsoft edge", "vs code": "visual studio code", "vscode": "visual studio code",
            "code": "visual studio code", "calc": "calculator", "word": "word", "excel": "excel", "powerpoint": "powerpoint",
            "ppt": "powerpoint", "terminal": "terminal", "windows terminal": "terminal", "powershell": "windows powershell",
@@ -102,6 +105,7 @@ MAC_BUILT_IN = {
     ("cmd.exe", "/c", "start", "cmd.exe"): ["open", "-a", "Terminal"], ("explorer.exe", "shell:Downloads"): ["open", _HOME + "/Downloads"],
     ("explorer.exe", "shell:Personal"): ["open", _HOME + "/Documents"], ("explorer.exe", "shell:My Pictures"): ["open", _HOME + "/Pictures"],
     ("explorer.exe", "shell:Desktop"): ["open", _HOME + "/Desktop"], ("explorer.exe", "shell:RecycleBinFolder"): ["open", _HOME + "/.Trash"],
+    ("notepad.exe",): ["open", "-a", "TextEdit"],
 }
 LINUX_BUILT_IN = {("explorer.exe",): ["xdg-open", _HOME], ("explorer.exe", "shell:Downloads"): ["xdg-open", _HOME + "/Downloads"],
                   ("explorer.exe", "shell:Personal"): ["xdg-open", _HOME + "/Documents"], ("explorer.exe", "shell:My Pictures"): ["xdg-open", _HOME + "/Pictures"],
@@ -218,6 +222,7 @@ class Apps:
         self.path = cfg.state_dir / "apps.json"
         self.items: dict[str, str] = {}
         self.loaded = 0.0
+        self.waited = False
         self.lock = threading.Lock()
         try:
             saved = json.loads(self.path.read_text("utf-8")) if self.path.exists() else {}
@@ -267,6 +272,11 @@ class Apps:
         want = ALIASES.get(name, name).strip()
         if not want:
             return None
+        if not self.items and not self.waited:
+            # Asked before the list has ever been read (a new install, and someone quick: "open calculator" in the first
+            # seconds): read it now, once, instead of handing a simple command to an AI the person may not have yet.
+            self.waited = True
+            self.refresh()
         with self.lock:
             items = dict(self.items)
         if want in items:
@@ -614,7 +624,7 @@ class Quick:
         name = match.group(1).strip()
         if re.search(r"\b(and|then|after|with|in|on|to|for|from|into|which|that|file|folder|project|chat|panel|tab|window)\b|,", name) or len(name) > 40:
             return None
-        if name in BUILT_IN:
+        if name in BUILT_IN and built_in_here(BUILT_IN[name]):
             self.act("run", BUILT_IN[name])
             return Result("Opening " + name + ".", ["Opened " + name])
         if self._told_about(name):
@@ -627,6 +637,9 @@ class Quick:
         if found:
             self.act("app", found[1])
             return Result("Opening " + found[0].title() + ".", ["Opened " + found[0].title()])
+        if name in FALLBACK and built_in_here(FALLBACK[name]):
+            self.act("run", FALLBACK[name])
+            return Result("Opening " + name.title() + ".", ["Opened " + name.title()])
         if re.fullmatch(r"(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|in|io|ai|co|edu|gov|app|dev|tv|me|uk|us)(?:/\S*)?", name):
             self.act("url", "https://" + name)
             return Result("Opening " + name + ".", ["Opened " + name])
