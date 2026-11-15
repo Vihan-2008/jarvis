@@ -7,7 +7,7 @@ import time
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
-from jcc import budgets,config,documents,governor,history,library,operations,planning,privacy,project_policy,provenance,restorepoints,sessions,task_queue,retrieval,learning,release_health
+from jcc import evaluations, budgets,config,documents,governor,history,library,operations,planning,privacy,project_policy,provenance,restorepoints,sessions,task_queue,retrieval,learning,release_health
 from jcc.chats import Chats
 from jcc.jobrunner import run_job
 from jcc.jobs import JobLauncher
@@ -185,6 +185,20 @@ class AdditionalSafetyTests(EngineTestCase):
     def test_current_build_failure_holds_new_coding_jobs(self):
         cfg=config.load(overrides(make_repo(self.tmp)));cfg.state_dir.mkdir(parents=True,exist_ok=True);(cfg.state_dir/'evaluations.json').write_text(json.dumps({'status':'failed','cases':[]}));calls=[]
         result=JobLauncher(cfg,Vault(cfg.vault),spawner=lambda *args:calls.append(args)).launch('20261111-030008-abcd','job','Add a helper function','trading');self.assertEqual(result.status,'queued');self.assertEqual(calls,[])
+
+    def test_an_installed_copy_without_test_files_never_holds_coding_jobs(self):
+        # (The installers ship no tests: there every case "failed" at once with "No module named 'tests'", and all coding
+        # work was held. The checks are not run there, and their old record does not hold anything.)
+        cfg=config.load(overrides(make_repo(self.tmp)));cfg.state_dir.mkdir(parents=True,exist_ok=True)
+        (cfg.state_dir/'evaluations.json').write_text(json.dumps({'status':'failed','build':'other','cases':[{'name':'Task size routing','passed':False,'error':"ModuleNotFoundError: No module named 'tests'"}]}))
+        with patch('jcc.evaluations.available',return_value=False):
+            self.assertEqual(evaluations.status(cfg)['status'],'not available')
+            self.assertEqual(evaluations.run(cfg)['status'],'not available','nothing is started')
+            self.assertEqual(evaluations.after_update(cfg)['status'],'not available')
+            calls=[]
+            result=JobLauncher(cfg,Vault(cfg.vault),spawner=lambda *args:calls.append(args)).launch('20261111-030011-abcd','job','Add a helper function','trading')
+        self.assertNotIn('evaluations',str(result.message).lower())
+        self.assertNotIn('regression',str(result.message).lower())
 
     def test_deadlines_order_equal_priority_and_can_be_cleared(self):
         cfg=config.load();a='20261111-030009-abcd';b='20261111-030010-abcd'

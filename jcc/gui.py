@@ -1368,7 +1368,7 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                             result = review.undo(state.cfg, job)
                     else: raise ValueError('Unknown request.')
                     self._json(HTTPStatus.OK, result);return
-                if self.path == '/api/accounts':              # signing in with your own Claude or ChatGPT account, as T3 Code does (jcc/accounts.py)
+                if self.path == '/api/accounts':              # signing in with your own Claude or ChatGPT account (jcc/accounts.py)
                     from jcc import accounts
                     action, ident = body.get('action'), str(body.get('id') or '')
                     if action == 'status': result = {'accounts': accounts.status(state.cfg, fresh=body.get('fresh') is True)}

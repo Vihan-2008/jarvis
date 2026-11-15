@@ -1209,7 +1209,7 @@ body.nv-coding.nv-grouped #projects{display:none}
 .nv-local-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
 .nv-local pre{white-space:pre-wrap;overflow-wrap:anywhere}
 
-/* Accounts (Settings, AI models & accounts): signed in with your own subscription, as in T3 Code. */
+/* Accounts (Settings, AI models & accounts): signed in with your own subscription. */
 .nv-account .nv-account-state{color:var(--ink-3)}.nv-account .nv-account-state.ok{color:var(--ok)}
 .nv-account-do{display:flex;justify-content:flex-end;gap:8px}
 

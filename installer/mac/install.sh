@@ -38,6 +38,7 @@ WAKE="ask"
 LOGIN="ask"
 QUIET=0
 OPEN_AFTER=0
+GIVEN_DIR=0
 SOURCE=""
 PYTHON=""
 
@@ -46,7 +47,7 @@ fail() { printf 'JARVIS setup stopped: %s\n' "$*" >&2; exit 1; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --install-dir) INSTALL_DIR="${2:?--install-dir needs a folder}"; shift 2 ;;
+    --install-dir) INSTALL_DIR="${2:?--install-dir needs a folder}"; GIVEN_DIR=1; shift 2 ;;
     --vault) VAULT="${2:?--vault needs a folder}"; shift 2 ;;
     --bundle-dir) BUNDLE_DIR="${2:?--bundle-dir needs a folder}"; shift 2 ;;
     --no-app) MAKE_APP=0; shift ;;
@@ -104,6 +105,13 @@ find_python() {
   return 1
 }
 
+if [ "$GIVEN_DIR" = 0 ]; then
+  # Installing again updates the JARVIS that is there (the one that starts at login), wherever it is; never a second one.
+  # Only a folder this installer made counts (its list of files is there).
+  agent_plist="$HOME/Library/LaunchAgents/local.jarvis.background.plist"
+  earlier="$(/usr/libexec/PlistBuddy -c 'Print :WorkingDirectory' "$agent_plist" 2>/dev/null || true)"
+  if [ -n "$earlier" ] && [ -f "$earlier/jcc/__init__.py" ] && [ -f "$earlier/.jarvis-files" ]; then INSTALL_DIR="$earlier"; fi
+fi
 say "Installing JARVIS for this Mac user (no administrator password needed)."
 # JARVIS brings its own Python (both kinds of Mac): the one for this Mac's chip is used, unless --python says otherwise.
 bundled=""

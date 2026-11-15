@@ -43,8 +43,14 @@ def create(cfg: Config, name: str, kind: str = "any") -> dict:
     try:
         refresh(cfg)
         root = _expand(cfg.raw["paths"].get("projects_root", str(cfg.state_dir / "projects"))).resolve()
-        target = (root / key).resolve()
-        if target.parent != root or target.exists() or key in cfg.projects:
+        if key in cfg.projects:
+            raise ValueError("A project with that name already exists.")
+        # The name is free once no project has it: a project that was deleted (its folder left where it was) does not
+        # keep it. The new one gets a folder of its own beside the old one, so nothing of the old is reused or written over.
+        target, number = (root / key).resolve(), 2
+        while target.exists() and number < 1000:
+            target, number = (root / f"{key}-{number}").resolve(), number + 1
+        if target.parent != root or target.exists():
             raise ValueError("A project with that name already exists.")
         for protected in [cfg.vault, *cfg.all_protected()]:
             if target.is_relative_to(protected.resolve()):

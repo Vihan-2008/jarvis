@@ -398,7 +398,7 @@ if (window.ResizeObserver) new ResizeObserver(tabEdges).observe(tabStrip);
 function drawTabs() {
   const left = tabStrip.scrollLeft;
   tabStrip.replaceChildren();
-  // Only the tools are tabs (as in Claude and T3 Code): files, terminal and browser, and panels of the owner's own.
+  // Only the tools are tabs (as in Claude): files, terminal and browser, and panels of the owner's own.
   // Everything else is a /command that answers in the chat; a panel opened by one shows as a tab while it is open.
   for (const p of PANES.filter(p => TOOL_TABS.has(p.id) || p.id.startsWith('mod') || p.id === currentPane)) {
     const b = el('button', { class: 'nv-tab' + (p.adv ? ' nv-adv' : '') + (p.id === currentPane ? ' on' : ''), type: 'button', role: 'tab', data: { tip: p.tip } }, icon(p.icon) + esc(p.label));

@@ -1,4 +1,4 @@
-"""Accounts: connecting JARVIS to the AIs the way T3 Code does, by signing in with your own account (your Claude or
+"""Accounts: connecting JARVIS to the AIs by signing in with your own account (your Claude or
 ChatGPT subscription), through the tools that hold those sign-ins: Claude Code (`claude auth`) and Codex (`codex login`).
 API keys for other services stay where they were (Settings, AI models; jcc/providers.py).
 

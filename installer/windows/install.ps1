@@ -35,12 +35,50 @@ param(
 # -Friendly is how JARVIS-Setup.exe runs it: no questions (notes in Documents\JARVIS Vault, no Obsidian), JARVIS
 # listed in Settings > Apps so it can be removed from there, a running JARVIS restarted, and JARVIS opened at the end.
 if ($Friendly) {
-    $Quiet = $true; $NoObsidian = $true
+    $Quiet = $true; $NoObsidian = $true; $Autostart = $true          # (it starts in the background at sign-in, for "Hey JARVIS")
     try { Start-Transcript -Path (Join-Path $env:TEMP 'jarvis-install.log') -Force | Out-Null } catch { }
 }
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
+
+function Find-Installed {
+    # The JARVIS this installer made before, wherever it is: the one Settings > Apps lists, else the one answering on its
+    # port, else the one a JARVIS shortcut starts. Only a folder the installer made (its list of files is there) counts:
+    # a developer's own copy is never written over.
+    $made = { param($folder) $folder -and (Test-Path -LiteralPath (Join-Path $folder 'jcc\__init__.py')) -and (Test-Path -LiteralPath (Join-Path $folder '.jarvis-files')) }
+    $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\JARVIS'
+    if (Test-Path $key) {
+        $entry = Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
+        if ($entry -and ($entry.PSObject.Properties.Name -contains 'InstallLocation') -and (& $made ([string]$entry.InstallLocation))) { return [string]$entry.InstallLocation }
+    }
+    try {
+        foreach ($owner in @(Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction Stop | ForEach-Object { $_.OwningProcess })) {
+            $exe = [string](Get-CimInstance Win32_Process -Filter "ProcessId=$owner" -ErrorAction SilentlyContinue).ExecutablePath
+            $folder = $exe
+            for ($i = 0; $i -lt 5 -and $folder; $i++) {
+                $folder = Split-Path -Parent $folder
+                if (& $made $folder) { return $folder }
+            }
+        }
+    } catch { }
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        foreach ($place in @([Environment]::GetFolderPath('Programs'), [Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Startup'))) {
+            foreach ($link in @(Get-ChildItem -LiteralPath $place -Filter 'JARVIS*.lnk' -ErrorAction SilentlyContinue)) {
+                $folder = [string]$shell.CreateShortcut($link.FullName).WorkingDirectory
+                if (& $made $folder) { return $folder }
+            }
+        }
+    } catch { }
+    return ''
+}
+
+if ($Friendly -and -not $PSBoundParameters.ContainsKey('InstallDir')) {
+    # Running Setup again updates the JARVIS that is there; it never installs a second one.
+    $there = Find-Installed
+    if ($there) { $InstallDir = $there }
+}
 
 # Files and folders that are never copied into the install folder: the person's own settings, the build and test
 # material, and the owner's own deployment tool. Paths are relative to the source folder, with backslashes.
@@ -354,9 +392,15 @@ if ($wantObsidian) {
 }
 
 # ------------------------------------------------------------------------------------- Settings > Apps, and go
-if ($Friendly) {
-    # Listed in Settings > Apps (for this user only, no administrator rights), so it can be removed from there.
-    $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\JARVIS'
+$key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\JARVIS'
+$listed = $false
+if (Test-Path $key) {
+    $entry = Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
+    if ($entry -and ($entry.PSObject.Properties.Name -contains 'InstallLocation')) { $listed = ([string]$entry.InstallLocation -eq $InstallDir) }
+}
+if ($Friendly -or $listed) {
+    # Listed in Settings > Apps (for this user only, no administrator rights), so it can be removed from there. An update
+    # of a copy listed there (JARVIS's own update helper) brings its version up to date.
     $version = (Get-Content -LiteralPath (Join-Path $InstallDir 'VERSION') -ErrorAction SilentlyContinue | Select-Object -First 1)
     New-Item -Path $key -Force | Out-Null
     $values = @{ DisplayName = 'JARVIS'; DisplayVersion = [string]$version; Publisher = 'JARVIS (open source)'; InstallLocation = $InstallDir

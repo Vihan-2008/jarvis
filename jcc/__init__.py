@@ -1,6 +1,6 @@
 """JARVIS Command Center: Obsidian-based request router (free tiers only, cost always 0)."""
 
-__version__ = "0.1.6"
+__version__ = "0.1.7"
 
 
 def trust_store() -> str:

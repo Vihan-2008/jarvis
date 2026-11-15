@@ -1330,7 +1330,7 @@ async function openSettings(tab = 'assistant') {
       '<div class="nv-link-do">' + (s.connected ? '<button class="plain" data-off>Disconnect</button>' : '<button class="primary" data-connect>' + (s.local ? 'Check' : 'Connect') + '</button>') +
       (s.get && !s.connected ? '<a class="plain" href="' + esc(s.get) + '" target="_blank" rel="noopener">' + (s.local ? 'Get it' : 'Get a key') + '</a>' : '') + '</div></div>';
     const on = services.filter(s => s.connected), rest = services.filter(s => !s.connected);
-    pane.innerHTML = '<h3>Accounts</h3><p class="small">Sign in with your own subscription, as in T3 Code: no key needed. Each one signs in on its own page, in your browser.</p><div class="nv-accounts" data-accounts><p class="small nv-set-wait"><i class="nv-spin"></i>Asking each one whether it is signed in…</p></div>' +
+    pane.innerHTML = '<h3>Accounts</h3><p class="small">Sign in with your own subscription: no key needed. Each one signs in on its own page, in your browser.</p><div class="nv-accounts" data-accounts><p class="small nv-set-wait"><i class="nv-spin"></i>Asking each one whether it is signed in…</p></div>' +
       '<h3>Who answers</h3>' + row('JARVIS’s brain', pick('mo-model', brainChoices()), 'For talking, quick questions and controlling the PC. Building software has its own choice, next to the message box.') +
       check('mo-standin', 'When that AI reaches its usage limit, carry on with another one', 'The same request simply continues with the next connected AI, and JARVIS tells you. It switches back by itself when the limit is over.') +
       check('mo-resume', 'If nothing can answer, carry on by itself as soon as something can', 'The request waits, and is picked up where it stopped. You are told when it happens.') +

@@ -35,6 +35,20 @@ CASES={
  'Everyday interface delivery':'tests.test_everyday.EverydayApiTests.test_everyday_assets_are_served_and_apis_stay_authenticated'}
 
 
+NOT_HERE = ("This copy of JARVIS was installed without its test files, so these checks are not run here. They are run, with "
+            "every other test, on every change before a release is made.")
+
+
+def available(root=None) -> bool:
+    """Whether this copy has the test files the cases are taken from (a development copy has; an installed one has not)."""
+    return (Path(root or Path(__file__).resolve().parents[1]) / 'tests' / '__init__.py').is_file()
+
+
+def _not_here(result: dict) -> dict:
+    return {'status': 'not available', 'reason': NOT_HERE, 'cases': [], 'expected_cases': len(CASES),
+            'scope': 'Fixed orchestration regressions using fake agents and temporary repositories. They need the test files.'}
+
+
 def fingerprint():
     root=Path(__file__).resolve().parents[1];digest=hashlib.sha256();latest=0
     for folder in ('jcc','tests'):
@@ -47,6 +61,10 @@ def fingerprint():
 def status(cfg):
     path=cfg.state_dir/'evaluations.json'
     result=json.loads(path.read_text('utf-8')) if path.exists() else {'status':'not run','cases':[]}
+    if not available():
+        # (A copy without its test files, or a result written by one: every case "failed" only because its file was missing.
+        # Two copies of JARVIS on one computer share this record.)
+        return _not_here(result)
     catalog=CASES
     try:
         tree=ast.parse(Path(__file__).read_text('utf-8'))
@@ -61,6 +79,8 @@ def status(cfg):
 
 
 def run(cfg):
+    if not available():
+        return status(cfg)
     lock=InstanceLock(cfg.state_dir/'evaluations.lock')
     if not lock.acquire():return status(cfg)
     path=cfg.state_dir/'evaluations.json';root=Path(__file__).resolve().parents[1]
@@ -88,6 +108,8 @@ def run(cfg):
 
 
 def after_update(cfg):
+    if not available():
+        return status(cfg)
     build,latest=fingerprint();previous=status(cfg)
     if previous.get('build')==build and (previous['status'] not in ('checking','outdated') or previous['status']=='checking' and time.time()-previous.get('at',0)<300):return previous
     if time.time()-latest<15:return previous

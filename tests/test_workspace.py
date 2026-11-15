@@ -37,6 +37,20 @@ class WorkspaceTests(EngineTestCase):
         with self.assertRaises(ValueError):
             workspace.create(cfg, "../../")
 
+    def test_a_deleted_projects_name_can_be_used_again(self):
+        cfg = self.cfg()
+        first = workspace.create(cfg, "WII-Latest")
+        (cfg.projects[first["key"]].path / "notes.txt").write_text("the old one", "utf-8")
+        workspace.remove(cfg, first["key"])                            # (its folder is left where it was)
+        again = workspace.create(cfg, "WII-Latest")
+        self.assertEqual(again["key"], first["key"], "the same name")
+        fresh = cfg.projects[again["key"]].path
+        self.assertNotEqual(fresh, Path(first["path"]), "in a folder of its own")
+        self.assertFalse((fresh / "notes.txt").exists(), "nothing of the old project is reused")
+        self.assertTrue((Path(first["path"]) / "notes.txt").exists(), "and nothing of it is written over")
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            workspace.create(cfg, "wii latest")                         # (a project that is there still keeps its name)
+
     def test_chat_roundtrip_and_bounded_context(self):
         cfg = self.cfg()
         c = Chats(cfg).create("New chat")

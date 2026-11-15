@@ -83,12 +83,27 @@ jobs:
           "JARVIS opened itself at the end of Setup and answers ({0:N0} s after Setup started)" -f $clock.Elapsed.TotalSeconds
           python scripts/first_command_check.py --app-dir $app
           if ($LASTEXITCODE -ne 0) { throw 'The first command did not work in the JARVIS that Setup installed.' }
+          $startup = Join-Path ([Environment]::GetFolderPath('Startup')) 'JARVIS (background).lnk'
+          if (-not (Test-Path $startup)) { throw 'Setup did not make JARVIS start at sign-in.' }
+          'JARVIS starts at sign-in: ' + $startup
+          # Setup run a second time updates that JARVIS; it never installs another.
+          $proc = Start-Process -FilePath $setup -ArgumentList '/Q' -PassThru
+          $null = $proc.Handle
+          if (-not $proc.WaitForExit(600000)) { throw 'Setup, run again, did not finish within 10 minutes.' }
+          if ((Get-Content (Join-Path $env:TEMP 'jarvis-install.log') -Raw) -notmatch 'Upgraded the app') { throw 'Setup run again did not update the JARVIS that was there.' }
+          $copies = @(Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA 'Programs') -Directory -Filter 'JARVIS*')
+          if ($copies.Count -ne 1) { throw "There are $($copies.Count) JARVIS folders after running Setup again." }
+          $up = $false
+          for ($i = 0; $i -lt 120; $i++) { try { Invoke-WebRequest http://127.0.0.1:8765/ -UseBasicParsing -TimeoutSec 3 | Out-Null; $up = $true; break } catch { Start-Sleep 1 } }
+          if (-not $up) { throw 'JARVIS did not open again after Setup updated it.' }
+          'Setup run again updated the same JARVIS, and it answers.'
           # Removed the way a person removes it: the command Settings > Apps runs, told to keep their notes and data.
           $remove = $key.UninstallString + ' -Quiet'
           cmd /c $remove
           if (Test-Path (Join-Path $app 'jcc')) { throw 'JARVIS is still there after removing it from Settings > Apps.' }
           if (Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\JARVIS') { throw 'Settings > Apps still lists JARVIS.' }
-          'Removed: the app, its shortcuts and its Settings > Apps entry; the notes and data were kept.'
+          if (Test-Path $startup) { throw 'JARVIS still starts at sign-in after being removed.' }
+          'Removed: the app, its shortcuts, its start at sign-in and its Settings > Apps entry; the notes and data were kept.'
 
   mac-live:
     name: on a real Mac (other apps' windows, typing, the screen, the wake word, the Mac's own sound)
