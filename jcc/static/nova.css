@@ -313,6 +313,27 @@ body.large-text .nv-msg .content,body.large-text .nv-bubble{font-size:18px}
 .nv-steps li::before{content:"";position:absolute;left:3px;top:11px;width:7px;height:7px;border-radius:50%;background:var(--line-2)}
 .nv-steps li::after{content:"";position:absolute;left:6px;top:20px;bottom:-6px;width:1px;background:var(--line)}
 .nv-steps li:last-child::after{display:none}
+.nv-steps li.has-ic::before{display:none}
+.nv-steps li .nv-step-ic{position:absolute;left:0;top:6px;width:14px;height:14px;display:grid;place-items:center;color:var(--ink-3)}
+.nv-steps li .nv-step-ic svg{width:13px;height:13px}
+/* the agent's own task list, as Claude desktop pins it under the message */
+.nv-todo{margin:6px 0 10px;padding:10px 14px;border:1px solid var(--line);border-radius:var(--r-sm,12px);background:var(--surface-1,transparent)}
+.nv-work .nv-todo{margin:4px 14px 8px 20px}
+.nv-todo-head{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-2)}.nv-todo-head svg{width:14px;height:14px}
+.nv-todo-head span{margin-left:auto;color:var(--ink-3);font-size:12px}
+.nv-todo ul{list-style:none;margin:6px 0 0;padding:0}
+.nv-todo li{display:flex;align-items:center;gap:10px;padding:4px 0;font-size:13.5px;color:var(--ink)}
+.nv-todo li .nv-ck,.nv-todo li .nv-spin{flex:none;width:14px;height:14px}
+.nv-todo li.completed span{color:var(--ink-3);text-decoration:line-through;text-decoration-color:var(--line-2)}
+.nv-todo li.in_progress span{font-weight:600}
+/* each changed file with its own diff */
+.nv-changed summary b .add,.nv-diff-file .add{color:var(--ok);margin-left:6px;font-weight:600}
+.nv-changed summary b .del,.nv-diff-file .del{color:var(--bad);margin-left:4px;font-weight:600}
+.nv-diff-file{border:1px solid var(--line);border-radius:var(--r-xs);margin:6px 0;overflow:hidden}
+.nv-diff-file>summary{display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;font-size:13px;list-style:none;background:var(--surface-2)}
+.nv-diff-file>summary::-webkit-details-marker{display:none}.nv-diff-file>summary svg{width:14px;height:14px;color:var(--ink-3)}
+.nv-diff-file>summary span:first-of-type{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono,ui-monospace,monospace)}
+.nv-diff-file .nv-diff{margin:0;border-radius:0;max-height:420px;overflow:auto}
 .nv-steps li:last-child::before{background:var(--accent)}
 .nv-steps li b{color:var(--ink);font-weight:600}.nv-steps li small{display:block;color:var(--ink-3);font-size:12px;overflow-wrap:anywhere}
 .nv-steps li code{font-size:12px;color:var(--ink-2)}

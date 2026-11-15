@@ -633,21 +633,38 @@ function tally(events) {
   const parts = KINDS.filter(([kind]) => counts[kind]).map(([kind, , one, many]) => (counts[kind] === 1 ? one : many).replace('%n', counts[kind]));
   return parts.length ? parts.join(', ').replace(/^./, c => c.toUpperCase()) : '';
 }
+// What kind of step a line is, as Claude desktop marks them: reading, editing, running, searching, the web, thinking.
+const STEP_KINDS = [[/^(reading|read |looking at|opened|viewing)/i, 'eye'], [/^(editing|writing|changed|edited|created|wrote|updating|deleted)/i, 'edit'],
+  [/^(running|ran )/i, 'term'], [/^(searched the web|searching the web|reading the web)/i, 'globe'], [/^(searching|looking for|searched|found)/i, 'search'],
+  [/^(thinking)/i, 'spark']];
+const stepIcon = text => { const kind = STEP_KINDS.find(([test]) => test.test(text)); return kind ? '<i class="nv-step-ic">' + icon(kind[1]) + '</i>' : ''; };
+// The agent's own task list (jcc/live.py), as it stands: shown under a running job, and with its steps once it is done.
+const todoCache = new Map();
+function todoHtml(rid, live) {
+  const rows = todoCache.get(rid) || []; if (!rows.length) return '';
+  const done = rows.filter(t => t.status === 'completed').length;
+  return '<div class="nv-todo' + (live ? ' live' : '') + '" data-todo="' + esc(rid) + '"><div class="nv-todo-head">' + icon('check') + '<b>Tasks</b><span>' + done + ' of ' + rows.length + ' done</span></div><ul>' +
+    rows.map(t => '<li class="' + esc(t.status) + '">' + (t.status === 'completed' ? '<i class="nv-ck done"></i>' : t.status === 'in_progress' ? '<i class="nv-spin"></i>' : '<i class="nv-ck"></i>') +
+      '<span>' + esc(t.text) + '</span></li>').join('') + '</ul></div>';
+}
 function stepsHtml(rid, message) {
   const events = eventsCache.get(rid) || [];
   const stopped = byYou(message), end = stopped ? '<li class="stage stopped">Cancelled by you</li>' : '';
   if (!events.length) return stopped ? end : '<li>' + (message.status === 'queued' ? 'Waiting its turn' : LIVE.has(message.status) ? 'Getting started' : 'No step-by-step record for this reply') + (LIVE.has(message.status) && message.content ? '<small>' + esc(plainWait(message.content)) + '</small>' : '') + '</li>';
-  return (stopped ? events.filter(ev => !['paused', 'cancelled'].includes(ev.stage)) : events).map(ev => ev.stage === 'tool' ? '<li class="tool">' + esc(plainStep(ev.message)) + '</li>' : '<li class="stage">' + esc(STAGES[ev.stage] || ev.stage) + (ev.agent ? ' · ' + esc(ev.agent === 'codex' ? 'GPT' : ev.agent[0].toUpperCase() + ev.agent.slice(1)) + (ev.model ? ' ' + esc(ev.model) : '') : '') + '</li>').join('') + end;
+  return (stopped ? events.filter(ev => !['paused', 'cancelled'].includes(ev.stage)) : events).map(ev => ev.stage === 'tool' ? (t => { const ic = stepIcon(t); return '<li class="tool' + (ic ? ' has-ic' : '') + '">' + ic + esc(t) + '</li>'; })(plainStep(ev.message)) : '<li class="stage">' + esc(STAGES[ev.stage] || ev.stage) + (ev.agent ? ' · ' + esc(ev.agent === 'codex' ? 'GPT' : ev.agent[0].toUpperCase() + ev.agent.slice(1)) + (ev.model ? ' ' + esc(ev.model) : '') : '') + '</li>').join('') + end;
 }
 function workBlock(message) {
   const rid = message.receipt, live = LIVE.has(message.status), events = eventsCache.get(rid) || [];
-  const open = openWork.has(rid) ? openWork.get(rid) : store.get('nv-transcript', 'normal') === 'verbose';   // (one line until it is opened, as in Claude Code; Verbose: open)
+  // A running coding job shows its steps as they happen, as Claude desktop does; a quick reply and finished work are one
+  // line until opened (Verbose: always open). Whatever its owner chose for this one stays.
+  const open = openWork.has(rid) ? openWork.get(rid) : store.get('nv-transcript', 'normal') === 'verbose' || (live && !message.fast);
   const span = events.length > 1 ? events[events.length - 1].at - events[0].at : 0;
   const latest = events[events.length - 1];
   const did = tally(events);
   const label = live ? (latest ? (latest.stage === 'tool' ? plainStep(latest.message) : STAGES[latest.stage] || 'Working') : (message.fast ? 'Thinking' : WORDS[message.status])) : message.status === 'done' ? (did || (span ? 'Worked for ' + fmtTime(span) : message.fast ? 'Did ' + events.length + (events.length === 1 ? ' thing' : ' things') : 'Finished')) : wordFor(message) || 'Details';
   const mark = live ? '<i class="nv-spin"></i>' : '<i class="nv-done-dot ' + (message.status === 'done' ? '' : byYou(message) ? 'off' : message.status === 'failed' ? 'bad' : 'wait') + '"></i>';
-  return '<details class="nv-work ' + (live ? 'live' : '') + '" data-rid="' + esc(rid) + '" ' + (open ? 'open' : '') + '><summary>' + mark + '<b>' + esc(label) + '</b>' + (live ? '<span data-since="' + (message.at || Date.now() / 1000) + '"></span>' : '') + '</summary><ol class="nv-steps">' + stepsHtml(rid, message) + '</ol>' +
+  return '<details class="nv-work ' + (live ? 'live' : '') + '" data-rid="' + esc(rid) + '" ' + (open ? 'open' : '') + '><summary>' + mark + '<b>' + esc(label) + '</b>' + (live ? '<span data-since="' + (message.at || Date.now() / 1000) + '"></span>' : '') + '</summary>' +
+    (!live && !message.fast ? todoHtml(rid, false) : '') + '<ol class="nv-steps">' + stepsHtml(rid, message) + '</ol>' +
     (live ? '<div class="nv-work-foot"><button class="plain" type="button" data-nv-stop="' + esc(rid) + '" data-tip="Stop this reply. Anything already finished is kept.">' + icon('stop') + 'Stop</button></div>' : message.fast ? '' : ['paused', 'failed'].includes(message.status) ? '<div class="nv-work-foot"><button class="plain" data-job-action="resume" data-job-id="' + esc(rid) + '" data-tip="Carry on from where it stopped">Continue</button></div>' : '') + '</details>';
 }
 const act = (name, label, iconName, extra = '') => '<button class="nv-icon ' + (name === 'down' ? 'nv-flip' : '') + '" type="button" aria-label="' + label + '" data-tip="' + label + '" ' + extra + '>' + icon(iconName) + '</button>';
@@ -660,9 +677,10 @@ function messageHtml(m, i, c) {
   if (m.fast && m.steps?.length && !eventsCache.has(m.receipt)) eventsCache.set(m.receipt, m.steps.map((t, n) => ({ stage: 'tool', message: t, at: n })));
   const live = LIVE.has(m.status), job = m.fast ? (LIVE.has(m.status) || !!m.steps?.length) : (!!m.agent || (m.status && m.status !== 'done')), streamed = liveText.get(m.receipt);
   let html = (m.receipt && (job || live)) ? workBlock(m) : '';
+  if (m.receipt && !m.fast && live) html += todoHtml(m.receipt, true);
   if (m.content?.startsWith('**From the planner**')) return '<details class="nv-planner"><summary>' + icon('note') + '<b>The planner wrote the next steps</b></summary><div class="content">' + rich(m.content.replace(/^\*\*From the planner\*\*\s*/, '')) + '</div></details>';
   if (m.child) html += '<button class="nv-open-child" type="button" data-open-chat="' + esc(m.child) + '">' + icon('arrow') + 'Open its chat</button>';
-  if (m.receipt && !m.fast && (m.job || m.agent) && !live && /^(done|needs_approval)$/.test(m.status || '')) html += '<details class="nv-changed" data-job="' + esc(m.receipt) + '"><summary>' + icon('edit') + '<b>See what changed</b></summary><div class="nv-changed-body">Reading the changes…</div></details>';
+  if (m.receipt && !m.fast && (m.job || m.agent) && !live && /^(done|needs_approval)$/.test(m.status || '')) html += '<details class="nv-changed" data-job="' + esc(m.receipt) + '"><summary>' + icon('edit') + '<b>' + changedLabel(m.receipt) + '</b></summary><div class="nv-changed-body">Reading the changes…</div></details>';
   if (m.fast && m.status === 'paused' && m.resumes) html += '<div class="nv-waits">' + icon('clock') + '<span>Waiting for an AI to be available again. JARVIS carries on with this by itself at about ' +
     esc(new Date(m.resumes * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })) + '.</span><button class="plain" type="button" data-nv-wait="now" data-rid="' + esc(m.receipt) + '">Try now</button>' +
     '<button class="plain" type="button" data-nv-wait="cancel" data-rid="' + esc(m.receipt) + '">Do not</button></div>';
@@ -722,6 +740,7 @@ function draw(c) {
   if (busy && messages[messages.length - 1].role === 'user') wasLive.set('i' + messages.length, true);
   while (rendered.length > list.length) rendered.pop().node.remove();
   drawChecklist(c);
+  countChanges();
   requestAnimationFrame(stick);
   // A chat opens at its latest message, as in Claude, even when pictures and cards finish drawing a moment later.
   if (fresh) for (const ms of [60, 250, 700]) setTimeout(() => { if (pinned && lastChatId === (c?.id || '')) box.scrollTop = box.scrollHeight; }, ms);
@@ -814,6 +833,11 @@ async function refreshSteps(rid) {
   events.sort((a, b) => (a.at || 0) - (b.at || 0));
   const before = (eventsCache.get(rid) || []).length; eventsCache.set(rid, events);
   const block = box.querySelector('.nv-work[data-rid="' + rid + '"]'), message = chat?.messages.find(m => m.receipt === rid && m.role === 'assistant');
+  if (Array.isArray(live?.todo) && live.todo.length && JSON.stringify(live.todo) !== JSON.stringify(todoCache.get(rid) || [])) {
+    todoCache.set(rid, live.todo);                                  // (the agent's task list changed: drawn again where it is)
+    const shown = block?.parentElement?.querySelector(':scope > .nv-todo[data-todo="' + rid + '"]'), fresh = message && LIVE.has(message.status) ? todoHtml(rid, true) : '';
+    if (shown && fresh) shown.outerHTML = fresh; else if (block && fresh) block.insertAdjacentHTML('afterend', fresh);
+  }
   if (block && message && events.length !== before) {
     block.querySelector('.nv-steps').innerHTML = stepsHtml(rid, message);
     if (LIVE.has(message.status)) { const latest = events[events.length - 1]; block.querySelector('summary b').textContent = latest.stage === 'tool' ? plainStep(latest.message) : STAGES[latest.stage] || 'Working'; }
@@ -852,6 +876,21 @@ function fastPoll() {
   }, 700);
 }
 setInterval(() => { for (const node of box.querySelectorAll('[data-since]')) node.textContent = '· ' + fmtTime(Date.now() / 1000 - Number(node.dataset.since)); }, 1000);
+// "3 files changed +45 -2", as Claude desktop says it, without opening anything: read once for each finished job shown.
+const changeCounts = new Map();
+const changedLabel = rid => { const c = changeCounts.get(rid); return !c ? 'See what changed' : c.files ? c.files + (c.files === 1 ? ' file changed' : ' files changed') +
+  (c.plus ? ' <span class="add">+' + c.plus + '</span>' : '') + (c.minus ? ' <span class="del">\u2212' + c.minus + '</span>' : '') : 'No files changed'; };
+async function countChanges() {
+  for (const node of [...box.querySelectorAll('.nv-changed[data-job]')].slice(-6)) {
+    const rid = node.dataset.job; if (changeCounts.has(rid)) { node.querySelector('summary b').innerHTML = changedLabel(rid); continue; }
+    changeCounts.set(rid, null);
+    try {
+      const d = await api('/api/job/details?id=' + encodeURIComponent(rid)), seen = window.Nova.changeSummary ? window.Nova.changeSummary(d) : { files: (d.files || []).length, plus: 0, minus: 0 };
+      changeCounts.set(rid, { files: seen.files, plus: seen.plus, minus: seen.minus });
+      const now = box.querySelector('.nv-changed[data-job="' + rid + '"] summary b'); if (now) now.innerHTML = changedLabel(rid);
+    } catch { changeCounts.delete(rid); }
+  }
+}
 box.addEventListener('toggle', async e => {
   const changed = e.target.closest?.('.nv-changed[data-job]');
   if (changed && changed.open && !changed.dataset.read) {

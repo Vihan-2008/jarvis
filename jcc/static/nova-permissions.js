@@ -114,10 +114,22 @@ function changeSummary(d) {
     return esc(line);
   });
   const files = (d.files || []).length;
+  // Each file with its own diff and its own count, as Claude desktop lists them (one long diff when it cannot be split).
+  const parts = []; let part = null;
+  text.split('\n').forEach((line, i) => {
+    const named = line.startsWith('diff --git ') ? (line.match(/ b\/(.+)$/) || [])[1] : line.startsWith('New file: ') ? line.slice(10).trim() : null;
+    if (named) { part = { name: named, lines: [], plus: 0, minus: 0 }; parts.push(part); }
+    if (!part) return;
+    part.lines.push(lines[i]);
+    const isNew = part.lines[0].includes('class="hunk">New file: ');
+    if (!line.startsWith('+++') && !line.startsWith('---') && !named) { if (line.startsWith('+') || (isNew && line)) part.plus++; else if (line.startsWith('-')) part.minus++; }
+  });
+  const each = parts.length ? parts.map((f, n) => '<details class="nv-diff-file"' + (parts.length === 1 ? ' open' : '') + '><summary>' + icon('file') + '<span>' + esc(f.name) + '</span>' +
+      (f.plus ? '<span class="add">+' + f.plus + '</span>' : '') + (f.minus ? '<span class="del">\u2212' + f.minus + '</span>' : '') + '</summary><pre class="nv-diff">' + f.lines.join('\n') + '</pre></details>').join('')
+    : (files ? '<details class="nv-diff-box"><summary>' + esc((d.files || []).slice(0, 6).join(', ') + (files > 6 ? ' and ' + (files - 6) + ' more' : '')) + '</summary><pre class="nv-diff">' + lines.join('\n') + '</pre></details>' : '');
   return { revision: String(d.revision || ''), files, plus, minus,
     html: '<p class="nv-change-line">' + icon('edit') + '<b>' + (files ? files + (files === 1 ? ' file changed' : ' files changed') : 'Changes') + '</b>' +
-      (plus ? '<span class="add">+' + plus + '</span>' : '') + (minus ? '<span class="del">−' + minus + '</span>' : '') + '</p>' +
-      (files ? '<details class="nv-diff-box"><summary>' + esc((d.files || []).slice(0, 6).join(', ') + (files > 6 ? ' and ' + (files - 6) + ' more' : '')) + '</summary><pre class="nv-diff">' + lines.join('\n') + '</pre></details>' : '') };
+      (plus ? '<span class="add">+' + plus + '</span>' : '') + (minus ? '<span class="del">\u2212' + minus + '</span>' : '') + '</p>' + each };
 }
 async function fillChanges(card) {
   const id = card.dataset.id, spot = card.querySelector('[data-changes]'); if (!spot) return;

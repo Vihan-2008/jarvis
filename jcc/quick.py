@@ -144,9 +144,24 @@ class Result:
     private: bool = False
 
 
+# Speech as it is spoken: hesitations, a word said twice, and the name heard as something close to it.
+_FILLERS = re.compile(r"(?:^|(?<=[\s,.]))(?:u+m+|u+h+|e+r+m+|e+r+|hmm+|mm+)(?=[\s,.!?]|$)[,.]?", re.I)
+_SAID_TWICE = re.compile(r"^(\w+)(?:[ ,]+\1\b)+", re.I)          # (a stutter at the start only: elsewhere a word said twice may be meant)
+_NAME_HEARD = re.compile(r"^(?:(?:hey|ok|okay|hi|yo)[ ,]+)?(?:travis|jarvis'?s|jarvice|jervis|javis|jarvas|jarves|jarvus|charvis)(?=[ ,!.]+\w)", re.I)
+
+
+def as_spoken(text: str) -> str:
+    """What was meant, from what was said: "um, open open notepad" is "open notepad"; "Travis, open notepad" is "JARVIS,
+    open notepad". Only hesitations, stutters and the name are touched: every other word stays as it was heard."""
+    clean = _FILLERS.sub("", " ".join(str(text).split()))
+    clean = _SAID_TWICE.sub(lambda m: m.group(1) if not m.group(1).isdigit() else m.group(0), clean.strip(" ,"))
+    clean = _NAME_HEARD.sub(lambda m: re.sub(r"(?i)travis|jarvis'?s|jarvice|jervis|javis|jarvas|jarves|jarvus|charvis", "jarvis", m.group(0), count=1), clean)
+    return " ".join(clean.replace(" ,", ",").split()).strip(" ,")
+
+
 def normalise(text: str, keep_case: bool = False) -> str:
     """The request without greetings and politeness ("hey JARVIS, could you ... please")."""
-    clean = " ".join(str(text).replace("’", "'").split())
+    clean = " ".join(as_spoken(str(text).replace("’", "'")).split())
     clean = _SUFFIX.sub("", _PREFIX.sub("", clean if keep_case else clean.lower()))
     return clean.strip(" .!?,")
 

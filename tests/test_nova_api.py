@@ -44,7 +44,7 @@ class TestNovaApi(GuiTestCase):
 
     def test_live_progress_for_a_request(self):
         rid = "20260101-010101-abcd"
-        self.assertEqual(self.req("GET", "/api/live?id=" + rid)[1], {"id": rid, "steps": [], "text": "", "answering": False})
+        self.assertEqual(self.req("GET", "/api/live?id=" + rid)[1], {"id": rid, "steps": [], "text": "", "answering": False, "todo": []})
         feed = live.Feed("codex", self.jobs_root / rid / "live.jsonl")
         feed.emit("step", "Running: git status")
         feed.emit("say", "Half an answer")

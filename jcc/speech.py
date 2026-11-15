@@ -33,7 +33,8 @@ from jcc.vault import atomic_write
 TTS_MODELS = {"eleven_v4_turbo": "Most natural", "eleven_flash_v2_5": "Fastest", "eleven_v3_conversational": "Most expressive"}
 STT_MODELS = ("scribe_v3_live", "scribe_v2_realtime")
 WHISPER = {
-    "groq": {"base": "https://api.groq.com/openai/v1", "model": "whisper-large-v3-turbo", "label": "Whisper large v3 (Groq, free)"},
+    # "careful": the slower, more accurate model asked for a second opinion when the first is unsure of a short clip.
+    "groq": {"base": "https://api.groq.com/openai/v1", "model": "whisper-large-v3-turbo", "careful": "whisper-large-v3", "label": "Whisper large v3 (Groq, free)"},
     "openai": {"base": "https://api.openai.com/v1", "model": "gpt-transcribe", "label": "OpenAI transcription"},
 }
 LISTEN = ("auto", "whisper", "eleven", "browser")
@@ -365,6 +366,38 @@ def clean_transcript(data: dict, hint: str = "") -> str:
     return text
 
 
+def tidy(pcm: bytes, rate: int = MIC_RATE) -> bytes:
+    """The recording as Whisper hears it best: the silence before and after the words trimmed (a little kept on each
+    side), and a quiet recording brought up to a good level (never louder than clipping allows). Raw 16-bit mono."""
+    import array
+    samples = array.array("h", pcm[:len(pcm) // 2 * 2])
+    if not samples:
+        return pcm
+    frame = max(1, rate // 50)                                              # 20 ms
+    levels = [max(abs(s) for s in samples[i:i + frame]) for i in range(0, len(samples), frame)]
+    loudest = max(levels)
+    if loudest < 200:                                                       # (silence or a hum: left as it is)
+        return pcm
+    floor = max(300, loudest * 0.06)
+    voiced = [n for n, level in enumerate(levels) if level >= floor]
+    keep = 10                                                               # 200 ms either side
+    start, end = max(0, voiced[0] - keep) * frame, min(len(samples), (voiced[-1] + 1 + keep) * frame)
+    kept = samples[start:end]
+    gain = min(8.0, 26000 / loudest)                                        # up to about -2 dB, at most 8 times louder
+    if gain > 1.25:
+        kept = array.array("h", (max(-32768, min(32767, int(s * gain))) for s in kept))
+    return kept.tobytes()
+
+
+def _sureness(data: dict) -> float:
+    """How sure Whisper was of what it heard: its average log-probability over the words it kept (0 is certain)."""
+    segments = [s for s in data.get("segments") or [] if isinstance(s, dict)] if isinstance(data.get("segments"), list) else []
+    if not segments:
+        return 0.0
+    worst_repeat = max(float(s.get("compression_ratio") or 0) for s in segments)
+    return sum(float(s.get("avg_logprob") or 0) for s in segments) / len(segments) - (1.0 if worst_repeat > 2.4 else 0.0)
+
+
 def transcribe(cfg, audio: bytes, name: str = "speech.wav", language: str | None = None, prompt: str = "", names: bool = False) -> dict:
     """Text for a recording. `audio` is a WAV or any common sound or video file up to 25 MB.
 
@@ -379,7 +412,9 @@ def transcribe(cfg, audio: bytes, name: str = "speech.wav", language: str | None
     current = settings(cfg)
     spoken = language if language in LANGUAGES else current["language"]
     kind = AUDIO_TYPES.get(name.rsplit(".", 1)[-1].lower(), "audio/wav")
-    hint = hint_text("JARVIS" if names else "", prompt, current["words"])
+    # (talking to JARVIS: its name, and the names of the owner's projects, so "open the WII-latest project" is spelled right)
+    projects = ", ".join(p.name for p in list(getattr(cfg, "projects", {}).values())[:12]) if names else ""
+    hint = hint_text("JARVIS" if names else "", prompt, current["words"], projects)
     if which == "openai":
         fields = [("model", WHISPER[which]["model"]), ("prompt", hint)] + ([("languages[]", spoken)] if spoken != "auto" else [])
     else:
@@ -389,6 +424,17 @@ def transcribe(cfg, audio: bytes, name: str = "speech.wav", language: str | None
     started = time.time()
     data = _json(whisper_base(which), "POST", "/audio/transcriptions", {"Authorization": "Bearer " + secret, "Content-Type": content_type},
                  body, timeout=120 if len(audio) > 2_000_000 else 30, who="Groq" if which == "groq" else "OpenAI")
+    careful = WHISPER[which].get("careful")
+    if careful and len(audio) < 1_000_000 and _sureness(data) < -0.6 and clean_transcript(data, hint):
+        # Unsure of a short clip: the more accurate model hears it once more, and the surer of the two is kept.
+        try:
+            body2, type2 = _multipart([(k, careful if k == "model" else v) for k, v in fields], name, audio, kind)
+            again = _json(whisper_base(which), "POST", "/audio/transcriptions", {"Authorization": "Bearer " + secret, "Content-Type": type2},
+                          body2, timeout=30, who="Groq")
+            if _sureness(again) > _sureness(data):
+                data = again
+        except SpeechError:
+            pass                                                            # (the first hearing stands)
     found = data.get("language") or ((data.get("languages") or [{}])[0].get("code") if isinstance(data.get("languages"), list) and data.get("languages") else "")
     return {"text": redact(clean_transcript(data, hint)), "language": str(found or "")[:20], "seconds": round(time.time() - started, 2),
             "engine": which, "audio_seconds": data.get("duration")}
@@ -400,7 +446,7 @@ def hear(cfg, pcm: bytes, prompt: str = "", names: bool = True) -> dict:
         return {"text": "", "engine": "", "seconds": 0}
     if len(pcm) > MAX_SPEECH_BYTES:
         raise SpeechError("That was too long to take in at once (about two minutes is the limit).")
-    return transcribe(cfg, wav(pcm[:len(pcm) // 2 * 2]), "speech.wav", prompt=prompt, names=names)
+    return transcribe(cfg, wav(tidy(pcm[:len(pcm) // 2 * 2])), "speech.wav", prompt=prompt, names=names)
 
 
 def sample_speech(text: str, run=None, rate: int = MIC_RATE) -> bytes:
