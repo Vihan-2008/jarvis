@@ -264,12 +264,21 @@ class Pipe:
                 tab.inbox.put(None)
 
     def close(self) -> None:
+        """Closed without ever hanging. On Windows, closing the reading end while the reader thread is still waiting on it
+        can block until the browser writes again (seen on GitHub's Windows machine: closing the last tab never returned).
+        So the writing end goes first (the browser sees the end of its input and stops), and the closing is done on a
+        thread of its own that is waited for a few seconds at most."""
         self.alive = False
-        for handle in (self.read_fd, self.write_fd):
-            try:
-                os.close(handle)
-            except OSError:
-                pass
+
+        def shut():
+            for handle in (self.write_fd, self.read_fd):
+                try:
+                    os.close(handle)
+                except OSError:
+                    pass
+        closer = threading.Thread(target=shut, daemon=True, name="webview-pipe-close")
+        closer.start()
+        closer.join(3)
 
 
 class Tab:
@@ -550,8 +559,8 @@ class WebView:
             ws, proc, pipe, self.ws, self.proc, self.pipe = self.ws, self.proc, self.pipe, None, None, None
         if ws:
             ws.close()
-        if pipe:
-            pipe.close()
+        # The browser is stopped first: its end of the pipe closes with it, so the reader thread is no longer waiting when
+        # the pipe is closed (closing it under a waiting reader could hang on Windows).
         if proc and proc.poll() is None:
             if os.name == "nt":
                 subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True,
@@ -562,6 +571,8 @@ class WebView:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 proc.kill()
+        if pipe:
+            pipe.close()
         self.active, self.chooser, self._listing = "", None, (0.0, [])
         shutil.rmtree(self.cfg.state_dir / "web-uploads", ignore_errors=True)
         with self.changed:
