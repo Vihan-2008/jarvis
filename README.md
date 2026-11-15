@@ -55,6 +55,11 @@ Your notes are kept unless you choose to delete them.
   Claude Code: a stronger model (Opus, Fable or Sonnet) that coding jobs consult at hard moments. Each answers in the chat, the Court and the
   security check included; only Files, Terminal and Browser sit beside it. Projects can be opened in Explorer or Finder, and deleted
   (their folder goes to the Recycle Bin only if you tick the box).
+- **Your websites.** Connect WordPress, Shopify, Wix or Squarespace sites with `/sites` (each with a key you create
+  there, kept in your system's key store), then just say what to change. Every change is shown first on your own
+  computer (a preview at `127.0.0.1`, beside what is on the site now) and goes online only when you press Publish.
+  JARVIS reaches only the sites you connected. What each platform's API allows: WordPress posts and pages, Shopify
+  products and pages, new Wix blog posts, and Squarespace products.
 - **Security check.** Finds the usual holes in a project, has the ones you tick fixed in a copy, shows you the
   change, applies it, and can undo it.
 - **Routines.** Things done again and again at the times you choose, each run sent as if you had typed it.

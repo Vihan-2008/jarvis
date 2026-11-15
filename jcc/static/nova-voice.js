@@ -860,6 +860,7 @@ function handle(event) {
   } else if (k === 'confirm') askConfirm(event);
   else if (k === 'confirmed' && confirmOpen?.dataset.id === event.id) { confirmOpen.close(); confirmOpen = null; }
   else if (k === 'careful') carefulChats.add(event.chat);
+  else if (k === 'site' && !MINI) N.siteCard?.(event.change);   // a website change: its preview, with Publish and Discard (nova-sites.js)
   else if (k === 'wake') A.unlock();   // "Hey JARVIS" or the Talk shortcut, somewhere on the PC: pickUp() below goes and takes it
   else if (k === 'name') nameHeard(Number(event.at) || Date.now() / 1000);   // its name, heard during this conversation
   // "JARVIS, stop", "go to sleep" or "end session", heard by the helper that listens for the name (it hears them even while

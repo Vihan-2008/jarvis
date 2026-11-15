@@ -1239,3 +1239,9 @@ dialog.nv-offscreen::backdrop{background:transparent!important}
 .nv-set-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 0;border-top:1px solid var(--line)}
 .nv-set-row span{display:flex;flex-direction:column;gap:3px}.nv-set-row small{color:var(--ink-2);font-size:12.5px}
 button.nv-danger{color:var(--bad)}button.primary.nv-danger{background:var(--bad);border-color:var(--bad);color:#fff}
+
+/* Website changes (nova-sites.js): the preview on this computer, then Publish. */
+.nv-site-frame{width:100%;height:min(420px,55vh);border:1px solid var(--line);border-radius:var(--r);background:#fff;margin:8px 0}
+.nv-site-state{margin:6px 0;font-size:13.5px}.nv-site-state.ok{color:var(--ok)}.nv-site-state.wait{color:var(--warn)}.nv-site-state.bad{color:var(--bad)}
+.nv-site-card .actions,.nv-site-add .actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.nv-site-add{display:grid;gap:8px}.nv-site-add .hidden{display:none}

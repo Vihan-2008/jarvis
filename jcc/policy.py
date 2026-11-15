@@ -38,7 +38,8 @@ from jcc.redact import redact
 ALLOW, CONFIRM, DENY = "allow", "confirm", "deny"
 # Tools that do not touch the computer itself; they stay available when PC control is switched off.
 WITHOUT_PC = frozenset({"set_timer", "set_reminder", "list_reminders", "cancel_reminder", "weather", "where_to_watch", "remember", "forget", "add_note",
-                        "read_web_page", "make_image", "list_projects", "create_project", "build_with_coding_agents", "connector", "use_accounts"})
+                        "read_web_page", "make_image", "list_projects", "create_project", "build_with_coding_agents", "connector", "use_accounts",
+                        "list_sites", "site_read", "site_change", "site_publish"})
 
 def _on_mac() -> bool:
     from jcc import system
@@ -60,7 +61,8 @@ LEVELS = ("sending", "edits", "plan", "all", "bypass", "risky")
 # Tools that only look, or change nothing that matters: never asked about, even at the "all" level.
 QUIET_TOOLS = frozenset({"see_screen", "list_controls", "list_windows", "find_files", "read_file", "read_web_page", "weather", "list_reminders",
                          "list_projects", "wait", "find_videos", "read_clipboard", "scroll", "set_timer", "set_reminder", "cancel_reminder",
-                         "set_volume", "set_brightness", "media", "focus_window", "move_window", "where_to_watch"})
+                         "set_volume", "set_brightness", "media", "focus_window", "move_window", "where_to_watch", "list_sites", "site_read",
+                         "site_change"})       # (site_change only makes a preview on this computer: nothing reaches the site)
 # What may still be done in Plan mode besides those: looking things up, which changes nothing.
 PLAN_LOOKS = frozenset({"WebSearch", "WebFetch", "list_projects", "see_screen", "find_files", "read_file"})
 # Windows where Enter sends what was typed (chat apps and public posts). In a mail window only ctrl+enter sends.
@@ -292,6 +294,14 @@ def _decide(tool: str, args: dict, ctx: Context) -> Decision:
                 "set_brightness", "lock_pc", "find_files", "read_clipboard", "write_clipboard", "play_music", "play_show", "write_email"):
         return _allow()
 
+    if tool in ("list_sites", "site_read", "site_change"):
+        # The owner's connected websites (jcc/sites.py): reading them, and making a change into a preview on this computer.
+        return _allow()
+    if tool == "site_publish":
+        # Out in the world, in the owner's name: asked about like sending, after the owner has seen the preview.
+        return _ask("send", f"Shall I publish this change to {str(args.get('site') or 'your website')[:80]}?", str(args.get("summary") or args.get("change", ""))[:300],
+                    core=True)
+
     if tool == "connector":
         # A tool from a connector the owner added (Gmail, a calendar...). Trusted in a clean chat; asked about in careful mode.
         name = str(args.get("tool", "")).split("__")[-1].replace("_", " ")[:60] or "a connector"
@@ -475,6 +485,8 @@ def marks(tool: str, args: dict) -> tuple[bool, bool]:
         return True, True
     if short == "find_files":
         return False, True
+    if short == "site_read":
+        return True, False         # (a site holds other people's writing too: comments, reviews, product questions)
     if short == "run_command":
         return reads_content(str((args or {}).get("command", ""))), True
     if short == "list_projects":

@@ -46,10 +46,11 @@ STATIC = Path(__file__).with_name("static") / "desktop.html"
 MAX_TEXT = 400_000              # (what is typed has no practical limit: a long paste, a whole spec)
 SCRIPTS = ("/workbench.js", "/assistant.js", "/horizon.js", "/horizon.css", "/delivery.js", "/reliability.js", "/operations.js", "/operations.css",
            "/everyday.js", "/everyday.css", "/nova.css", "/nova.js", "/nova-core.js", "/nova-rich.js", "/nova-panels.js", "/nova-voice.js",
-           "/nova-audio.js", "/nova-mic.js", "/nova-work.js", "/nova-security.js", "/nova-permissions.js", "/nova-routines.js", "/nova-kinds.js", "/nova-gallery.js", "/nova-start.js", "/vendor/xterm.js", "/vendor/xterm.css", "/vendor/addon-fit.js")
+           "/nova-audio.js", "/nova-mic.js", "/nova-work.js", "/nova-security.js", "/nova-permissions.js", "/nova-routines.js", "/nova-kinds.js", "/nova-gallery.js", "/nova-start.js", "/nova-sites.js", "/vendor/xterm.js", "/vendor/xterm.css", "/vendor/addon-fit.js")
 # Tools the JARVIS app itself carries out for the assistant, each only with a one-time permit from the gate.
 APP_TOOLS = frozenset({"open_app", "list_projects", "create_project", "build_with_coding_agents", "make_image", "set_timer", "set_reminder",
-                       "list_reminders", "cancel_reminder", "remember", "forget", "add_note", "send_email", "use_accounts"})
+                       "list_reminders", "cancel_reminder", "remember", "forget", "add_note", "send_email", "use_accounts",
+                       "list_sites", "site_read", "site_change", "site_publish"})
 # A page JARVIS shows (something a reply made, a file of a project, a pinned panel) runs in a sealed frame at an address of
 # its own: it cannot reach JARVIS, the conversation or the files on this PC. Sealed, it cannot reach the internet either: no
 # pictures or data from anywhere, code and styles only from the well-known libraries, no form sent off, no window opened.
@@ -445,6 +446,23 @@ class GuiState:
                                           "cached": spent.get("cache_read_input_tokens"), "written": spent.get("cache_creation_input_tokens"), "output": spent.get("output_tokens"),
                                           "cost": got.get("cost"), "seconds": time.time() - began})
             return {"text": str(got.get("text") or "")}
+        if tool in ("list_sites", "site_read", "site_change", "site_publish"):
+            from jcc import sites
+            try:
+                if tool == "list_sites":
+                    return {"sites": sites.listing(cfg)}
+                if tool == "site_read":
+                    return sites.read(cfg, str(args.get("site", "")), str(args.get("kind", "")), str(args.get("item") or ""))
+                if tool == "site_change":
+                    made = sites.stage(cfg, str(args.get("site", "")), str(args.get("kind", "")), str(args.get("summary", "")), str(args.get("item") or ""),
+                                       args.get("title"), args.get("content"), args.get("price"), args.get("visible"))
+                    helper.emit("site", change=sites.public(made))        # the window shows the preview, with Publish and Discard
+                    return {"id": made["id"]}
+                done = sites.publish(cfg, str(args.get("change", "")))
+                helper.emit("site", change=done)
+                return {"site_name": done.get("site_name"), "url": (done.get("result") or {}).get("url", "")}
+            except sites.SiteError as problem:
+                return {"error": str(problem)}
         if tool == "open_app":
             name = " ".join(str(args.get("name", "")).lower().split())
             if name in quick.BUILT_IN:
@@ -844,6 +862,15 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
             if not self._guard():
                 return
             url = urlparse(self.path)
+            if url.path.startswith("/site-preview/"):
+                # A website change, shown on this computer before anything is published (jcc/sites.py). Its link carries its key.
+                from jcc import sites
+                page = sites.preview_html(state.cfg, url.path.rsplit("/", 1)[-1], (parse_qs(url.query).get("k") or [""])[0])
+                if page is None:
+                    self._json(HTTPStatus.NOT_FOUND, {"error": "No such preview."})
+                    return
+                self._send(HTTPStatus.OK, page.encode("utf-8"), "text/html; charset=utf-8", sites.PREVIEW_POLICY, frame="SAMEORIGIN")
+                return
             if url.path in ("/", "/index.html"):
                 if not self._same_user():
                     self._json(HTTPStatus.FORBIDDEN, {"error": "JARVIS belongs to another Windows account on this PC."})
@@ -1131,7 +1158,7 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                 system.open_path(Path(__file__).resolve().parents[1] / "browser-sync")
                 self._json(HTTPStatus.OK, {"opened": True})
                 return
-            if self.path not in ("/api/uninstall", "/api/accounts", "/api/project/remove", "/api/reveal", "/api/updates", "/api/ask", "/api/mods", "/api/chats", "/api/chat/send", "/api/chat/update", "/api/projects", "/api/terminal", "/api/browser/open", "/api/routing", "/api/prompt-master", "/api/cloud", "/api/efficiency", "/api/job/control", '/api/assistant/settings','/api/feedback','/api/project/browse','/api/project/inspect','/api/project/connect','/api/job/review','/api/maintenance','/api/ui/activity','/api/context/inspect','/api/memory/resolve','/api/delivery/settings','/api/delivery/plan','/api/task-queue','/api/project/preferences','/api/dry-run','/api/evaluations','/api/handoff','/api/library','/api/provenance','/api/controls','/api/restorepoints','/api/diagnostics/export','/api/attachments/extract','/api/memory/search','/api/files/save','/api/pty','/api/web','/api/computer','/api/voice','/api/speech','/api/speech/tts','/api/mail','/api/assistants','/api/preview','/api/screenshot','/api/connections','/api/window','/api/providers','/api/usage','/api/skills','/api/pairs','/api/court','/api/agents','/api/artifacts','/api/security','/api/permissions','/api/routines'):
+            if self.path not in ("/api/sites", "/api/uninstall", "/api/accounts", "/api/project/remove", "/api/reveal", "/api/updates", "/api/ask", "/api/mods", "/api/chats", "/api/chat/send", "/api/chat/update", "/api/projects", "/api/terminal", "/api/browser/open", "/api/routing", "/api/prompt-master", "/api/cloud", "/api/efficiency", "/api/job/control", '/api/assistant/settings','/api/feedback','/api/project/browse','/api/project/inspect','/api/project/connect','/api/job/review','/api/maintenance','/api/ui/activity','/api/context/inspect','/api/memory/resolve','/api/delivery/settings','/api/delivery/plan','/api/task-queue','/api/project/preferences','/api/dry-run','/api/evaluations','/api/handoff','/api/library','/api/provenance','/api/controls','/api/restorepoints','/api/diagnostics/export','/api/attachments/extract','/api/memory/search','/api/files/save','/api/pty','/api/web','/api/computer','/api/voice','/api/speech','/api/speech/tts','/api/mail','/api/assistants','/api/preview','/api/screenshot','/api/connections','/api/window','/api/providers','/api/usage','/api/skills','/api/pairs','/api/court','/api/agents','/api/artifacts','/api/security','/api/permissions','/api/routines'):
                 self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
             if not self.headers.get("Content-Type", "").startswith("application/json"):
@@ -1352,6 +1379,28 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                 if self.path == '/api/project/remove':        # "Delete project": out of JARVIS; its folder only to the Recycle Bin, if asked
                     result = workspace.remove(state.cfg, str(body.get('project') or ''), trash=body.get('trash') is True)
                     self._json(HTTPStatus.OK, result);return
+                if self.path == '/api/sites':                 # /sites: the owner's websites, and the changes waiting for them
+                    from jcc import sites
+                    action = body.get('action')
+                    try:
+                        if action == 'add':
+                            got = {'site': sites.add(state.cfg, str(body.get('platform', '')), str(body.get('address', '')), str(body.get('key', '')),
+                                                     str(body.get('user', '')), str(body.get('site_id', '')), str(body.get('name', '')))}
+                        elif action == 'remove':
+                            got = {'removed': sites.remove(state.cfg, str(body.get('id', '')))}
+                        elif action == 'publish':
+                            got = {'change': sites.publish(state.cfg, str(body.get('id', '')))}
+                        elif action == 'discard':
+                            got = {'change': sites.discard(state.cfg, str(body.get('id', '')))}
+                        elif action == 'change':
+                            got = {'change': sites.public(sites.change(state.cfg, str(body.get('id', ''))))}
+                        else:
+                            got = {}
+                    except sites.SiteError as problem:
+                        raise ValueError(str(problem)) from None
+                    self._json(HTTPStatus.OK, {**got, 'sites': sites.listing(state.cfg), 'pending': sites.pending(state.cfg),
+                                               'platforms': {k: {'label': v['label'], 'key': v['key'], 'how': v['how'], 'needs': list(v['needs']), 'kinds': list(v['kinds'])}
+                                                             for k, v in sites.PLATFORMS.items()}});return
                 if self.path == '/api/uninstall':             # Settings > Advanced > Uninstall JARVIS: what it would do, and doing it
                     from jcc import uninstall
                     if body.get('action') == 'start':
