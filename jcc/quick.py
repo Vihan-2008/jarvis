@@ -624,7 +624,7 @@ class Quick:
         name = match.group(1).strip()
         if re.search(r"\b(and|then|after|with|in|on|to|for|from|into|which|that|file|folder|project|chat|panel|tab|window)\b|,", name) or len(name) > 40:
             return None
-        if name in BUILT_IN and built_in_here(BUILT_IN[name]):
+        if name in BUILT_IN:
             self.act("run", BUILT_IN[name])
             return Result("Opening " + name + ".", ["Opened " + name])
         if self._told_about(name):
