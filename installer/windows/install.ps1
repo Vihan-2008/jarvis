@@ -34,7 +34,10 @@ param(
 )
 # -Friendly is how JARVIS-Setup.exe runs it: no questions (notes in Documents\JARVIS Vault, no Obsidian), JARVIS
 # listed in Settings > Apps so it can be removed from there, a running JARVIS restarted, and JARVIS opened at the end.
-if ($Friendly) { $Quiet = $true; $NoObsidian = $true }
+if ($Friendly) {
+    $Quiet = $true; $NoObsidian = $true
+    try { Start-Transcript -Path (Join-Path $env:TEMP 'jarvis-install.log') -Force | Out-Null } catch { }
+}
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2

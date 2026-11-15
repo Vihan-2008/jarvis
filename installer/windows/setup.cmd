@@ -19,7 +19,7 @@ if "%CODE%"=="0" (
   timeout /t 8 >nul
   exit /b 0
 )
-echo JARVIS Setup did not finish. The message above says why.
+echo JARVIS Setup did not finish. The message above says why; the full report is in %TEMP%\jarvis-install.log
 echo Fix that, then run JARVIS Setup again: it carries on where it stopped, and keeps your settings and chats.
 pause
 exit /b %CODE%

@@ -1,6 +1,7 @@
 """The small "listening" window: a panel with the orb in a corner while another program is in front."""
 import contextlib
 import json
+import threading
 import time
 import unittest
 
@@ -271,8 +272,13 @@ class TestTheSmallWindow(MiniCase):
         fake = self.fake
         popup.show()
         fake.pointer, fake.held = (1600, 980), [(1590, 970), (1500, 900), (1400, 800)]
+        # (The drag is held at its first step until the second try has been made: on a fast machine the stand-in
+        # mouse button was let go before the test could ask, and the window was rightly free again.)
+        gate, pause = threading.Event(), popup.pause
+        popup.pause = lambda seconds: (gate.wait(5), pause(seconds))
         self.assertTrue(popup.drag())
         self.assertFalse(popup.drag(), "it is already in hand")
+        gate.set()
         self.settle(popup)
         self.assertEqual(fake.seen(popup.handle), (1430, 832, 1802, 982), "it followed the pointer, and stays where it was let go")
         self.assertEqual(json.loads((self.cfg.state_dir / "listening-window.json").read_text("utf-8")), {"right": 118, "bottom": 98})

@@ -57,6 +57,8 @@ def build_zip(out: Path, repo: Path = REPO, with_python: bool = True) -> Path:
     return target
 
 
+# (The quiet commands are the same as AppLaunched, for Setup started with /Q. ".\\setup.cmd", not "setup.cmd": where
+# NoDefaultCurrentDirectoryInExePath is set, cmd does not look in the current folder for a bare name.)
 SED = """[Version]
 Class=IEXPRESS
 SEDVersion=3
@@ -85,10 +87,10 @@ DisplayLicense=
 FinishMessage=
 TargetName={target}
 FriendlyName=JARVIS {version} Setup
-AppLaunched=cmd /c setup.cmd
+AppLaunched=cmd /c .\\setup.cmd
 PostInstallCmd=<None>
-AdminQuietInstCmd=
-UserQuietInstCmd=
+AdminQuietInstCmd=cmd /c .\\setup.cmd
+UserQuietInstCmd=cmd /c .\\setup.cmd
 FILE0="setup.cmd"
 FILE1="payload.zip"
 [SourceFiles]

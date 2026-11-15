@@ -52,7 +52,19 @@ jobs:
           # (Not Start-Process -Wait: that waits for every process Setup starts, and Setup leaves JARVIS open.)
           $proc = Start-Process -FilePath $setup -ArgumentList '/Q' -PassThru
           $null = $proc.Handle
-          if (-not $proc.WaitForExit(900000)) { throw 'Setup did not finish within 15 minutes.' }
+          if (-not $proc.WaitForExit(600000)) {
+            Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+            $root = [Windows.Automation.AutomationElement]::RootElement
+            foreach ($w in $root.FindAll([Windows.Automation.TreeScope]::Children, [Windows.Automation.Condition]::TrueCondition)) {
+              $texts = $w.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } | Where-Object { $_ } | Select-Object -First 12
+              "window: [{0}] pid {1}: {2}" -f $w.Current.Name, $w.Current.ProcessId, ($texts -join ' | ')
+            }
+            Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'cmd|powershell|pwsh|python|JARVIS|wextract|msedge|timeout' } |
+              ForEach-Object { "process {0} (parent {1}) {2}: {3}" -f $_.ProcessId, $_.ParentProcessId, $_.Name, $_.CommandLine }
+            $report = Join-Path $env:TEMP 'jarvis-install.log'
+            if (Test-Path $report) { 'the install report:'; Get-Content $report -Tail 80 } else { '(no install report: install.ps1 never started)' }
+            throw 'Setup did not finish within 10 minutes.'
+          }
           "Setup finished after {0:N0} s (exit code {1})" -f $clock.Elapsed.TotalSeconds, $proc.ExitCode
           $app = Join-Path $env:LOCALAPPDATA 'Programs\JARVIS'
           if (-not (Test-Path (Join-Path $app 'jcc\__init__.py'))) { throw 'JARVIS is not in its usual folder after Setup.' }
