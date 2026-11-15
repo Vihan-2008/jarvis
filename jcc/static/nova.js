@@ -659,6 +659,10 @@ function messageHtml(m, i, c) {
   if (m.fast && m.status === 'paused' && m.resumes) html += '<div class="nv-waits">' + icon('clock') + '<span>Waiting for an AI to be available again. JARVIS carries on with this by itself at about ' +
     esc(new Date(m.resumes * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })) + '.</span><button class="plain" type="button" data-nv-wait="now" data-rid="' + esc(m.receipt) + '">Try now</button>' +
     '<button class="plain" type="button" data-nv-wait="cancel" data-rid="' + esc(m.receipt) + '">Do not</button></div>';
+  if (m.receipt && !m.fast && /^(paused|failed)$/.test(m.status || '') && lastStatus(m.receipt) === m) html += '<div class="nv-carryon">' + icon('clock') + '<span>' +
+    (m.status === 'paused' ? 'Stopped. Its work so far is kept. Press Continue, or just say what to do next: your next message here carries this job on.'
+      : 'This job stopped before it finished. Its work so far is kept: Continue carries it on from where it stopped.') +
+    '</span><button class="primary" type="button" data-nv-continue="' + esc(m.receipt) + '">Continue</button></div>';
   if (live) html += streamed ? '<div class="content nv-caret">' + rich(streamed) + '</div>' : '';
   else {
     html += '<div class="content">' + rich(m.content) + '</div>';
@@ -855,11 +859,20 @@ box.addEventListener('toggle', async e => {
   openWork.set(block.dataset.rid, block.open);
   if (block.open && !eventsCache.has(block.dataset.rid)) refreshSteps(block.dataset.rid).then(() => { const m = chat?.messages.find(x => x.receipt === block.dataset.rid && x.role === 'assistant'); if (m) block.querySelector('.nv-steps').innerHTML = stepsHtml(block.dataset.rid, m); });
 }, true);
+// The newest message about this job in the chat (only that one shows Continue).
+function lastStatus(rid) { return [...(chat?.messages || [])].reverse().find(x => x.receipt === rid && x.role === 'assistant' && x.status); }
+document.addEventListener('click', async e => {
+  const b = e.target.closest?.('[data-nv-continue]'); if (!b) return;
+  b.disabled = true; b.textContent = 'Carrying on…';
+  try { await api('/api/job/control', { id: b.dataset.nvContinue, action: 'continue' }); notify('Carrying on from where it stopped.'); await refresh(); }
+  catch (error) { toast(error.message); b.disabled = false; b.textContent = 'Continue'; }
+});
 async function stopReply(rid) {
   const target = rid || [...(chat?.messages || [])].reverse().find(m => LIVE.has(m.status) && m.receipt)?.receipt;
   if (!target) return;
   if (await window.Nova.assistantStop?.()) { notify('Stopped.'); return; }
-  const d = await api('/api/job/control', { id: target, action: 'cancel' }); notify(d.requested ? 'Stopping. Anything already done is kept.' : 'Stopped.'); await refresh();
+  const d = await api('/api/job/control', { id: target, action: 'pause' });
+  notify((d.requested ? 'Stopping. ' : 'Stopped. ') + 'Its work is kept: press Continue, or say what to do next.'); await refresh();
 }
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-nv-act],[data-nv-stop],[data-nv-rate],[data-nv-undo],[data-nv-cmd]'); if (!b) return;
@@ -1164,11 +1177,12 @@ async function runCommand(name, words) {
         .map(([id, label, about], i) => '<li><button class="' + (id === current ? 'primary' : 'plain') + '" type="button" data-set-mode="' + id + '">' + (i + 1) + '. ' + label + '</button><small>' + about + '</small></li>').join('') + '</ul><p class="small">Shift+Tab in the message box goes to the next mode.</p>');
     }
     if (name === 'status' || name === 'usage') {
-      let now = {}; try { now = await api('/api/mods', { action: 'status_now' }); } catch {}
+      let now = {}, healed = { fixed: [] }; try { [now, healed] = await Promise.all([api('/api/mods', { action: 'status_now' }), api('/api/selfheal').catch(() => ({ fixed: [] }))]); } catch {}
       const left = w => (w.minutes === 300 || /five hour|primary/i.test(w.name) ? '5 hours' : w.minutes === 10080 || /seven day$|secondary/i.test(w.name) ? 'week' : w.name) + ': ' + w.left + '% left';
       const lines = [['Mode', ({ sending: 'Auto', all: 'Manual', edits: 'Accept edits', plan: 'Plan', bypass: 'Bypass permissions' })[window.Nova.permissionMode?.()] || 'Auto'], ['Answers with', now.brain || 'Auto'],
         ['Claude', now.claude ? now.claude.slice(0, 2).map(left).join(' · ') : 'not measured yet'], ['Codex', now.codex ? now.codex.slice(0, 2).map(left).join(' · ') : 'not measured yet'],
-        ['Voice', now.voice ? Math.max(0, 100 - Math.round(now.voice.percent)) + '% left' : 'not measured yet'], ['Waiting for you', String((window.Nova.waiting?.() || []).length)]];
+        ['Voice', now.voice ? Math.max(0, 100 - Math.round(now.voice.percent)) + '% left' : 'not measured yet'], ['Waiting for you', String((window.Nova.waiting?.() || []).length)],
+        ['Fixed by itself', (healed.fixed || []).length ? (healed.fixed || []).slice(0, 3).map(f => f.what + ': ' + f.done).join(' · ') : 'nothing needed fixing lately']];
       return void localReply(name === 'usage' ? 'Usage' : 'Status', '<dl class="nv-facts">' + lines.map(([k, v]) => '<dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd>').join('') + '</dl>' +
         '<button class="plain" type="button" data-nv-cmd="settings" data-arg="usage">All the numbers</button>');
     }

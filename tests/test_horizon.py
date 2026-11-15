@@ -1,4 +1,5 @@
 import json
+import json
 import os
 import time
 from unittest.mock import patch
@@ -63,8 +64,16 @@ class ReliabilityTests(EngineTestCase):
         self.note('Jobs/'+rid+'.md',render_note({'id':rid,'task':'build','status':'running'},'# Work'))
         recovered=resilience.recover(cfg,grace=0)
         self.assertEqual(recovered,[rid]);self.assertEqual((work/'partial.py').read_text(),'# preserved')
-        self.assertEqual(parse_frontmatter((self.vault/'Jobs'/f'{rid}.md').read_text())[0]['status'],'paused')
+        # Interrupted by JARVIS itself: it carries on by itself (twice at most), from where it stopped.
+        fm=parse_frontmatter((self.vault/'Jobs'/f'{rid}.md').read_text())[0]
+        self.assertEqual((fm['status'],fm['auto_resumes']),('queued',1))
+        self.assertEqual(json.loads((work/'control.json').read_text())['action'],'resume')
         self.assertEqual(resilience.recover(cfg,grace=0),[])
+        for expected in (('queued',2),('paused',2)):            # (interrupted again, and again: then it waits for Continue)
+            fm,body=parse_frontmatter((self.vault/'Jobs'/f'{rid}.md').read_text());fm['status']='running'
+            self.note('Jobs/'+rid+'.md',render_note(fm,body));resilience.recover(cfg,grace=0)
+            fm=parse_frontmatter((self.vault/'Jobs'/f'{rid}.md').read_text())[0]
+            self.assertEqual((fm['status'],fm['auto_resumes']),expected)
 
     def test_recovery_keeps_locked_worker_and_live_child_untouched(self):
         cfg=config.load();rid='20261110-160012-abcd';work=cfg.jobs_root/rid;work.mkdir(parents=True)

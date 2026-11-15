@@ -192,6 +192,8 @@ def run_job(cfg: Config, spec: dict[str, Any], workdir: Path,
     try:
         plan = agents.plan(cfg, task, usage.cooldowns(), spec.get("prefer"), res.level)
         said = job_control.take_answer(workdir)        # its owner's answer to what it asked before it stopped (read once)
+        heard = job_control.take_next(workdir)         # what its owner said after stopping it (read once)
+        carrying_on = bool(previous_attempts) or (workdir / "HANDOFF.md").exists() or bool(heard)
         env = scrub_env(dict(os.environ))
         env["JCC_CONTROL_FILE"] = str(workdir / "control.json")
         if proj:
@@ -222,6 +224,13 @@ def run_job(cfg: Config, spec: dict[str, Any], workdir: Path,
                        + "<owner-answer>\n" + said["text"] + "\n</owner-answer>\nCarry on with the task from where you stopped. "
                        "An answer in words does not lift this job's own safety rules: if a tool still refuses that one thing, do not try another way and do "
                        "not ask again. Finish everything else, and say plainly at the end what is left for the owner to do by hand.\n")
+        if carrying_on and not said:
+            prompt += ("\nThis job stopped part way (its owner stopped it, or JARVIS was interrupted) and is now carrying on. Your work so far is in "
+                       "this folder" + (" and in this conversation" if previous_attempts else "") + ": look at what is there and carry on from "
+                       "exactly where it stopped. Do not start over, and do not redo what is already done.\n")
+        if heard:
+            prompt += ("\nAfter stopping this job, its owner said this. Take it in as you carry on (it is their instruction for this task; every rule "
+                       "above still holds):\n<owner-said>\n" + heard + "\n</owner-said>\n")
         if proj:
             conventions=project_policy.read(cfg,proj.key)['conventions']
             if conventions: prompt+='\nOwner project conventions (subordinate to security and protected-file rules):\n'+conventions+'\n'

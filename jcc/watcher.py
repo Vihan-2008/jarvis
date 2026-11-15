@@ -12,6 +12,7 @@ from jcc.lock import watcher_lock
 from jcc.redact import redact
 
 RETRY_EVERY_S = 30
+RETRY_SOON = threading.Event()         # set when a job is carried on: the next round (within seconds) starts it
 
 
 def run(stop: threading.Event, interval: float = 5.0,
@@ -31,7 +32,8 @@ def run(stop: threading.Event, interval: float = 5.0,
             try:
                 for r in e.process_inbox():
                     log(f"{r.id} tier {r.tier} {r.status}: {redact(r.request)[:70]}")
-                if time.time() - last_retry > RETRY_EVERY_S:
+                if RETRY_SOON.is_set() or time.time() - last_retry > RETRY_EVERY_S:
+                    RETRY_SOON.clear()
                     from jcc.history import watch_imports
                     watch_imports(cfg)
                     recover(e)

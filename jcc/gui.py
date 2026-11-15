@@ -187,6 +187,13 @@ class GuiState:
             from jcc.image_inputs import validate as validate_images
             validate_images(self.cfg,image_ids)
             message_text = text + ("\n\nAttached: " + ", ".join(labels) if labels else "")
+            stopped = None if as_job or text.lstrip().startswith("/") else job_control.stopped_job(self.cfg, chat)
+            if stopped:
+                # A job in this chat was stopped (or interrupted): this message carries it on, from where it stopped.
+                chats.update(cid, archived=False, message={"role": "user", "content": message_text, "receipt": stopped})
+                job_control.carry_on(self.cfg, stopped, text)
+                watcher.RETRY_SOON.set()
+                return chats.get(cid)
             work_chat = cid
             if as_job:
                 # The chat where it was asked is the Master chat; this piece of work gets a chat of its own, named after
@@ -918,6 +925,9 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                 args=parse_qs(url.query)
                 try:self._json(HTTPStatus.OK,state.assistant.poll(int((args.get('since') or ['0'])[0]),float((args.get('wait') or ['0'])[0]),(args.get('w') or [''])[0][:40],(args.get('kind') or [''])[0][:8]))
                 except ValueError as e:self._json(HTTPStatus.BAD_REQUEST,{'error':str(e)[:200]})
+            elif url.path == '/api/selfheal':           # what JARVIS fixed by itself lately (/status)
+                from jcc import selfheal
+                self._json(HTTPStatus.OK, selfheal.recent(state.cfg))
             elif url.path in ('/api/speech', '/api/speech/voices', '/api/mail', '/api/assistants', '/api/connections'):
                 try:
                     from jcc import assistant as helper, mailer, speech
@@ -1258,6 +1268,14 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                 if self.path == '/api/voice':
                     from jcc import assistant
                     action=body.get('action')
+                    stopped_chat = Chats(state.cfg).get(str(body.get('chat'))) if action == 'say' and body.get('chat') else None
+                    stopped = job_control.stopped_job(state.cfg, stopped_chat) if stopped_chat and not str(body.get('text', '')).lstrip().startswith('/') else None
+                    if stopped:
+                        # A job in this chat was stopped (or interrupted): what is said carries it on, from where it stopped.
+                        Chats(state.cfg).update(stopped_chat['id'], message={'role': 'user', 'content': str(body.get('text', ''))[:20000], 'receipt': stopped})
+                        job_control.carry_on(state.cfg, stopped, str(body.get('text', '')))
+                        watcher.RETRY_SOON.set()
+                        self._json(HTTPStatus.OK, {'chat': stopped_chat['id'], 'instant': True, 'model': 'instant', 'say': 'Carrying on with that.'});return
                     if action=='say':
                         extra=state.bench.attachment_context(body.get('files') or [],bool(body.get('use_browser')),[u for u in (body.get('uploads') or []) if isinstance(u,dict) and not u.get('image_id')])
                         result=state.assistant.say(text,str(body.get('chat') or '') or None,body.get('spoken') is True,body.get('model'),extra,str(body.get('project') or '') or None,body.get('research') is True,body.get('heard') is True,how=str(body.get('research_model') or '')[:60],
@@ -1705,7 +1723,13 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                         self._json(HTTPStatus.OK, job_control.answer(state.cfg, str(body.get("id", "")), yes, str(body.get("text", "")),
                                                                      mark=body["mark"] if yes else None))
                         return
-                    self._json(HTTPStatus.OK, job_control.apply(state.cfg, str(body.get("id", "")), body.get("action")))
+                    if body.get("action") == "continue":     # Continue in the chat: carried on from where it stopped, within seconds
+                        done = job_control.carry_on(state.cfg, str(body.get("id", "")), str(body.get("text", "")))
+                    else:
+                        done = job_control.apply(state.cfg, str(body.get("id", "")), body.get("action"))
+                    if done.get("status") == "queued":
+                        watcher.RETRY_SOON.set()
+                    self._json(HTTPStatus.OK, done)
                     return
                 if self.path == "/api/routing":
                     self._json(HTTPStatus.OK, {"choices": routing.save(state.cfg, body.get("choices"))})
@@ -1896,6 +1920,19 @@ def serve(port: int = 8765, open_browser: bool = True, watch: bool = True,
 
         watcher_thread = threading.Thread(target=_run, name="inbox-watcher", daemon=True)
         watcher_thread.start()
+
+    def self_heal_loop() -> None:
+        # Problems JARVIS finds in itself are fixed by itself, where that is safe (jcc/selfheal.py), every minute; and
+        # the inbox watcher (which starts waiting jobs) is started again if it stopped by itself.
+        nonlocal watcher_thread
+        from jcc import selfheal
+        while not state.stop.wait(60):
+            _quietly(selfheal.run, state.cfg)
+            if watch and watcher_thread is not None and not watcher_thread.is_alive() and state.watcher == "running":
+                watcher_thread = threading.Thread(target=_run, name="inbox-watcher", daemon=True)
+                watcher_thread.start()
+                state.add_log("The inbox watcher had stopped; it was started again.")
+    threading.Thread(target=self_heal_loop, name="self-heal", daemon=True).start()
     url = f"http://127.0.0.1:{port}/"
     print(f"JARVIS control screen: {url}   (Ctrl+C to stop)", flush=True)
     if open_browser:

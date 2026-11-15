@@ -265,3 +265,69 @@ class TestAPairWhoseBuilderAsks(EngineTestCase):
 if __name__ == "__main__":
     import unittest
     unittest.main()
+
+
+class StoppedJobsCarryOn(AskingJob):
+    """A job its owner stopped (or that was interrupted) carries on from where it stopped: Continue, or the owner's next
+    message in its chat, which the job takes in."""
+
+    def stop(self):
+        res = self.run_it("approval")                                   # (it did some work, then stopped)
+        note = Vault(self.cfg.vault).read(f"Jobs/{self.rid}.md")
+        fm, body = parse_frontmatter(note)
+        fm.update(status="paused", chat_id="20261115-120000-abcd", asked=False)
+        Vault(self.cfg.vault).write(f"Jobs/{self.rid}.md", render_note(fm, body))
+        return res
+
+    def test_the_next_message_carries_the_same_job_on_with_what_was_said(self):
+        self.stop()
+        chat = {"messages": [{"role": "user", "content": "build it"},
+                             {"role": "assistant", "receipt": self.rid, "status": "running"},
+                             {"role": "assistant", "receipt": self.rid, "status": "paused"}]}
+        self.assertEqual(job_control.stopped_job(self.cfg, chat), self.rid)
+        got = job_control.carry_on(self.cfg, self.rid, "Use blue for the buttons instead.")
+        self.assertEqual((got["status"], self.note()["status"]), ("queued", "queued"))
+        self.assertEqual(job_control.signal(self.work), "resume")
+        self.assertIsNone(job_control.stopped_job(self.cfg, chat), "it is carrying on: the next message is not taken for it again")
+        with self.assertRaisesRegex(ValueError, "already carrying on"):
+            job_control.carry_on(self.cfg, self.rid, "again")
+        self.assertIn("# partial work", (self.work / "repo" / "src" / "pkg" / "__init__.py").read_text(), "its work so far is still there")
+        self.run_it("edit")
+        told = (self.work / "TASK.md").read_text("utf-8")
+        self.assertIn("<owner-said>\nUse blue for the buttons instead.\n</owner-said>", told)
+        self.assertIn("carry on from exactly where it stopped", told)
+        self.assertIn("Do not start over", told)
+        self.run_it("edit")
+        self.assertNotIn("<owner-said>", (self.work / "TASK.md").read_text("utf-8"), "what was said is taken in once")
+
+    def test_continue_without_words_carries_it_on_too(self):
+        self.stop()
+        self.assertEqual(job_control.carry_on(self.cfg, self.rid)["status"], "queued")
+        self.run_it("edit")
+        told = (self.work / "TASK.md").read_text("utf-8")
+        self.assertIn("carry on from exactly where it stopped", told)
+        self.assertNotIn("<owner-said>", told)
+
+    def test_a_job_that_is_running_or_done_is_not_carried_on(self):
+        self.run_it("edit")                                             # (finished)
+        with self.assertRaisesRegex(ValueError, "not stopped"):
+            job_control.carry_on(self.cfg, self.rid, "x")
+        self.assertIsNone(job_control.stopped_job(self.cfg, {"messages": [{"role": "assistant", "receipt": self.rid, "status": "done"}]}))
+
+
+class StoppedJobOverTheWire(GuiTestCase):
+    def test_the_next_message_in_the_chat_carries_the_stopped_job_on(self):
+        from jcc import watcher
+        from jcc.chats import Chats
+        rid = "20261115-120001-abcd"
+        chat = Chats(self.state.cfg).create("Build it", None)
+        Chats(self.state.cfg).update(chat["id"], message={"role": "assistant", "receipt": rid, "status": "paused", "content": "Stopped."})
+        Vault(self.state.cfg.vault).write(f"Jobs/{rid}.md", render_note({"id": rid, "status": "paused", "kind": "job", "chat_id": chat["id"], "task": "build it"}, "# Job"))
+        watcher.RETRY_SOON.clear()
+        status, got = self.req("POST", "/api/voice", {"action": "say", "text": "make the title bigger", "chat": chat["id"]})
+        self.assertEqual((status, got["chat"]), (200, chat["id"]))
+        self.assertEqual(parse_frontmatter(Vault(self.state.cfg.vault).read(f"Jobs/{rid}.md"))[0]["status"], "queued")
+        self.assertEqual(json.loads((self.state.cfg.jobs_root / rid / "owner-next.json").read_text("utf-8"))["text"], "make the title bigger")
+        self.assertTrue(watcher.RETRY_SOON.is_set(), "it starts within seconds, not at the next half-minute round")
+        said = [m for m in Chats(self.state.cfg).get(chat["id"])["messages"] if m.get("role") == "user"]
+        self.assertEqual(said[-1]["content"], "make the title bigger")

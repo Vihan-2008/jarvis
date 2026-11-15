@@ -97,7 +97,10 @@ def recover(cfg,grace=90):
                 message=f'Merge jcc/{rid} (JARVIS job, all checks passed)'
                 found=projects.git(['log',proj.base_branch,'--merges','-1','--fixed-strings','--grep='+message,'--format=%H%x00%s','--'],proj.path,check=False).strip().split('\0',1)
                 if len(found)==2 and found[1]==message:merged=found[0]
-            final_status='done' if merged else 'paused'
+            # Interrupted by JARVIS itself (a restart, a crash, the PC switched off): it carries on by itself, from where it
+            # stopped, at most twice; after that it waits for its owner's Continue.
+            again=not merged and int(fm.get('auto_resumes') or 0)<2
+            final_status='done' if merged else ('queued' if again else 'paused')
             if not merged and (work/'worker.json').exists() and (work/'worker-heartbeat.json').exists():
                 worker=json.loads((work/'worker.json').read_text('utf-8'));beat=json.loads((work/'worker-heartbeat.json').read_text('utf-8'))
                 elapsed=max(0,beat.get('at',0)-worker.get('started_at',time.time()))
@@ -110,6 +113,9 @@ def recover(cfg,grace=90):
                         'seconds':round(elapsed,2),'interrupted':True,'recovered':True,'input_tokens':None,'cached_tokens':None,'output_tokens':None})
                     atomic_write(attempts_path,json.dumps(attempts))
             fm.update({'status':final_status,'recovered_at':time.time(),'recovery_reason':'Checked merge recovered; task not replayed.' if merged else 'Worker interrupted; edits preserved.'})
+            if again:
+                fm['auto_resumes']=int(fm.get('auto_resumes') or 0)+1
+                work.mkdir(parents=True,exist_ok=True);atomic_write(work/'control.json',json.dumps({'action':'resume','at':time.time()}))
             if merged:fm.update({'merged':merged,'checks_passed':True})
             vault.write(f'Jobs/{rid}.md',render_note(fm,body+('\n\nChecked merge recovered after a worker interruption. The completed task was not replayed.' if merged else '\n\nWorker interruption detected. Existing files and checkpoints are preserved. Resume explicitly from Activity.')))
             if not merged and not (work/'HANDOFF.md').exists():
@@ -117,7 +123,9 @@ def recover(cfg,grace=90):
             receipts.update_status(vault,rid,final_status)
             if fm.get('chat_id'):
                 from jcc.chats import Chats
-                Chats(cfg).update(fm['chat_id'],message={'role':'assistant','receipt':rid,'status':final_status,'content':'JARVIS found this task was already merged with passing checks; it was not replayed.' if merged else 'JARVIS recovered interrupted work. Edits are preserved. Resume from Activity when ready.'})
+                Chats(cfg).update(fm['chat_id'],message={'role':'assistant','receipt':rid,'status':final_status,'content':'JARVIS found this task was already merged with passing checks; it was not replayed.' if merged else
+                    'JARVIS was interrupted, so this job carries on by itself from where it stopped. Its work so far is kept.' if again else
+                    'This job was interrupted again. Its work so far is kept: press Continue, or tell JARVIS what to do next, and it carries on from where it stopped.'})
             activity.emit(cfg,rid,'recovered','Checked merge recovered; the task was not replayed.' if merged else 'The worker stopped unexpectedly. Files and checkpoints were preserved; resume from Activity.')
             activity.alert(cfg,rid,final_status);recovered.append(rid)
         finally:lock.release()

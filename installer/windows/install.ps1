@@ -424,4 +424,5 @@ if ($Friendly) {
     Say '  Start it from the JARVIS shortcut, or run:'
     Say "    `"$pythonw`" -m jcc.desktop   (in $InstallDir)"
 }
+if ($Friendly) { try { Stop-Transcript | Out-Null } catch { } }      # (the report ends cleanly)
 exit 0

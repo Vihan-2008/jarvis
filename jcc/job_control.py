@@ -10,6 +10,7 @@ from jcc import receipts
 
 ASKED = "ASKED.md"                    # what a job that stopped to ask wrote down, kept in the job's own folder
 ANSWER = "owner-answer.json"          # its owner's yes, waiting to be read by the job when it carries on
+NEXT = "owner-next.json"              # what its owner said after stopping it, for the job to take in as it carries on
 ID = re.compile(r"\d{8}-\d{6}-[a-f0-9]{4}")
 SHOWN = 3000                          # characters of a question its owner is shown: a yes is a yes to exactly that much
 CUT = "\n(The job wrote more than can be shown. Only what is above was shown to its owner, and only that is answered.)"
@@ -122,6 +123,77 @@ def answer(cfg, rid, yes: bool, text: str = "", mark: str | None = None) -> dict
         except (ValueError, OSError):
             pass                                  # the chat is gone: the job is answered all the same
     return {"status": fm["status"], "answered": "yes" if yes else "no"}
+
+
+def stopped_job(cfg, chat: dict) -> str | None:
+    """The coding job in this chat that was stopped (or interrupted) and has not carried on yet: its id, or None. Its
+    owner's next message in the chat carries it on."""
+    latest: dict[str, str] = {}
+    for message in (chat or {}).get("messages") or []:
+        rid = str(message.get("receipt") or "")
+        if rid and message.get("role") == "assistant" and message.get("status") and not message.get("fast"):
+            latest[rid] = str(message["status"])
+    vault = Vault(cfg.vault)
+    for rid, status in reversed(list(latest.items())):
+        if status != "paused" or not ID.fullmatch(rid):
+            continue
+        fm, _ = parse_frontmatter(vault.read(f"Jobs/{rid}.md") or "")
+        if fm.get("status") == "paused" and fm.get("kind", "job") == "job":
+            return rid
+    return None
+
+
+def carry_on(cfg, rid: str, text: str = "") -> dict:
+    """Carry a stopped, interrupted or failed job on: the same job, in its own copy of the project, with the same agent
+    conversation, from where it stopped. text: what its owner said since, which the job takes in as it carries on."""
+    from jcc.redact import redact
+    from jcc.resilience import child_alive
+    if not ID.fullmatch(str(rid or "")):
+        raise ValueError("Invalid job.")
+    words = redact(str(text or "").strip())[:4000]
+    vault, work = Vault(cfg.vault), cfg.jobs_root / rid
+    if not vault.read(f"Jobs/{rid}.md"):
+        raise ValueError("Job not found.")
+    work.mkdir(parents=True, exist_ok=True)
+    lock = InstanceLock(work / "job.lock")
+    if not lock.acquire():
+        raise ValueError("The job is still stopping. Try again in a moment.")
+    try:
+        fm, body = parse_frontmatter(vault.read(f"Jobs/{rid}.md") or "")
+        if fm.get("status") not in ("paused", "failed"):
+            raise ValueError("This job is not stopped." if fm.get("status") != "queued" else "This job is already carrying on.")
+        if child_alive(work):
+            raise ValueError("The job is still stopping. Try again in a moment.")
+        if words:
+            atomic_write(work / NEXT, json.dumps({"text": words, "at": time.time()}))
+        atomic_write(work / "control.json", json.dumps({"action": "resume", "at": time.time()}))
+        fm.update(status="queued", carried_on_at=time.time())
+        vault.write(f"Jobs/{rid}.md", render_note(fm, body))
+    finally:
+        lock.release()
+    receipts.update_status(vault, rid, "queued")
+    if fm.get("chat_id"):
+        from jcc.chats import Chats
+        try:
+            Chats(cfg).update(fm["chat_id"], message={"role": "assistant", "receipt": rid, "status": "queued", "resume_requested": True,
+                                                       "content": "Carrying on from where it stopped" + (", with what you said." if words else ".")})
+        except (ValueError, OSError):
+            pass
+    return {"status": "queued", "carried_on": rid}
+
+
+def take_next(workdir) -> str:
+    """What its owner said after stopping this job (read once: put aside as it is taken), or ""."""
+    path = workdir / NEXT
+    try:
+        saved = json.loads(path.read_text("utf-8"))
+    except (OSError, ValueError):
+        return ""
+    try:
+        path.replace(workdir / ("owner-next-read-%d.json" % int(time.time())))
+    except OSError:
+        path.unlink(missing_ok=True)
+    return str(saved.get("text") or "")[:4000]
 
 
 def signal(workdir):
