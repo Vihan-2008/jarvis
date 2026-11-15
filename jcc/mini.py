@@ -98,6 +98,51 @@ class _Windows:
         self.user32.EnumWindows(proto(each), 0)
         return found[0] if found else 0
 
+    def owned(self, pid: int) -> list[int]:
+        """The shown top-level browser windows of this process (the Edge started for the small window)."""
+        ctypes, found = self.c, []
+        proto = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+        def each(handle, _):
+            owner = self.wintypes.DWORD()
+            self.user32.GetWindowThreadProcessId(ctypes.c_void_p(handle), ctypes.byref(owner))
+            if owner.value == pid and self.user32.IsWindowVisible(ctypes.c_void_p(handle)):
+                name = ctypes.create_unicode_buffer(80)
+                self.user32.GetClassNameW(ctypes.c_void_p(handle), name, 80)
+                if name.value == "Chrome_WidgetWin_1":
+                    found.append(int(handle))
+            return True
+        self.user32.EnumWindows(proto(each), 0)
+        return found
+
+    def untask(self, handle: int) -> bool:
+        """Off the taskbar at once: a tool window that is never activated, and its taskbar button taken away (Windows
+        keeps a button made before the window became a tool window until the window is hidden)."""
+        ctypes, pointer = self.c, self.c.c_void_p(handle)
+        extended = self.user32.GetWindowLongPtrW(pointer, -20)
+        self.user32.SetWindowLongPtrW(pointer, -20, (extended | 0x80 | 0x08000000) & ~0x40000)
+        ole, started = ctypes.windll.ole32, False
+        try:
+            started = ole.CoInitializeEx(None, 2) in (0, 1)              # (S_OK or S_FALSE: this thread is set up for COM)
+            clsid, iid = (ctypes.c_byte * 16)(), (ctypes.c_byte * 16)()
+            ole.CLSIDFromString("{56FDF344-FD6D-11d0-958A-006097C9A090}", ctypes.byref(clsid))     # TaskbarList
+            ole.CLSIDFromString("{56FDF342-FD6D-11d0-958A-006097C9A090}", ctypes.byref(iid))       # ITaskbarList
+            taskbar = ctypes.c_void_p()
+            if ole.CoCreateInstance(ctypes.byref(clsid), None, 1, ctypes.byref(iid), ctypes.byref(taskbar)) != 0 or not taskbar:
+                return False
+            table = ctypes.cast(taskbar, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents
+            call = lambda at, *kinds: ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, *kinds)(table[at])   # noqa: E731
+            try:
+                call(3)(taskbar)                                           # HrInit
+                return call(5, ctypes.c_void_p)(taskbar, pointer) == 0      # DeleteTab
+            finally:
+                call(2)(taskbar)                                           # Release
+        except (AttributeError, OSError, ValueError):
+            return False
+        finally:
+            if started:
+                ole.CoUninitialize()
+
     def exists(self, handle: int) -> bool:
         return bool(handle) and bool(self.user32.IsWindow(self.c.c_void_p(handle)))
 
@@ -151,6 +196,7 @@ class _Windows:
         pointer = self.c.c_void_p(handle)
         extended = self.user32.GetWindowLongPtrW(pointer, -20)
         self.user32.SetWindowLongPtrW(pointer, -20, (extended | 0x80 | 0x08000000 | 0x8) & ~0x40000)      # tool window, no activate, topmost; not an "app window"
+        self.untask(handle)
         if not bare:
             return
         style = self.user32.GetWindowLongPtrW(pointer, -16)
@@ -245,6 +291,7 @@ class Mini:
         self.extra, self.spot = (0, 0, 0, 0), None  # the room Edge kept around the page when last seen; where the panel was last put
         self.front = 0                             # the program that had the keyboard when the panel was last looked at
         self.dragging = False
+        self.pid = 0                               # the Edge started for it (see _launch)
         self.gap = self._kept()                    # how far from the right and bottom edges its owner put it (screen points)
         self.lock, self.moving = threading.Lock(), threading.RLock()
 
@@ -280,8 +327,10 @@ class Mini:
         edge = edge_path()
         if not edge:
             return False
-        # It opens far off the screen, so nothing flashes before it has been dressed and put in its corner.
-        subprocess.Popen(launch_argv(self.cfg, edge, self.url), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # It opens far off the screen, so nothing flashes before it has been dressed and put in its corner. (Its process is
+        # kept: its window is taken off the taskbar the moment it appears, before its page has even said what it is.)
+        self.pid = subprocess.Popen(launch_argv(self.cfg, edge, self.url), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL).pid
         return True
 
     def alive(self) -> bool:
@@ -315,11 +364,18 @@ class Mini:
                         self.pause(0.2)
                         if not win.find(self.title):
                             break
+                self.pid = 0
                 if not self.launch():
                     self.failed_at = self.clock()
                     return
-                for _ in range(60):
-                    self.pause(0.2)
+                early, owned, untask = set(), getattr(win, "owned", None), getattr(win, "untask", None)
+                for _ in range(300):                        # (up to 30 s: a first start of Edge with a new profile is slow)
+                    self.pause(0.1)
+                    if self.pid and owned and untask:
+                        for shown in owned(self.pid):
+                            if shown not in early:          # never on the taskbar, not even while its page loads
+                                early.add(shown)
+                                untask(shown)
                     handle = win.find(self.title)
                     if handle:
                         unmaximise = getattr(win, "unmaximise", None)
@@ -335,6 +391,9 @@ class Mini:
                         if before and win.foreground() != before and win.exists(before):
                             win.focus(before)               # the keyboard goes straight back to the program that had it
                         return
+                for shown in early:                         # a page that never loaded: its window is closed, not left about
+                    if win.exists(shown):
+                        win.close(shown)
                 self.failed_at = self.clock()
         except Exception:  # noqa: BLE001 - without this window JARVIS still listens and answers
             self.failed_at = self.clock()

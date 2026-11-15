@@ -772,7 +772,13 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
             kept = placement.prefs(state.cfg)
             if "nv-welcomed" not in kept and any((state.cfg.state_dir / name).exists() for name in ("assistant.json", "speech.json", "conversation-index.json")):
                 kept["nv-welcomed"] = "1"           # someone who has used JARVIS before is not shown the first-run guide again
-            html = (STATIC.read_text("utf-8").replace("__JCC_TOKEN__", state.token).replace("__JCC_NONCE__", nonce)
+            page = STATIC.read_text("utf-8")
+            if "mini" in parse_qs(urlparse(self.path).query, keep_blank_values=True):
+                # The small listening window is known by its title (jcc/mini.py): it has it from the page's first bytes,
+                # not only once the page's scripts have run, so it is dressed and off the taskbar at once.
+                from jcc import mini
+                page = page.replace("<title>JARVIS · Workspace</title>", "<title>" + mini.title_for(f"http://127.0.0.1:{self.server.server_address[1]}") + "</title>", 1)
+            html = (page.replace("__JCC_TOKEN__", state.token).replace("__JCC_NONCE__", nonce)
                     .replace("__JCC_DIRECT__", "1" if direct else "0")
                     .replace("__JCC_PREFS__", json.dumps(kept).replace("<", "\\u003c").replace(">", "\\u003e").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")))
             socket_origin = speech.base().replace("https://", "wss://").replace("http://", "ws://")

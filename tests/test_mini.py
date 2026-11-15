@@ -582,5 +582,74 @@ class TestOverTheWire(GuiTestCase):
         self.assertEqual(self.state.assistant.voices["small"][0], "listening")
 
 
+
+class TaskbarWindows(FakeWindows):
+    """Windows that also say which shown browser windows a process has, and take a window off the taskbar."""
+
+    def __init__(self):
+        super().__init__()
+        self.untasked, self.later, self.named_after = [], 0, None
+        self.ticks = 0
+
+    def owned(self, pid):
+        return [h for h, w in self.wins.items() if w.get("pid") == pid and w["visible"]]
+
+    def untask(self, handle):
+        self.untasked.append((handle, self.wins[handle]["title"]))
+        self.wins[handle]["tool"] = True
+        return True
+
+    def pause(self, seconds):
+        super().pause(seconds)
+        self.ticks += 1
+        if self.named_after and self.ticks == self.named_after and self.later in self.wins:
+            self.wins[self.later]["title"] = mini.title_for("http://127.0.0.1:8765")       # the page has said what it is
+
+
+class TestNeverOnTheTaskbar(MiniCase):
+    """Edge shows the small window as an ordinary window, on the taskbar, before its page has loaded and named it. It is
+    taken off the taskbar the moment it appears, and one whose page never loads is closed rather than left there."""
+
+    def launched(self, named_after):
+        fake = self.fake = TaskbarWindows()
+        fake.named_after = named_after
+        popup = None
+
+        def launch():
+            handle = fake.open("127.0.0.1:8765/?mini")                  # what Edge calls it before the page says
+            fake.wins[handle]["pid"], popup.pid, fake.later = 4242, 4242, handle
+            return True
+        popup = mini.Mini(self.cfg, "http://127.0.0.1:8765", launch=launch, windows=lambda: fake, clock=lambda: fake.now, pause=fake.pause)
+        popup.ensure()
+        self.settle(popup)
+        return popup, fake
+
+    def test_off_the_taskbar_before_its_page_has_named_it(self):
+        popup, fake = self.launched(named_after=8)
+        self.assertEqual(fake.untasked[0], (fake.later, "127.0.0.1:8765/?mini"), "taken off the taskbar while its page was still loading")
+        self.assertEqual(popup.handle, fake.later, "and then found by its name and dressed as before")
+        self.assertIn(("dress", fake.later, True), fake.calls)
+
+    def test_a_slow_first_start_is_waited_for(self):
+        popup, fake = self.launched(named_after=150)                    # 15 s: longer than the 12 s it used to be given
+        self.assertEqual(popup.handle, fake.later)
+
+    def test_a_window_whose_page_never_loads_is_closed_not_left_on_the_taskbar(self):
+        popup, fake = self.launched(named_after=None)
+        self.assertNotIn(fake.later, fake.wins, "closed")
+        self.assertFalse(popup.alive())
+
+
+class TestItsPageIsNamedAtOnce(GuiTestCase):
+    def test_the_listening_page_has_its_title_in_its_first_bytes(self):
+        import http.client
+        for path, title in (("/?mini", mini.title_for(f"http://127.0.0.1:{self.port}")), ("/", "JARVIS · Workspace")):
+            c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+            c.request("GET", path, headers={"Host": f"127.0.0.1:{self.port}"})
+            page = c.getresponse().read().decode("utf-8")
+            c.close()
+            self.assertIn("<title>" + title + "</title>", page, path)
+
+
 if __name__ == "__main__":
     unittest.main()
