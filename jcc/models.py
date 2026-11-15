@@ -7,6 +7,7 @@ from jcc.vault import read_json
 
 
 FULL = ["low", "medium", "high", "xhigh", "max"]       # every level Claude Code's --effort takes
+FAMILY_WORDS = ("fable", "opus", "sonnet", "haiku", "astra", "sol", "terra", "luna")
 STRONGEST = ("fable", "opus")                          # Claude's strongest models, the strongest first
 
 
@@ -33,13 +34,41 @@ def catalog(cfg) -> list[dict]:
             continue
         levels = model.get("supported_reasoning_levels")
         codex.append({"id": "codex:" + model["slug"], "provider": "codex", "model": model["slug"],
-                      "label": str(model.get("display_name") or model["slug"]),
+                      "label": str(model.get("display_name") or model["slug"]), "given": str(model.get("description") or "")[:300],
                       "efforts": [r["effort"] for r in levels if isinstance(r, dict) and isinstance(r.get("effort"), str)] if isinstance(levels, list) else []})
     if not codex:
         agent = cfg.agents.get("codex")
         codex = [{"id": "codex:" + name, "provider": "codex", "model": name, "label": name,
                   "efforts": ["low", "medium", "high"]} for name in dict.fromkeys(agent.models.values() if agent else []) if name]
-    return claude + codex + _grok(cfg)
+    return _with_notes(claude + codex + _grok(cfg))
+
+
+def _family(entry: dict) -> str:
+    text = (entry["model"] + " " + entry["label"]).lower()
+    word = next((w for w in FAMILY_WORDS if re.search(r"\b" + w + r"\b", text)), "")
+    if entry["provider"] == "grok":
+        word = "fast" if "fast" in text else "code" if "code" in text else "mini" if "mini" in text else "main"
+    return entry["provider"] + ":" + (word or re.sub(r"[\d.]+", "", entry["model"]))
+
+
+def _version(entry: dict):
+    found = re.findall(r"\d+(?:\.\d+)?", entry["label"]) or re.findall(r"\d+(?:\.\d+)?", entry["model"])
+    return tuple(int(part) for part in found[0].split(".")) if found else None
+
+
+def _with_notes(rows: list[dict]) -> list[dict]:
+    """Each model with one line on what it is good for (jcc/model_notes.py); an older one of a family is said to be so."""
+    from jcc import model_notes
+    newest: dict[str, tuple] = {}
+    for row in rows:
+        version = _version(row)
+        if version:
+            newest[_family(row)] = max(newest.get(_family(row), version), version)
+    for row in rows:
+        version = _version(row)
+        row["about"] = model_notes.about(row["model"], row["provider"], row["label"], row.pop("given", ""),
+                                         older=bool(version and version < newest.get(_family(row), version)))
+    return rows
 
 
 def _grok(cfg) -> list[dict]:
@@ -52,7 +81,8 @@ def _grok(cfg) -> list[dict]:
     for slug, entry in (listed.items() if isinstance(listed, dict) else []):
         info = entry.get("info") if isinstance(entry, dict) and isinstance(entry.get("info"), dict) else {}
         if isinstance(slug, str) and re.fullmatch(r"[A-Za-z0-9._-]{1,120}", slug):
-            found.append({"id": "grok:" + slug, "provider": "grok", "model": slug, "label": str(info.get("name") or slug)[:60], "efforts": ["low", "medium", "high"]})
+            found.append({"id": "grok:" + slug, "provider": "grok", "model": slug, "label": str(info.get("name") or slug)[:60], "efforts": ["low", "medium", "high"],
+                          "given": str(info.get("description") or "")[:300]})
     return found
 
 

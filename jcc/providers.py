@@ -62,9 +62,9 @@ CATALOG: dict[str, dict] = {
                  "about": "Moonshot's Kimi models.", "prefer": [r"^kimi-", r"moonshot"]},
     "cohere": {"name": "Cohere", "base": "https://api.cohere.ai/compatibility/v1", "get": "https://dashboard.cohere.com/api-keys",
                "about": "Cohere's Command models.", "prefer": [r"^command-a", r"^command-r-plus", r"^command"]},
-    "ollama": {"name": "Ollama (on this PC)", "base": "http://127.0.0.1:11434/v1", "local": True, "get": "https://ollama.com/download",
+    "ollama": {"name": "Ollama", "base": "http://127.0.0.1:11434/v1", "local": True, "get": "https://ollama.com/download",
                "about": "Models that run on this PC with Ollama. Nothing leaves the computer and nothing is paid for.", "prefer": [r"."], "lean": True},
-    "lmstudio": {"name": "LM Studio (on this PC)", "base": "http://127.0.0.1:1234/v1", "local": True, "get": "https://lmstudio.ai",
+    "lmstudio": {"name": "LM Studio", "base": "http://127.0.0.1:1234/v1", "local": True, "get": "https://lmstudio.ai",
                  "about": "Models that run on this PC with LM Studio.", "prefer": [r"."], "lean": True},
     "custom": {"name": "Another service", "base": "", "get": "",
                "about": "Any other service that speaks the OpenAI chat format: give its address and a key.", "prefer": [r"."]},
@@ -126,6 +126,34 @@ def base(cfg, ident: str) -> str:
     if ident == "custom":
         return str((settings(cfg).get("custom") or {}).get("base") or "")
     return CATALOG[ident]["base"]
+
+
+# Where each model app is found when it is installed (Windows, a Mac, Linux), besides its command on the PATH.
+INSTALLED = {"ollama": {"commands": ("ollama",),
+                        "places": ("%LOCALAPPDATA%/Programs/Ollama/ollama.exe", "%ProgramFiles%/Ollama/ollama.exe", "/Applications/Ollama.app",
+                                   "~/Applications/Ollama.app", "/usr/local/bin/ollama", "/opt/homebrew/bin/ollama", "/usr/bin/ollama")},
+             "lmstudio": {"commands": ("lms",),
+                          "places": ("%LOCALAPPDATA%/Programs/LM Studio/LM Studio.exe", "%LOCALAPPDATA%/Programs/lm-studio/LM Studio.exe",
+                                     "%ProgramFiles%/LM Studio/LM Studio.exe", "~/.lmstudio/bin/lms", "~/.lmstudio/bin/lms.exe",
+                                     "/Applications/LM Studio.app", "~/Applications/LM Studio.app")}}
+
+
+def installed(ident: str, which=None, exists=None) -> bool:
+    """Is this model app on this PC? (Its program in its usual place, or its command on the PATH.) Only the model apps
+    that run on the PC are asked; every other service is not "on this PC"."""
+    import os
+    import shutil
+    which, exists = which or shutil.which, exists or (lambda p: Path(p).exists())
+    known = INSTALLED.get(ident)
+    if not known:
+        return False
+    if any(which(command) for command in known["commands"]):
+        return True
+    for place in known["places"]:
+        path = os.path.expanduser(os.path.expandvars(place))
+        if "%" not in path and exists(path):
+            return True
+    return False
 
 
 def connected(cfg, ident: str) -> bool:
@@ -256,6 +284,23 @@ def label(cfg, ident: str) -> str:
     return CATALOG[ident]["name"]
 
 
+_said: dict[str, dict[str, str]] = {}
+
+
+def about(ident: str, model: str) -> str:
+    """One line on what this service's model is good for (jcc/model_notes.py)."""
+    from jcc import model_notes
+    with _lock:
+        given = (_said.get(ident) or {}).get(model, "")
+    return model_notes.about(model, ident, given=given, local=bool(CATALOG.get(ident, {}).get("local")))
+
+
+def models_about(cfg, ident: str, refresh: bool = False) -> dict:
+    """The models this key can use, each with what it is good for."""
+    names = models(cfg, ident, refresh=refresh)
+    return {"models": names, "about": {name: about(ident, name) for name in names}}
+
+
 def models(cfg, ident: str, refresh: bool = False) -> list[str]:
     """The chat models this key can use, read from the service itself (kept for six hours)."""
     if ident not in CATALOG:
@@ -287,6 +332,10 @@ def models(cfg, ident: str, refresh: bool = False) -> list[str]:
             data = json.loads(response.read(4_000_000).decode("utf-8", "replace"))
         rows = data.get("data") if isinstance(data, dict) else data
         found = sorted({str(row.get("id") or "").removeprefix("models/") for row in rows or [] if isinstance(row, dict)} - {""})
+        said = {str(row.get("id") or "").removeprefix("models/"): str(row.get("description") or "")[:400]
+                for row in rows or [] if isinstance(row, dict) and isinstance(row.get("description"), str)}
+        with _lock:
+            _said[ident] = said                             # (what the service says about each one, for model_notes)
         found = [name for name in found if not NOT_CHAT.search(name)] or found
     except ProviderError as problem:
         if not fixed or problem.status in (401, 403):
@@ -345,7 +394,10 @@ def describe(cfg, ident: str) -> dict:
     on = connected(cfg, ident)
     return {"id": ident, "name": label(cfg, ident), "about": entry["about"], "get": entry.get("get", ""), "local": bool(entry.get("local")),
             "connected": on, "has_key": bool(_key(ident)), "model": default_model(cfg, ident, ask=False) if on else "", "search": bool(entry.get("search")),
-            "tools": entry.get("tools", True), "free": bool(entry.get("free")), "address": base(cfg, ident) if ident == "custom" else ""}
+            "model_about": about(ident, default_model(cfg, ident, ask=False)) if on and default_model(cfg, ident, ask=False) else "",
+            "tools": entry.get("tools", True), "free": bool(entry.get("free")), "address": base(cfg, ident) if ident == "custom" else "",
+            # "On this PC" only for a model app that is on this PC: installed, or its server answering.
+            "on_pc": bool(entry.get("local")) and (on or installed(ident))}
 
 
 def listing(cfg, look: bool = False) -> list[dict]:

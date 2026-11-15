@@ -1455,11 +1455,53 @@ async function beforeSending(name) {
 function modelLabel() { const option = $('model')?.selectedOptions[0]; $('nv-model-name').textContent = !option || option.value === 'auto' ? 'Auto' : option.textContent; }
 modelB.onclick = () => openPop(modelB, p => {
   const select = $('model');
-  item(p, 'Auto', 'spark', () => pick('auto'), { note: 'JARVIS picks the best AI and saves your allowance', tick: select.value === 'auto' });
-  for (const group of select.querySelectorAll('optgroup')) { if (!group.children.length) continue; p.append(el('h5', {}, group.label)); for (const option of group.children) item(p, option.textContent, '', () => pick(option.value), { tick: select.value === option.value }); }
+  item(p, 'Auto', 'spark', () => pick('auto'), { note: 'JARVIS picks the right model for each request: quick ones for small things, strong ones for hard ones, and it saves your allowance', tick: select.value === 'auto' });
+  for (const group of select.querySelectorAll('optgroup')) { if (!group.children.length) continue; p.append(el('h5', {}, group.label)); for (const option of group.children) item(p, option.textContent, '', () => pick(option.value), { tick: select.value === option.value, note: option.dataset.about || '' }); }
+  // What Auto uses for each kind of task, here as in Settings.
+  p.append(el('h5', {}, 'Auto, by kind of task'));
+  item(p, 'Model for each kind of task', 'gear', () => taskModels(), { note: taskSummary() || 'Choose which model Auto uses for small, medium and large tasks' });
   function pick(value) { select.value = value; select.dispatchEvent(new Event('change', { bubbles: true })); modelLabel(); }
 }, { up: !home, right: true });
-const priorPicker = window.updateModelPicker; window.updateModelPicker = d => { priorPicker?.(d); modelLabel(); };
+let pickerState = null;
+const priorPicker = window.updateModelPicker; window.updateModelPicker = d => { priorPicker?.(d); pickerState = d; modelLabel(); };
+/* ---------- the model for each kind of task (what Auto uses): the model menu and Settings > AI models & accounts ---------- */
+const TASK_SIZES = [['small', 'Small tasks', 'Questions, quick fixes and one-file changes'], ['medium', 'Medium tasks', 'Features and changes across a few files'],
+  ['large', 'Large tasks', 'Big builds, many files and long jobs']];
+const modelName = id => id === 'auto' || !id ? 'Auto' : ((pickerState?.models || []).find(m => m.id === id) || {}).label || String(id).split(':').pop();
+function taskSummary() {
+  const chosen = pickerState?.routing?.choices || {};
+  return TASK_SIZES.every(([level]) => chosen[level]) ? TASK_SIZES.map(([level, name]) => name.split(' ')[0] + ': ' + modelName(chosen[level].model)).join(' · ') : '';
+}
+// Three choices, each model with what it is good for, and Save. Drawn into a dialog (the menu) or a settings page.
+function taskModelsInto(spot, done) {
+  const all = pickerState?.models || [], chosen = pickerState?.routing?.choices || {};
+  const options = picked => '<option value="auto">Auto decide: JARVIS picks for each request</option>' + all.map(m => '<option value="' + esc(m.id) + '" data-about="' + esc(m.about || '') + '"' +
+    (m.id === picked ? ' selected' : '') + '>' + esc(m.label + (m.about ? ' \u2014 ' + m.about : '')) + '</option>').join('');
+  spot.innerHTML = '<p class="small">When the model next to the message box is Auto, JARVIS uses these. If one reaches its usage limit, another takes over.</p>' +
+    TASK_SIZES.map(([level, name, what]) => '<label class="nv-task-model"><span><b>' + name + '</b><small>' + what + '</small></span><select data-level="' + level + '">' +
+      options(chosen[level]?.model || 'auto') + '</select><small class="nv-model-about" data-about-for="' + level + '"></small></label>').join('') +
+    '<div class="actions">' + (done ? '<button type="button" class="plain" data-task-cancel>Cancel</button>' : '') + '<button type="button" class="primary" data-task-save>Save</button></div>';
+  const tell = s => { spot.querySelector('[data-about-for="' + s.dataset.level + '"]').textContent = s.value === 'auto' ? 'JARVIS picks a model for each request by its size, and saves your allowance.' : s.selectedOptions[0]?.dataset.about || ''; };
+  spot.querySelectorAll('select[data-level]').forEach(s => { tell(s); s.onchange = () => tell(s); });
+  spot.querySelector('[data-task-cancel]')?.addEventListener('click', () => done?.());
+  spot.querySelector('[data-task-save]').onclick = async () => {
+    const choices = {};
+    for (const s of spot.querySelectorAll('select[data-level]')) {
+      const before = chosen[s.dataset.level] || {};
+      choices[s.dataset.level] = { model: s.value, effort: before.model === s.value ? before.effort || 'auto' : 'auto' };      // (a new model starts at Auto effort)
+    }
+    try {
+      const saved = await api('/api/routing', { choices });
+      if (pickerState) pickerState.routing = { ...(pickerState.routing || {}), choices: saved.choices || choices };
+      notify('Saved. ' + taskSummary()); done?.();
+    } catch (error) { toast(error.message); }
+  };
+}
+function taskModels() {
+  const d = dialog('<div class="nv-set-head"><h2>Model for each kind of task</h2><button class="nv-icon" data-close aria-label="Close">' + icon('x') + '</button></div><div data-task-spot></div>', 'nv-task-models');
+  d.querySelector('[data-close]').onclick = () => d.close();
+  taskModelsInto(d.querySelector('[data-task-spot]'), () => d.close());
+}
 $('model')?.addEventListener('change', modelLabel);       // (however the choice was changed, the button says what it is)
 // Drag a file anywhere onto the window to attach it.
 let dragDepth = 0;
@@ -1495,7 +1537,7 @@ document.addEventListener('keydown', e => {
 /* ---------- start ---------- */
 welcome = () => '<div class="welcome"></div>';
 setWorkMode(workMode, false);
-window.Nova = { command: (name, words) => runCommand(name, words || ''), localReply, loadMods, mods: () => modsData, hook: runHooks, unregisterPane, setFull, isFull, icon, el, openPop, closePop, item, dialog, confirmBox, ask, notify, registerPane, openPane, closePanel, rich, setDraft, store, panel, liveUpdate, applyLight, micButton: micB, refreshMode: () => updateMode(), newChat: () => newChat.click(),
+window.Nova = { command: (name, words) => runCommand(name, words || ''), localReply, taskModelsInto, taskModels, loadMods, mods: () => modsData, hook: runHooks, unregisterPane, setFull, isFull, icon, el, openPop, closePop, item, dialog, confirmBox, ask, notify, registerPane, openPane, closePanel, rich, setDraft, store, panel, liveUpdate, applyLight, micButton: micB, refreshMode: () => updateMode(), newChat: () => newChat.click(),
   setTheme: name => { store.set('nv-theme', name); applyTheme(); }, get pane() { return currentPane; } };
 applyTheme(); drawTabs(); drawTopButtons();
 body.classList.add('nova', 'nv-home'); body.classList.remove('workspace-open');

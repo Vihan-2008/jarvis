@@ -102,6 +102,7 @@ class Feed:
         self.written = 0
         self.blocks: dict[int, dict] = {}
         self.answer = ""
+        self.todo: list[dict] = []          # the agent's own task list: [{"id", "text", "status": pending|in_progress|completed}]
         if target:
             try:
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -120,6 +121,33 @@ class Feed:
             self.written += len(row)
         except OSError:
             self.target = None
+
+    def tasks(self, items: list[dict]) -> None:
+        """The agent's task list as it stands now (each change sent whole, so the newest one is the list)."""
+        rows = []
+        for n, item in enumerate(items[:40]):
+            text = _short(item.get("text") or "", 160)
+            status = item.get("status") if item.get("status") in ("pending", "in_progress", "completed") else "pending"
+            if text:
+                rows.append({"id": str(item.get("id") or n + 1), "text": text, "status": status})
+        self.todo = rows
+        self.emit("todo", json.dumps(rows))
+
+    def _claude_tasks(self, name: str, args: dict) -> bool:
+        """Claude Code's to-do tools. True when this call was one of them."""
+        if name == "TodoWrite":
+            todos = args.get("todos") if isinstance(args.get("todos"), list) else []
+            self.tasks([{"text": t.get("content") or t.get("activeForm"), "status": t.get("status")} for t in todos if isinstance(t, dict)])
+            return True
+        if name == "TaskCreate":
+            self.tasks(self.todo + [{"id": str(len(self.todo) + 1), "text": args.get("subject") or args.get("description"), "status": "pending"}])
+            return True
+        if name == "TaskUpdate":
+            ident = str(args.get("taskId") or args.get("id") or "")
+            self.tasks([{**t, "status": args.get("status") or t["status"], "text": args.get("subject") or t["text"]} if t["id"] == ident else t
+                        for t in self.todo if not (t["id"] == ident and args.get("status") == "deleted")])
+            return True
+        return False
 
     def line(self, raw: str) -> None:
         text = raw.strip()
@@ -181,7 +209,9 @@ class Feed:
                     args = json.loads(block["json"] or "{}")
                 except ValueError:
                     args = {}
-                if not (block["name"] == "Write" and _name(args.get("file_path", "")).upper() == "RESULT.MD"):
+                if isinstance(args, dict) and self._claude_tasks(block["name"], args):
+                    pass                                        # (its task list, shown as a list rather than as a step)
+                elif not (block["name"] == "Write" and _name(args.get("file_path", "")).upper() == "RESULT.MD"):
                     self.emit("step", describe_tool(block["name"], args if isinstance(args, dict) else {}))
                 else:
                     self.emit("step", "Writing the reply")
@@ -192,6 +222,14 @@ class Feed:
         if not item:
             return
         kind, done = item.get("type") or item.get("item_type"), data.get("type") == "item.completed"
+        if kind == "todo_list" and isinstance(item.get("items"), list):
+            rows = [{"text": t.get("text"), "status": "completed" if t.get("completed") else "pending"} for t in item["items"] if isinstance(t, dict)]
+            for row in rows:                                    # (the first one not done is the one being worked on)
+                if row["status"] == "pending" and not done:
+                    row["status"] = "in_progress"
+                    break
+            self.tasks(rows)
+            return
         if kind == "command_execution" and data.get("type") == "item.started":
             self.emit("step", "Running: " + _short(plain_command(item.get("command", "")), 90))
         elif kind == "file_change" and done:
@@ -210,7 +248,7 @@ def read(cfg, rid: str) -> dict:
     from jcc.activity import job_id
     work = cfg.jobs_root / job_id(rid)
     path = work / "live.jsonl"
-    steps, said, answer = [], [], []
+    steps, said, answer, todo = [], [], [], []
     if path.exists() and not path.is_symlink():
         try:
             lines = path.read_text("utf-8", errors="replace").splitlines()
@@ -228,9 +266,14 @@ def read(cfg, rid: str) -> dict:
                 said.append(event.get("t", ""))
             elif event.get("k") == "answer":
                 answer.append(event.get("t", ""))
+            elif event.get("k") == "todo":
+                try:
+                    todo = json.loads(event.get("t") or "[]")
+                except ValueError:
+                    pass
     # The answer file is the reply; the agent's running commentary is shown only until it exists.
     text = "".join(answer) or "".join(said)
-    return {"id": rid, "steps": steps[-60:], "text": text[-20000:], "answering": bool(answer)}
+    return {"id": rid, "steps": steps[-60:], "text": text[-20000:], "answering": bool(answer), "todo": todo if isinstance(todo, list) else []}
 
 
 def with_stream(argv: list[str]) -> list[str]:

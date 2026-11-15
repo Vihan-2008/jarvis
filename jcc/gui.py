@@ -1532,7 +1532,7 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                     elif action == 'connect': result = providers.connect(state.cfg, ident, str(body.get('key', '')), str(body.get('address', '')), str(body.get('name', '')))
                     elif action == 'disconnect': result = providers.disconnect(state.cfg, ident)
                     elif action == 'model': result = providers.choose_model(state.cfg, ident, str(body.get('model', '')))
-                    elif action == 'models': result = {'models': providers.models(state.cfg, ident, refresh=body.get('refresh') is True)}
+                    elif action == 'models': result = providers.models_about(state.cfg, ident, refresh=body.get('refresh') is True)
                     else: raise ValueError('Unknown request.')
                     self._json(HTTPStatus.OK, result);return
                 if self.path == '/api/mods':                  # the owner's own commands, hooks, panels and status line (jcc/mods.py)

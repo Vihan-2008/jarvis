@@ -837,10 +837,10 @@ function fillPicker() {
   if (!on.length) { group?.remove(); return; }
   if (!group) { group = document.createElement('optgroup'); group.dataset.ai = '1'; group.label = 'Other AI services'; select.append(group); }
   const keep = select.value;
-  group.replaceChildren(...on.map(s => { const o = document.createElement('option'); o.value = 'api:' + s.id + ':' + s.model; o.textContent = s.name.split(' (')[0] + ' · ' + s.model.split('/').pop(); return o; }));
+  group.replaceChildren(...on.map(s => { const o = document.createElement('option'); o.value = 'api:' + s.id + ':' + s.model; o.textContent = s.name.split(' (')[0] + ' · ' + s.model.split('/').pop(); o.dataset.about = o.title = s.model_about || ''; return o; }));
   if ([...select.options].some(o => o.value === keep)) select.value = keep;
 }
-const earlierPicker = window.updateModelPicker; window.updateModelPicker = d => { earlierPicker?.(d); fillPicker(); };
+const earlierPicker = window.updateModelPicker; window.updateModelPicker = d => { earlierPicker?.(d); if (Array.isArray(d?.models)) modelNotes = d.models; fillPicker(); };
 N.aiChanged = () => loadServices(false);
 
 /* ---------- events from the assistant ---------- */
@@ -994,9 +994,16 @@ document.addEventListener('keydown', e => {
 
 /* ---------- settings ---------- */
 // The brains the owner may pick for the assistant: left to JARVIS, one of Claude's models, or a connected AI service.
-const brainChoices = () => [['auto', 'Automatic: the right model for each request (recommended)'], ['haiku', 'Claude Haiku: the quickest'], ['sonnet', 'Claude Sonnet: stronger, a little slower'],
-  ['opus', 'Claude Opus: very capable, slower'], ['fable', 'Claude Fable: the most capable, uses the most allowance'],
-  ...services.filter(s => s.connected && s.model && s.tools !== false).map(s => [s.id + ':' + s.model, s.name.split(' (')[0] + ': ' + s.model.split('/').pop()])];
+// Each with what it is good for (jcc/model_notes.py, by way of the model list; these words until that list is read).
+let modelNotes = [];
+const BRAIN_NOTES = { haiku: 'Claude\u2019s fastest and lightest: quick questions and controlling the PC; the cheapest, weaker on hard problems.',
+  sonnet: 'Claude\u2019s balanced all-rounder: most questions and writing; quick, at a moderate cost.',
+  opus: 'Very capable Claude: harder questions and careful answers; slower and pricier than Sonnet.',
+  fable: 'Claude\u2019s most capable model: the hardest questions and deepest thinking; the slowest and costliest to use.' };
+const brainNote = id => (modelNotes.find(m => m.provider === 'claude' && m.model === id) || {}).about || BRAIN_NOTES[id] || '';
+const brainChoices = () => [['auto', 'Automatic: the right model for each request (recommended)'],
+  ...['haiku', 'sonnet', 'opus', 'fable'].map(id => [id, 'Claude ' + id[0].toUpperCase() + id.slice(1) + ' \u2014 ' + brainNote(id)]),
+  ...services.filter(s => s.connected && s.model && s.tools !== false).map(s => [s.id + ':' + s.model, s.name.split(' (')[0] + ': ' + s.model.split('/').pop() + (s.model_about ? ' \u2014 ' + s.model_about : '')])];
 const row = (label, control, note) => '<label class="nv-field"><span>' + label + (note ? '<small>' + note + '</small>' : '') + '</span>' + control + '</label>';
 const check = (id, label, note) => '<label class="assistant-check"><input type="checkbox" id="' + id + '"> <span>' + label + (note ? '<small>' + note + '</small>' : '') + '</span></label>';
 const pick = (id, entries) => '<select id="' + id + '">' + entries.map(([value, text]) => '<option value="' + esc(value) + '">' + esc(text) + '</option>').join('') + '</select>';
@@ -1331,9 +1338,9 @@ async function openSettings(tab = 'assistant') {
   }
   function drawModels(opened, looking) {
     const one = s => '<div class="nv-link nv-ai" data-id="' + esc(s.id) + '" data-state="' + (s.connected ? 'ok' : 'off') + '"><span class="nv-dot"></span>' +
-      '<div class="nv-link-text"><div class="nv-ai-name"><b>' + esc(s.name) + '</b>' + (s.free ? '<span class="nv-tag">Free key</span>' : '') + (s.local ? '<span class="nv-tag">On this PC</span>' : '') +
-      '</div><small>' + esc(s.about) + '</small><span class="nv-link-status">' + (s.connected ? 'Connected' : s.local ? 'Not running' : 'Not connected') + '</span>' +
-      (s.connected ? '<label class="nv-ai-model">Model <select data-model></select></label>' : '') +
+      '<div class="nv-link-text"><div class="nv-ai-name"><b>' + esc(s.name) + '</b>' + (s.free ? '<span class="nv-tag">Free key</span>' : '') + (s.on_pc ? '<span class="nv-tag">On this PC</span>' : '') +
+      '</div><small>' + esc(s.about) + '</small><span class="nv-link-status">' + (s.connected ? 'Connected' : s.local ? (s.on_pc ? 'Installed, not running' : 'Not installed on this PC') : 'Not connected') + '</span>' +
+      (s.connected ? '<label class="nv-ai-model">Model <select data-model></select></label><small class="nv-model-about" data-model-about>' + esc(s.model_about || '') + '</small>' : '') +
       '<div class="nv-keyrow ' + (opened === s.id ? '' : 'hidden') + '">' + (s.id === 'custom' ? '<input data-name maxlength="40" placeholder="A name for it"><input data-address spellcheck="false" placeholder="Its address, https://…/v1">' : '') +
       (s.local ? '' : '<input data-key type="password" autocomplete="off" spellcheck="false" placeholder="Paste the key here" aria-label="Key for ' + esc(s.name) + '">') + '<button class="primary" data-save>' + (s.local ? 'Look for it' : 'Save') + '</button></div></div>' +
       '<div class="nv-link-do">' + (s.connected ? '<button class="plain" data-off>Disconnect</button>' : '<button class="primary" data-connect>' + (s.local ? 'Check' : 'Connect') + '</button>') +
@@ -1342,12 +1349,14 @@ async function openSettings(tab = 'assistant') {
     pane.innerHTML = '<h3>Accounts</h3><p class="small">Sign in with your own subscription: no key needed. Each one signs in on its own page, in your browser.</p><div class="nv-accounts" data-accounts><p class="small nv-set-wait"><i class="nv-spin"></i>Asking each one whether it is signed in…</p></div>' +
       '<h3>Who answers</h3>' + row('JARVIS’s brain', pick('mo-model', brainChoices()), 'For talking, quick questions and controlling the PC. Building software has its own choice, next to the message box.') +
       check('mo-standin', 'When that AI reaches its usage limit, carry on with another one', 'The same request simply continues with the next connected AI, and JARVIS tells you. It switches back by itself when the limit is over.') +
+      '<h3>Model for each kind of task</h3><div class="nv-task-models-here" data-task-models></div>' +
       check('mo-resume', 'If nothing can answer, carry on by itself as soon as something can', 'The request waits, and is picked up where it stopped. You are told when it happens.') +
       '<h3>API keys: connected</h3>' + (on.length ? on.map(one).join('') : '<p class="small">None yet. Connect at least one so that JARVIS can keep going when Claude’s allowance runs out. Groq and Gemini have free keys.</p>') +
       '<h3>API keys: more AI services</h3>' + (looking ? '<p class="small nv-set-wait"><i class="nv-spin"></i>Looking for models running on this PC…</p>' : '') + rest.map(one).join('') +
       '<p class="small">A key is kept in Windows Credential Manager on this PC and sent only to the service it belongs to. JARVIS never buys anything: paid services charge your own account with them.</p>';
     bind('mo-model', options.model, 'model', setAssistant); bind('mo-standin', options.standin !== false, 'standin', setAssistant); bind('mo-resume', options.resume !== false, 'resume', setAssistant);
     drawAccounts(pane.querySelector('[data-accounts]'));
+    const taskSpot = pane.querySelector('[data-task-models]'); if (taskSpot && N.taskModelsInto) N.taskModelsInto(taskSpot);
     for (const line of pane.querySelectorAll('.nv-ai')) {
       const id = line.dataset.id, service = services.find(s => s.id === id), box = line.querySelector('.nv-keyrow'), save = line.querySelector('[data-save]');
       const connect = line.querySelector('[data-connect]'), off = line.querySelector('[data-off]'), model = line.querySelector('[data-model]');
@@ -1367,11 +1376,15 @@ async function openSettings(tab = 'assistant') {
       };
       if (model) {
         model.innerHTML = '<option value="' + esc(service.model) + '">' + esc(service.model || 'Reading its models…') + '</option>'; model.value = service.model;
+        // Each model with what it is good for: in the list, and under it for the one chosen.
+        const told = line.querySelector('[data-model-about]'), tell = () => { if (told) told.textContent = model.selectedOptions[0]?.dataset.about || ''; };
         api('/api/providers', { action: 'models', id }).then(got => {
           if (!model.isConnected) return;
-          model.replaceChildren(...got.models.map(name => { const o = document.createElement('option'); o.value = o.textContent = name; return o; })); model.value = service.model || got.models[0] || '';
+          model.replaceChildren(...got.models.map(name => { const o = document.createElement('option'); o.value = name; o.dataset.about = (got.about || {})[name] || '';
+            o.textContent = name + (o.dataset.about ? ' \u2014 ' + o.dataset.about : ''); return o; }));
+          model.value = service.model || got.models[0] || ''; tell();
         }).catch(error => { if (model.isConnected && !service.model) model.innerHTML = '<option value="">' + esc(error.message) + '</option>'; });
-        model.onchange = async () => { try { await api('/api/providers', { action: 'model', id, model: model.value }); saved(); loadServices(); } catch (error) { toast(error.message); } };
+        model.onchange = async () => { tell(); try { await api('/api/providers', { action: 'model', id, model: model.value }); saved(); loadServices(); } catch (error) { toast(error.message); } };
       }
     }
   }

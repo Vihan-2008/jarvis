@@ -90,6 +90,33 @@ class TestLiveFeed(unittest.TestCase):
         raw = '{"type":"item.completed"}\n'
         self.assertEqual(feed.output(raw), raw)
 
+    def tool(self, feed, name, args, index=5):
+        feed.line(ev({"type": "content_block_start", "index": index, "content_block": {"type": "tool_use", "name": name, "input": {}}}))
+        feed.line(ev({"type": "content_block_delta", "index": index, "delta": {"type": "input_json_delta", "partial_json": json.dumps(args)}}))
+        feed.line(ev({"type": "content_block_stop", "index": index}))
+
+    def test_claudes_own_task_list_is_kept_as_a_list(self):
+        """As Claude desktop shows it under the message: the agent's to-do list, ticking off (not a "step" each time)."""
+        feed = live.Feed("claude", self.target)
+        self.tool(feed, "TodoWrite", {"todos": [{"content": "Add the page", "status": "completed", "activeForm": "Adding the page"},
+                                                {"content": "Link it", "status": "in_progress", "activeForm": "Linking it"},
+                                                {"content": "Test it", "status": "pending", "activeForm": "Testing it"}]})
+        data = live.read(self.cfg, self.rid)
+        self.assertEqual([(t["text"], t["status"]) for t in data["todo"]], [("Add the page", "completed"), ("Link it", "in_progress"), ("Test it", "pending")])
+        self.assertEqual(data["steps"], [], "the list is not repeated as steps")
+        # The newer tools: one task made at a time, then updated.
+        feed = live.Feed("claude", self.target)
+        self.tool(feed, "TaskCreate", {"subject": "Write the tests", "description": "x"}, 1)
+        self.tool(feed, "TaskCreate", {"subject": "Run them", "description": "y"}, 2)
+        self.tool(feed, "TaskUpdate", {"taskId": "1", "status": "completed"}, 3)
+        self.assertEqual([(t["text"], t["status"]) for t in live.read(self.cfg, self.rid)["todo"]], [("Write the tests", "completed"), ("Run them", "pending")])
+
+    def test_codex_task_list_shows_the_one_being_worked_on(self):
+        feed = live.Feed("codex", self.target)
+        items = [{"text": "Read the code", "completed": True}, {"text": "Change it", "completed": False}, {"text": "Check it", "completed": False}]
+        feed.line(json.dumps({"type": "item.updated", "item": {"type": "todo_list", "items": items}}) + "\n")
+        self.assertEqual([t["status"] for t in live.read(self.cfg, self.rid)["todo"]], ["completed", "in_progress", "pending"])
+
     def test_secrets_never_reach_the_live_file(self):
         feed = live.Feed("codex", self.target)
         feed.line(json.dumps({"type": "item.started", "item": {"type": "command_execution",
