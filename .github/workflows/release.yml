@@ -33,8 +33,16 @@ jobs:
             dist/JARVIS-windows.zip
           if-no-files-found: error
 
+  # Built twice at the same time, on an Apple-silicon Mac and on an Intel Mac, and the release takes the first that is
+  # there: GitHub sometimes has no Apple-silicon Mac free for an hour or more (v0.1.18 waited through four tries), and a
+  # release must not wait on that. Either build makes the same packages, for both kinds of Mac.
   mac:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        machine: [macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.machine }}
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -48,7 +56,7 @@ jobs:
         run: bash installer/mac/build_dmg.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: mac
+          name: mac-${{ matrix.machine }}
           path: |
             dist/JARVIS-mac.zip
             dist/JARVIS.dmg
@@ -56,14 +64,31 @@ jobs:
 
   release:
     needs: [windows, mac]
+    # (always: one of the two Mac builds may never have found a machine; the step below needs only one of them.)
+    if: ${{ always() && needs.windows.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
+          name: windows
           path: dist
-          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: mac-*
+          path: mac
+      - name: Take one Mac build
+        run: |
+          for one in mac/mac-macos-latest mac/mac-macos-15-intel; do
+            if [ -f "$one/JARVIS-mac.zip" ] && [ -f "$one/JARVIS.dmg" ]; then
+              cp "$one/JARVIS-mac.zip" "$one/JARVIS.dmg" dist/
+              echo "The Mac packages come from $one."
+              break
+            fi
+          done
+          test -f dist/JARVIS-mac.zip && test -f dist/JARVIS.dmg || { echo "Neither Mac build finished." >&2; exit 1; }
       - name: Attach the packages to the release for this tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
