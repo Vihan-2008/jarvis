@@ -1,4 +1,4 @@
-"""Websites the owner connected (WordPress, Shopify, Wix, Squarespace), and changes to them that are shown on this computer
+"""Websites the owner connected (WordPress, WordPress.com, Shopify, Wix, Squarespace), and changes to them that are shown on this computer
 first and go online only when the owner presses Publish.
 
 A site stays connected until the owner removes it: nothing JARVIS meets (an error, the site being down, an expired
@@ -13,7 +13,13 @@ showing what is on the site now beside what it would become. Nothing is sent to 
 in the chat card or by saying so; then exactly what was previewed is sent.
 
 What each platform's API allows (and so what JARVIS can change there):
-- WordPress: posts and pages (create and edit), through the REST API with an application password.
+- WordPress: posts and pages (create and edit), through the REST API with an application password. JARVIS finds the
+  site's API itself (at /wp-json/, or at ?rest_route= on a site without "pretty" links, at the address WordPress calls
+  its own) and says plainly what is in the way when it cannot get in: a wrong password or user name, application
+  passwords switched off, a host that drops the sign-in, a firewall.
+- WordPress.com (sites without hosting features): the same, through WordPress.com's own API, with a token WordPress.com
+  gives for the owner's own app and an application password (see PLATFORMS["wordpresscom"]["how"]). A WordPress.com
+  site with hosting features works like any WordPress site.
 - Shopify: products and pages (create and edit), through the Admin API with an access token, or with a Dev Dashboard
   app's client ID and secret (exchanged for a token).
 - Wix: new blog posts, through the REST API with an API key and the site's ID.
@@ -40,13 +46,22 @@ from jcc.vault import atomic_write, read_json
 SHOPIFY_VERSION = "2026-07"
 WIX_API = "https://www.wixapis.com"                  # (tests point these at a stand-in)
 SQUARESPACE_API = "https://api.squarespace.com/1.0"
+WPCOM_API = "https://public-api.wordpress.com"
 KINDS = ("post", "page", "product")
 PLATFORMS = {
     "wordpress": {"label": "WordPress", "kinds": ("post", "page"), "edits": True, "needs": ("user",),
                   "key": "Application password",
                   "how": "In WordPress: Users > Profile > Application Passwords. Type JARVIS as the name, press Add, and copy the password "
-                         "it shows. Give the same user name you sign in with. Use a user whose role may do what you want JARVIS to do (Editor, "
-                         "or Author for posts only)."},
+                         "it shows (your usual sign-in password does not work here). Give the user name you sign in with, not the "
+                         "password's name. Use a user whose role may do what you want JARVIS to do (Editor, or Author for posts only). "
+                         "A site on WordPress.com without hosting features: choose WordPress.com instead."},
+    "wordpresscom": {"label": "WordPress.com", "kinds": ("post", "page"), "edits": True, "needs": ("user", "client"),
+                     "key": "Application password (or your WordPress.com password, if two-step sign-in is off)",
+                     "how": "For a site hosted on WordPress.com without hosting features (with them, choose WordPress). WordPress.com lets "
+                            "only an app of your own in: 1. At developer.wordpress.com/apps, press Create New Application; any name and "
+                            "description, your site's address as the website, https://localhost as the redirect address; then copy its "
+                            "Client ID and Client Secret. 2. If two-step sign-in is on, make an application password at wordpress.com/me/"
+                            "security/two-step (Application Passwords). 3. Give your WordPress.com user name."},
     "shopify": {"label": "Shopify", "kinds": ("product", "page"), "edits": True, "needs": (),
                 "key": "Admin API access token (shpat_...), or the app's client ID and secret as id:secret",
                 "how": "In Shopify admin: Settings > Apps > Develop apps > Build apps in Dev Dashboard. Make an app for this store with the "
@@ -110,7 +125,9 @@ def clean_address(platform: str, address: str) -> str:
         raise SiteError("Use the site's https:// address: a key is never sent over plain http.")
     if platform == "shopify" and not (host.endswith(".myshopify.com") or _local(host)):
         raise SiteError("For Shopify, give the store's myshopify.com address (Settings > Domains shows it), e.g. mystore.myshopify.com.")
-    path = parts.path.rstrip("/") if platform == "wordpress" else ""
+    if platform == "wordpress" and host.endswith(".wordpress.com") and not _local(host):
+        raise SiteError("That is a site on WordPress.com: choose WordPress.com as the platform (WordPress is for sites with their own hosting).")
+    path = re.sub(r"/(?:wp-admin|wp-login\.php|wp-json)(?:/.*)?$", "", parts.path.rstrip("/")) if platform == "wordpress" else ""
     port = f":{parts.port}" if parts.port else ""
     return f"{parts.scheme.lower()}://{host}{port}{path}"
 
@@ -144,20 +161,35 @@ def _key(site: dict) -> str:
     return value
 
 
-def add(cfg, platform: str, address: str, key: str, user: str = "", site_id: str = "", name: str = "", check: bool = True) -> dict:
+def _client(client_id: str, client_secret: str) -> str:
+    """A WordPress.com app's client ID and secret, as they are kept in front of the password: "id:secret:"."""
+    client_id, client_secret = str(client_id or "").strip(), str(client_secret or "").strip()
+    if not re.fullmatch(r"\d{1,12}", client_id):
+        raise SiteError("Give the Client ID of your app at developer.wordpress.com/apps (a number).")
+    if not re.fullmatch(r"[A-Za-z0-9]{20,128}", client_secret):
+        raise SiteError("Give the Client Secret of your app at developer.wordpress.com/apps.")
+    return f"{client_id}:{client_secret}:"
+
+
+def add(cfg, platform: str, address: str, key: str, user: str = "", site_id: str = "", name: str = "", check: bool = True,
+        client_id: str = "", client_secret: str = "") -> dict:
     """Connect a site: its key goes into the key store, and the connection is tried before it is kept."""
     platform = str(platform or "").lower().strip()
     if platform not in PLATFORMS:
-        raise SiteError("Choose WordPress, Shopify, Wix or Squarespace.")
+        raise SiteError("Choose WordPress, WordPress.com, Shopify, Wix or Squarespace.")
     key = str(key or "").strip()
     if not key or len(key) > 400 or any(ch in key for ch in "\r\n"):
-        raise SiteError("Paste the " + PLATFORMS[platform]["key"].split(",")[0].lower() + ".")
+        raise SiteError("Paste the " + PLATFORMS[platform]["key"].split(",")[0].split(" (")[0].lower() + ".")
     register_secret(key)
     row = {"id": _random.token_hex(5), "platform": platform, "address": clean_address(platform, address), "added": time.time()}
+    if "client" in PLATFORMS[platform]["needs"]:
+        key = _client(client_id, client_secret) + key
+        register_secret(key)
     if "user" in PLATFORMS[platform]["needs"]:
         row["user"] = str(user or "").strip()[:80]
         if not row["user"]:
-            raise SiteError("Give the WordPress user name the application password belongs to.")
+            raise SiteError("Give the user name you sign in with" + (" to WordPress.com." if platform == "wordpresscom" else
+                                                                    ", which the application password belongs to (not the password's name)."))
     if "site_id" in PLATFORMS[platform]["needs"]:
         row["site_id"] = str(site_id or "").strip()
         if not re.fullmatch(r"[0-9a-fA-F-]{20,40}", row["site_id"]):
@@ -169,12 +201,16 @@ def add(cfg, platform: str, address: str, key: str, user: str = "", site_id: str
     secrets.store(_key_name(row["id"]), key)
     try:
         if check:
-            found = Remote(row, key).check()
+            found = Remote(row, key).check()            # (for WordPress it also notes where the site's API is: row["route"], row["address"])
             if not name and found:
-                row["name"] = found[:60]
+                row["name"] = " ".join(html.unescape(found).split())[:60]
     except SiteError:
         secrets.delete(_key_name(row["id"]))
+        _TOKENS.pop(row["id"], None)
         raise
+    if any(other["address"] == row["address"] and other["platform"] == platform for other in rows):
+        secrets.delete(_key_name(row["id"]))
+        raise SiteError("That site is connected already.")
     rows.append(row)
     _save(cfg, rows)
     return next(item for item in listing(cfg) if item["id"] == row["id"])
@@ -188,11 +224,18 @@ def rekey(cfg, site_id: str, key: str) -> dict:
         raise SiteError("That site is not connected.")
     key = str(key or "").strip()
     if not key or len(key) > 400 or any(ch in key for ch in "\r\n"):
-        raise SiteError("Paste the new " + PLATFORMS[site["platform"]]["key"].split(",")[0].lower() + ".")
+        raise SiteError("Paste the new " + PLATFORMS[site["platform"]]["key"].split(",")[0].split(" (")[0].lower() + ".")
     register_secret(key)
+    if site["platform"] == "wordpresscom" and not re.match(r"\d{1,12}:[A-Za-z0-9]{20,128}:", key):
+        client, secret, _ = _key(site).split(":", 2)       # (a new password: the app stays the same)
+        key = f"{client}:{secret}:{key}"
+        register_secret(key)
     _TOKENS.pop(site_id, None)
+    before = dict(site)
     Remote(site, key).check()
     secrets.store(_key_name(site_id), key)
+    if site != before:                                     # (where the site's API is, learned again)
+        _save(cfg, [site if row["id"] == site_id else row for row in _saved(cfg)])
     return next(item for item in listing(cfg) if item["id"] == site_id)
 
 
@@ -207,30 +250,67 @@ def remove(cfg, site_id: str) -> bool:
 
 
 # --------------------------------------------------------------------------------------- talking to a platform
+class _OnlyReadsFollow(urllib.request.HTTPRedirectHandler):
+    """A redirect is followed only when reading. Followed after a POST, urllib would ask again with GET and no body: the
+    post would quietly become a look at the list. JARVIS says where the site wants it to go instead (see _call)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if req.get_method() not in ("GET", "HEAD"):
+            return None
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = urllib.request.build_opener(_OnlyReadsFollow)
+
+
+def _agent() -> str:
+    from jcc import __version__
+    return f"Mozilla/5.0 (compatible; JARVIS/{__version__}; personal assistant)"   # (a bare "JARVIS" is turned away by some site firewalls)
+
+
+def _decoded(raw: bytes) -> object:
+    """The API's answer, or {"_page": the start of it} when it is a web page and not an API's answer."""
+    text = raw.decode("utf-8", "replace").lstrip("﻿")
+    if not text.strip():
+        return {}
+    try:
+        return json.loads(text)
+    except ValueError:
+        # (Some sites print a notice or blank lines before WordPress's answer: the answer itself still counts.)
+        start = min((i for i in (text.find("{"), text.find("[")) if i >= 0), default=-1)
+        if start > 0:
+            try:
+                return json.loads(text[start:])
+            except ValueError:
+                pass
+        text = re.sub(r"(?is)<(script|style)\b.*?</\1\s*>", " ", text)
+        return {"_page": " ".join(re.sub(r"<[^>]+>", " ", text).split())[:300]}
+
+
 def _fetch(method: str, url: str, headers: dict, body=None, form: bool = False) -> tuple[int, object]:
     data = None
     if body is not None:
         data = urllib.parse.urlencode(body).encode() if form else json.dumps(body).encode()
         headers = {**headers, "Content-Type": "application/x-www-form-urlencoded" if form else "application/json"}
-    request = urllib.request.Request(url, data=data, method=method, headers={"Accept": "application/json", "User-Agent": "JARVIS", **headers})
+    request = urllib.request.Request(url, data=data, method=method, headers={"Accept": "application/json", "User-Agent": _agent(), **headers})
     try:
-        with urllib.request.urlopen(request, timeout=30) as answer:
-            raw = answer.read(8_000_000)
-            return answer.status, (json.loads(raw) if raw.strip() else {})
+        with _OPENER.open(request, timeout=30) as answer:
+            return answer.status, _decoded(answer.read(8_000_000))
     except urllib.error.HTTPError as problem:
-        raw = problem.read(200_000)
-        try:
-            return problem.code, json.loads(raw)
-        except ValueError:
-            return problem.code, {"message": raw.decode("utf-8", "replace")[:300]}
+        got = _decoded(problem.read(200_000) or b"")
+        if isinstance(got, dict) and 300 <= problem.code < 400:
+            got["_moved"] = str(problem.headers.get("Location") or "")[:300]
+        if isinstance(got, dict) and problem.code == 401 and "basic" in str(problem.headers.get("WWW-Authenticate") or "").lower() and "_page" in got:
+            got["_locked"] = True                         # (a password the web server itself asks for, in front of WordPress)
+        return problem.code, got
     except (urllib.error.URLError, TimeoutError, OSError) as problem:
-        raise SiteError("The site could not be reached: " + redact(str(getattr(problem, "reason", problem)))[:160]) from None
-    except ValueError:
-        raise SiteError("The site answered with something that is not its API's answer. Check the address.") from None
+        from jcc import net
+        raise SiteError("The site could not be reached: " + redact(net.reason(problem))[:300]) from None
 
 
 FETCH = _fetch                    # (tests put a stand-in here)
-_TOKENS: dict[str, tuple[str, float]] = {}       # Shopify tokens exchanged from a client ID and secret, until they expire
+_TOKENS: dict[str, tuple[str, float]] = {}       # Shopify and WordPress.com tokens exchanged for the owner's own app, until they expire
+_ROUTES: dict[str, str] = {}                      # WordPress sites found to answer at ?rest_route= only since they were connected
 
 
 def _said(status: int, answer) -> str:
@@ -239,6 +319,48 @@ def _said(status: int, answer) -> str:
             if answer.get(field):
                 return redact(json.dumps(answer[field]) if not isinstance(answer[field], str) else answer[field])[:200]
     return f"error {status}"
+
+
+_NO_APP_PASSWORDS = ("Application passwords are switched off on this site, so it cannot let JARVIS in. They are on in WordPress unless "
+                     "something turns them off: a security plugin (in Wordfence: Login Security > Settings, untick \"Disable WordPress "
+                     "application passwords\"; others have a similar setting), the host, or the site not using https. Switch them on, "
+                     "then make one in Users > Profile > Application Passwords.")
+_LOCKED = ("The web server asks for a password of its own before WordPress is reached (a protected or staging site). An application "
+           "password cannot pass that lock: lift it for /wp-json/, or connect the live site.")
+_HEADER_LOST = ("The site did not see JARVIS's sign-in at all. Usually the web host drops it on the way to WordPress. The fix is one line, "
+                "put by the host or in the site's .htaccess file, above WordPress's own lines: SetEnvIf Authorization \"(.*)\" "
+                "HTTP_AUTHORIZATION=$1 . Many hosts' support will do it if asked to \"pass the Authorization header to PHP\". A security "
+                "plugin that blocks the REST API for signed-out visitors can cause it too.")
+
+
+def _wordpress_trouble(status: int, answer, site: dict) -> str:
+    """What a WordPress refusal means, in words that say what to do. ("" when it is nothing special.)"""
+    if not isinstance(answer, dict):
+        return ""
+    code, said, user = str(answer.get("code") or ""), redact(str(answer.get("message") or ""))[:160], site.get("user") or "that user"
+    if answer.get("_locked"):
+        return _LOCKED
+    if code == "incorrect_password":
+        return ("WordPress did not take that application password. Make a new one in Users > Profile > Application Passwords and paste it "
+                "(type /sites, Replace key); the password you sign in with does not work here.")
+    if code in ("invalid_username", "invalid_email"):
+        return (f"WordPress has no user called {user}. Give the user name you sign in with (Users > Profile shows it), not the "
+                "application password's name.")
+    if code in ("application_passwords_disabled", "application_passwords_disabled_for_user"):
+        return _NO_APP_PASSWORDS
+    if code in ("rest_not_logged_in", "rest_forbidden_context", "rest_cannot_access", "rest_login_required") or \
+            (status == 401 and code == "rest_forbidden"):
+        return _HEADER_LOST
+    if code in ("rest_cannot_create", "rest_cannot_publish", "rest_cannot_edit", "rest_cannot_edit_others"):
+        return (f"WordPress says {user} may not do that ({said}). Give the user the Editor role (or Author, for posts only), or use "
+                "an application password of a user who may.")
+    if status in (403, 406, 409, 429, 503) and "_page" in answer:
+        return ("The site's firewall turned JARVIS away before WordPress saw the request (error " + str(status) + ": a security plugin, "
+                "the host's firewall or Cloudflare). Allow requests to /wp-json/ from this computer there, then try again.")
+    if site.get("platform") == "wordpresscom" and status in (401, 403):
+        return ("WordPress.com refused the request (" + (said or f"error {status}") + "). Check that the user name is the one that "
+                "owns the site, and that the site is not one with hosting features (those connect as WordPress).")
+    return ""
 
 
 class Remote:
@@ -250,10 +372,25 @@ class Remote:
     # -- plumbing
     def _call(self, method: str, url: str, body=None, form: bool = False, headers: dict | None = None) -> object:
         status, answer = FETCH(method, url, {**self._auth(), **(headers or {})}, body, form)
-        if status == 401 and self.platform == "shopify" and self.site["id"] in _TOKENS:
-            # The app's token ran out before Shopify said it would: a new one, and the same request once more.
+        if status == 401 and self.platform in ("shopify", "wordpresscom") and self.site["id"] in _TOKENS:
+            # The app's token ran out before the platform said it would: a new one, and the same request once more.
             _TOKENS.pop(self.site["id"], None)
             status, answer = FETCH(method, url, {**self._auth(), **(headers or {})}, body, form)
+        if self.platform == "wordpress" and self._wrong_route(status, answer) and self.site.get("route") != "plain":
+            # A site without "pretty" links has no /wp-json/: its API answers at ?rest_route= instead.
+            plain = self._wp_url(url, "plain")
+            if plain:
+                again = FETCH(method, plain, {**self._auth(), **(headers or {})}, body, form)
+                if not self._wrong_route(*again):
+                    self.site["route"], (status, answer) = "plain", again
+                    _ROUTES[self.site["id"]] = "plain"            # (remembered while JARVIS runs, so it is not asked twice each time)
+        if isinstance(answer, dict) and answer.get("_moved") is not None and 300 <= status < 400:
+            raise SiteError("The site sends JARVIS to another address (" + (answer["_moved"] or "no address given") + "). Remove the site in /sites "
+                            "and add it again with the address WordPress uses (Settings > General shows it), so that what JARVIS sends is not lost on the way.")
+        if self.platform in ("wordpress", "wordpresscom") and status >= 400:
+            plain = _wordpress_trouble(status, answer, self.site)
+            if plain:
+                raise SiteError(plain)
         if status in (401, 403):
             raise SiteError(f"{self.site.get('name') or 'The site'} refused JARVIS's key ({_said(status, answer)}). The site stays connected: if the "
                             "key was changed or withdrawn on the site, type /sites and use Replace key; if it lacks a permission, give it that there.")
@@ -261,11 +398,41 @@ class Remote:
             raise SiteError("The site has no such item (or its API is switched off).")
         if status >= 400:
             raise SiteError(f"The site said no: {_said(status, answer)}")
+        if isinstance(answer, dict) and "_page" in answer:
+            raise SiteError("The site answered with a web page, not its API's answer (" + answer["_page"][:120] + "). Check the address" +
+                            (", and that nothing on the site (a maintenance or coming-soon page, a security plugin) hides its API." if self.platform == "wordpress" else "."))
         return answer
+
+    @staticmethod
+    def _wrong_route(status: int, answer) -> bool:
+        """The address reached no WordPress API at all (a web page, or a 404 that is not WordPress's own)."""
+        page = isinstance(answer, dict) and "_page" in answer
+        return (page and status < 500 and not answer.get("_locked")) or (status == 404 and isinstance(answer, dict) and answer.get("code") in (None, "rest_no_route") and
+                                                                           not str(answer.get("message", "")).startswith("Invalid"))
+
+    def _wp_url(self, url: str, route: str) -> str:
+        """The same WordPress API address, written the other way ("plain": ?rest_route=, otherwise /wp-json/)."""
+        address = self.site["address"]
+        if route == "plain" and url.startswith(address + "/wp-json/"):
+            path, _, query = url[len(address) + len("/wp-json"):].partition("?")
+            return address + "/?rest_route=" + urllib.parse.quote(path, safe="/") + ("&" + query if query else "")
+        return ""
+
+    def _wp(self, tail: str) -> str:
+        """The address of a WordPress API call, /wp/v2/<tail>, written the way this site takes it."""
+        path, _, query = tail.partition("?")
+        if self.platform == "wordpresscom":
+            host = urllib.parse.urlsplit(self.site["address"]).hostname
+            return f"{WPCOM_API}/wp/v2/sites/{host}/{path}" + ("?" + query if query else "")
+        if self.site.get("route") == "plain":
+            return self.site["address"] + "/?rest_route=" + urllib.parse.quote("/wp/v2/" + path, safe="/") + ("&" + query if query else "")
+        return self.site["address"] + "/wp-json/wp/v2/" + path + ("?" + query if query else "")
 
     def _auth(self) -> dict:
         if self.platform == "wordpress":
             return {"Authorization": "Basic " + base64.b64encode(f"{self.site['user']}:{self.key}".encode()).decode()}
+        if self.platform == "wordpresscom":
+            return {"Authorization": "Bearer " + self._wpcom_token()}
         if self.platform == "shopify":
             return {"X-Shopify-Access-Token": self._shopify_token()}
         if self.platform == "wix":
@@ -289,10 +456,35 @@ class Remote:
         _TOKENS[self.site["id"]] = (token, time.time() + float(answer.get("expires_in") or 3600))
         return token
 
+    def _wpcom_token(self) -> str:
+        """A WordPress.com token, given for the owner's own app, user name and (application) password. It lasts two weeks;
+        a new one is asked for when it runs out."""
+        held = _TOKENS.get(self.site["id"])
+        if held and held[1] > time.time() + 60:
+            return held[0]
+        client, secret, password = (self.key.split(":", 2) + ["", ""])[:3]
+        status, answer = FETCH("POST", WPCOM_API + "/oauth2/token", {},
+                               {"client_id": client, "client_secret": secret, "grant_type": "password", "username": self.site.get("user", ""),
+                                "password": password}, True)
+        token = answer.get("access_token") if isinstance(answer, dict) else None
+        if status >= 400 or not token:
+            said = (answer.get("error_description") or answer.get("error") or "") if isinstance(answer, dict) else ""
+            low = str(said).lower()
+            if "client" in low:
+                why = "the app's Client ID or Client Secret is not right (developer.wordpress.com/apps shows them)"
+            elif "two" in low or "2fa" in low or "application password" in low or "two_step" in low:
+                why = "two-step sign-in is on for this account, so it needs an application password (wordpress.com/me/security/two-step)"
+            else:
+                why = "the user name or password is not right" + (f" ({redact(str(said))[:120]})" if said else "")
+            raise SiteError("WordPress.com did not let JARVIS in: " + why + ".")
+        register_secret(token)
+        _TOKENS[self.site["id"]] = (token, time.time() + min(float(answer.get("expires_in") or 1_209_600), 1_209_600))
+        return token
+
     def _base(self) -> str:
         address = self.site["address"]
-        return {"wordpress": address + "/wp-json/wp/v2", "shopify": f"{address}/admin/api/{SHOPIFY_VERSION}",
-                "wix": WIX_API, "squarespace": SQUARESPACE_API}[self.platform]
+        return {"wordpress": address + "/wp-json/wp/v2", "wordpresscom": WPCOM_API + "/wp/v2/sites/" + str(urllib.parse.urlsplit(address).hostname),
+                "shopify": f"{address}/admin/api/{SHOPIFY_VERSION}", "wix": WIX_API, "squarespace": SQUARESPACE_API}[self.platform]
 
     def _plural(self, kind: str) -> str:
         return {"post": "posts", "page": "pages", "product": "products"}[kind]
@@ -302,8 +494,11 @@ class Remote:
         """Try the key; the site's own name if it says it."""
         base = self._base()
         if self.platform == "wordpress":
-            self._call("GET", base + "/posts?per_page=1&context=edit&_fields=id")
-            return ""
+            return self._wordpress_check()
+        if self.platform == "wordpresscom":
+            self._call("GET", self._wp("posts?per_page=1&context=edit&_fields=id"))
+            status, about = FETCH("GET", f"{WPCOM_API}/rest/v1.1/sites/{urllib.parse.urlsplit(self.site['address']).hostname}?fields=name", self._auth())
+            return str(about.get("name") or "") if status < 400 and isinstance(about, dict) else ""
         if self.platform == "shopify":
             shop = self._call("GET", base + "/shop.json")
             return str((shop.get("shop") or {}).get("name") or "") if isinstance(shop, dict) else ""
@@ -315,8 +510,8 @@ class Remote:
 
     def items(self, kind: str, limit: int = 20) -> list[dict]:
         base, many = self._base(), self._plural(kind)
-        if self.platform == "wordpress":
-            got = self._call("GET", f"{base}/{many}?per_page={limit}&context=edit&_fields=id,title,status,link")
+        if self.platform in ("wordpress", "wordpresscom"):
+            got = self._call("GET", self._wp(f"{many}?per_page={limit}&context=edit&_fields=id,title,status,link"))
             return [{"id": str(row.get("id")), "title": _raw(row.get("title")), "status": row.get("status", ""), "url": row.get("link", "")}
                     for row in got if isinstance(row, dict)] if isinstance(got, list) else []
         if self.platform == "shopify":
@@ -335,8 +530,8 @@ class Remote:
     def item(self, kind: str, item_id: str) -> dict:
         base, many = self._base(), self._plural(kind)
         safe = urllib.parse.quote(str(item_id), safe="")
-        if self.platform == "wordpress":
-            row = self._call("GET", f"{base}/{many}/{safe}?context=edit")
+        if self.platform in ("wordpress", "wordpresscom"):
+            row = self._call("GET", self._wp(f"{many}/{safe}?context=edit"))
             return {"id": str(row.get("id")), "title": _raw(row.get("title")), "content": _raw(row.get("content")), "status": row.get("status", ""),
                     "url": row.get("link", "")}
         if self.platform == "shopify":
@@ -357,11 +552,13 @@ class Remote:
         kind, fields, target = change["kind"], change["fields"], change.get("target") or ""
         base, many = self._base(), self._plural(kind)
         safe = urllib.parse.quote(str(target), safe="")
-        if self.platform == "wordpress":
+        if self.platform in ("wordpress", "wordpresscom"):
             body = {k: v for k, v in (("title", fields.get("title")), ("content", fields.get("content"))) if v is not None}
             if not target:
                 body["status"] = "publish"
-            row = self._call("POST", f"{base}/{many}/{safe}" if target else f"{base}/{many}", body)
+            row = self._call("POST", self._wp(f"{many}/{safe}" if target else many), body)
+            if not isinstance(row, dict) or not row.get("id"):
+                raise SiteError("The site did not say that it saved the " + kind + ". Look at the site before trying again, so it is not posted twice.")
             return {"id": str(row.get("id")), "url": row.get("link", "")}
         if self.platform == "shopify":
             body = {k: v for k, v in (("title", fields.get("title")), ("body_html", fields.get("content"))) if v is not None}
@@ -388,6 +585,44 @@ class Remote:
         body = {k: v for k, v in (("name", fields.get("title")), ("description", fields.get("content")), ("isVisible", fields.get("visible"))) if v is not None}
         row = self._call("POST", f"{base}/commerce/products/{safe}", body) or {}
         return {"id": str(row.get("id") or target), "url": row.get("url", "")}
+
+    def _wordpress_check(self) -> str:
+        """Find the site's API, see that application passwords are on there, and try the key. The site's name if it says it.
+
+        Where the API is: /wp-json/ normally, ?rest_route=/ on a site without "pretty" links. WordPress also says its own
+        address there: when the one given differs only in "www." or http/https, its own is used, because a site that
+        sends JARVIS on to another address loses what JARVIS posts on the way (see _OnlyReadsFollow)."""
+        address = self.site["address"]
+        status, index = FETCH("GET", address + "/wp-json/", self._auth())
+        route = "pretty"
+        if self._wrong_route(status, index) or not isinstance(index, dict) or status == 404:
+            again = FETCH("GET", address + "/?rest_route=/", self._auth())
+            if not self._wrong_route(*again) and isinstance(again[1], dict) and again[0] != 404:
+                route, (status, index) = "plain", again
+        if isinstance(index, dict) and index.get("_locked"):
+            raise SiteError(_LOCKED)
+        if self._wrong_route(status, index):
+            raise SiteError("No WordPress answered at " + address + " (it gave " + ("a web page" if isinstance(index, dict) and "_page" in index else f"error {status}") +
+                            "). Check the address: it is the one in WordPress's Settings > General, Site Address. If a plugin switches the "
+                            "REST API off, JARVIS needs it on. A site on WordPress.com without hosting features: choose WordPress.com.")
+        self.site["route"] = route
+        name = ""
+        if status < 400 and isinstance(index, dict):
+            name = str(index.get("name") or "")
+            home = urllib.parse.urlsplit(str(index.get("home") or ""))
+            given = urllib.parse.urlsplit(address)
+            if home.scheme == "https" and home.hostname and home.hostname.removeprefix("www.") == (given.hostname or "").removeprefix("www.") \
+                    and (home.hostname, home.path.rstrip("/")) != (given.hostname, given.path.rstrip("/")):
+                self.site["address"] = clean_address("wordpress", f"https://{home.hostname}{':' + str(home.port) if home.port else ''}{home.path}")
+            ways = index.get("authentication")
+            if isinstance(ways, (dict, list)) and "application-passwords" not in (ways if isinstance(ways, dict) else {}):
+                raise SiteError(_NO_APP_PASSWORDS)
+        me = self._call("GET", self._wp("users/me?context=edit&_fields=id,name,capabilities"))
+        able = me.get("capabilities") if isinstance(me, dict) else None
+        if isinstance(able, dict) and able and not (able.get("publish_posts") or able.get("edit_posts")):
+            raise SiteError(f"The user {self.site.get('user')} may not write posts on this site (a Subscriber, perhaps). Give it the Author or "
+                            "Editor role, or use another user's application password.")
+        return name
 
     def _shopify_url(self, kind: str, handle: str) -> str:
         return f"{self.site['address']}/{'products' if kind == 'product' else 'pages'}/{handle}" if handle else ""
@@ -416,6 +651,8 @@ def ricos(text_or_html: str) -> dict:
 
 def remote(cfg, which: str) -> tuple[dict, Remote]:
     site = find(cfg, which)
+    if site["id"] in _ROUTES:
+        site["route"] = _ROUTES[site["id"]]
     return site, Remote(site, _key(site))
 
 

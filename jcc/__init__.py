@@ -1,6 +1,6 @@
 """JARVIS Command Center: Obsidian-based request router (free tiers only, cost always 0)."""
 
-__version__ = "0.1.16"
+__version__ = "0.1.17"
 
 
 def trust_store() -> str:
@@ -29,3 +29,15 @@ def trust_store() -> str:
 
 
 trust_store()
+
+
+def _secure_defaults() -> None:
+    """Secure connections trust Mozilla's list of authorities beside the PC's own (jcc/net.py)."""
+    try:
+        from jcc import net
+        net.install()
+    except Exception:  # noqa: BLE001 - Python's own defaults are kept if this cannot be done
+        pass
+
+
+_secure_defaults()

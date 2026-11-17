@@ -78,7 +78,9 @@ function draw(node, data) {
     '<label class="nv-field"><span>Platform</span><select name="platform">' + Object.entries(platforms).map(([k, p]) => '<option value="' + k + '">' + esc(p.label) + '</option>').join('') + '</select></label>' +
     '<p class="small nv-site-how"></p>' +
     '<label class="nv-field"><span>Site address</span><input name="address" placeholder="https://example.com" autocomplete="off" spellcheck="false"></label>' +
-    '<label class="nv-field" data-need="user"><span>WordPress user name</span><input name="user" autocomplete="off" spellcheck="false"></label>' +
+    '<label class="nv-field" data-need="user"><span>User name (the one you sign in with)</span><input name="user" autocomplete="off" spellcheck="false"></label>' +
+    '<label class="nv-field" data-need="client"><span>Your app’s Client ID</span><input name="client_id" autocomplete="off" spellcheck="false" inputmode="numeric"></label>' +
+    '<label class="nv-field" data-need="client"><span>Your app’s Client Secret</span><input name="client_secret" type="password" autocomplete="off" spellcheck="false"></label>' +
     '<label class="nv-field" data-need="site_id"><span>Wix site ID</span><input name="site_id" autocomplete="off" spellcheck="false"></label>' +
     '<label class="nv-field"><span data-key-label>Key</span><input name="key" type="password" autocomplete="off" spellcheck="false"></label>' +
     '<label class="nv-field"><span>Name (optional)</span><input name="name" placeholder="My shop" autocomplete="off"></label>' +

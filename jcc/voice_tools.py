@@ -86,7 +86,7 @@ TOOLS = [
           "A lookup comes back as who, when and the subject. Set full true only when the user asks to open, read or hear the whole of one message, "
           "thread or document: then its complete text comes back. To send an email use send_email.",
           {"request": _S, "change": {"type": "boolean"}, "full": {"type": "boolean"}}, ["request"]),
-    _tool("list_sites", "The websites the user connected to JARVIS (WordPress, Shopify, Wix, Squarespace): each one's name, platform, and what JARVIS "
+    _tool("list_sites", "The websites the user connected to JARVIS (WordPress, WordPress.com, Shopify, Wix, Squarespace): each one's name, platform, and what JARVIS "
           "can change there. Only these can be read or changed."),
     _tool("site_read", "Read one of the user's connected websites: without item, its latest posts, pages or products (kind); with item (an id from that "
           "list), that one in full.", {"site": _S, "kind": {"type": "string", "enum": ["post", "page", "product"]}, "item": _S}, ["site", "kind"]),
@@ -147,7 +147,7 @@ BRIEF = {"find_files": "find_files(name): find files on this PC by part of their
          "where_to_watch": "where_to_watch(title): which services a film or series is streaming on in the user's country",
          "use_accounts": "use_accounts(request, change?): the user's email, calendar and other online accounts: look something up, or with change true "
          "create, change or delete something, or connect an account. To send an email use send_email",
-         "list_sites": "list_sites(): the user's connected websites (WordPress, Shopify, Wix, Squarespace)",
+         "list_sites": "list_sites(): the user's connected websites (WordPress, WordPress.com, Shopify, Wix, Squarespace)",
          "site_read": "site_read(site, kind: post|page|product, item?): a connected website's latest posts, pages or products, or one in full",
          "site_change": "site_change(site, kind, summary, item?, title?, content?, price?, visible?): a new or changed post, page or product on a "
          "connected website, made into a preview on this computer for the user to publish (never live by itself)",

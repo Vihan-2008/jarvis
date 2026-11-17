@@ -109,3 +109,9 @@ hotkey = true
 mode = "auto"
 repo = "https://github.com/Vihan-2008/jarvis"       # where releases are published (and signed by its maker: see jcc/updates.py)
 check_hours = 24
+
+[notch]
+# NotchPixel: show what JARVIS is doing (thinking, working, waiting for you, done) on its island at the top of the
+# screen. Off unless switched on in config/local.toml. Sends only to 127.0.0.1, at this port.
+enabled = false
+port = 47823

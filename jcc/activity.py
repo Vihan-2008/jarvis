@@ -8,6 +8,12 @@ import time
 from pathlib import Path
 from jcc.vault import atomic_write, parse_frontmatter
 from jcc.redact import redact
+from jcc import notch
+
+# How a job's stage shows on the NotchPixel island (jcc/notch.py). Any other stage is the job thinking: planning,
+# gathering context, or waiting its turn for an agent (which is not waiting for its owner).
+ISLAND = {'working': 'working', 'repair': 'working', 'checking': 'working', 'acceptance': 'working',
+          'needs_approval': 'waiting', 'paused': 'waiting', 'done': 'done', 'merged': 'done', 'failed': 'error', 'cancelled': 'end'}
 
 
 def job_id(value):
@@ -21,6 +27,7 @@ def emit(cfg, rid, stage, message, **fields):
              **{k: str(v)[:150] for k, v in fields.items() if k in ('agent', 'model')}}
     with (work / 'activity.jsonl').open('a', encoding='utf-8') as out:
         out.write(json.dumps(event) + '\n')
+    notch.tell(cfg, rid, ISLAND.get(stage, 'thinking'), event['message'])
 
 
 def events(cfg, rid):
@@ -53,6 +60,9 @@ def alert(cfg, rid, status):
     if path.exists() and json.loads(path.read_text('utf-8')).get('status') == status: return
     value = {'id': rid, 'at': time.time(), 'status': status, 'message': 'Job finished.' if status == 'done' else 'Job needs your review.' if status == 'needs_approval' else 'Job paused; work is preserved.' if status=='paused' else 'Job encountered a failure.'}
     atomic_write(path, json.dumps(value))
+    # The island already shows a status its job wrote last; this is for one reached another way (a recovered worker).
+    if notch.enabled(cfg) and (events(cfg, rid) or [{}])[-1].get('stage') != status:
+        notch.tell(cfg, rid, ISLAND[status], value['message'])
     from jcc.learning import settings
     if os.name != 'nt' or not settings(cfg)['desktop_alerts'] or os.environ.get('JCC_NO_CREDMAN'): return
     heartbeat=cfg.state_dir/'ui-active'

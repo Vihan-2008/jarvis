@@ -23,10 +23,15 @@ class Platforms:
         self.calls.append({"method": method, "url": url, "headers": dict(headers), "body": body, "form": form})
         parts = urllib.parse.urlsplit(url)
         path = parts.path
+        if parts.hostname == "blog.example.com" and path == "/wp-json/":      # the API's index: open to anyone
+            return 200, {"name": "Ann &amp; Co", "home": "https://blog.example.com", "namespaces": ["wp/v2"],
+                         "authentication": {"application-passwords": {"endpoints": {"authorization": "https://blog.example.com/wp-admin/authorize-application.php"}}}}
         if "/wp-json/wp/v2/" in path:
             if headers.get("Authorization") != "Basic " + __import__("base64").b64encode(b"ann:abcd efgh ijkl").decode():
                 return 401, {"message": "Sorry, you are not allowed to do that."}
             tail = path.split("/wp-json/wp/v2/")[1]
+            if method == "GET" and tail == "users/me":
+                return 200, {"id": 1, "name": "Ann", "capabilities": {"edit_posts": True, "publish_posts": True}}
             if method == "GET" and tail == "posts":
                 return 200, list(self.wp_posts.values())
             if method == "GET" and tail.startswith("posts/"):
@@ -85,6 +90,7 @@ class SitesCase(EngineTestCase):
         self.web = Platforms()
         self._fetch, sites.FETCH = sites.FETCH, self.web
         sites._TOKENS.clear()
+        sites._ROUTES.clear()
 
     def tearDown(self):
         sites.FETCH = self._fetch
@@ -114,8 +120,12 @@ class TheSites(SitesCase):
             sites.add(self.cfg, "wordpress", "http://blog.example.com", "abcd efgh ijkl", user="ann")
         with self.assertRaisesRegex(sites.SiteError, "myshopify.com"):
             sites.add(self.cfg, "shopify", "annsshop.com", "shpat_good")
-        with self.assertRaisesRegex(sites.SiteError, "WordPress, Shopify, Wix or Squarespace"):
+        with self.assertRaisesRegex(sites.SiteError, "WordPress, WordPress.com, Shopify, Wix or Squarespace"):
             sites.add(self.cfg, "joomla", "x.com", "k")
+        with self.assertRaisesRegex(sites.SiteError, "choose WordPress.com"):
+            sites.add(self.cfg, "wordpress", "ann.wordpress.com", "abcd efgh ijkl", user="ann")
+        self.assertEqual(sites.clean_address("wordpress", "blog.example.com/wp-admin/post-new.php"), "https://blog.example.com", "an address copied from the admin works")
+        self.assertEqual(sites.add(self.cfg, "wordpress", "blog.example.com", "abcd efgh ijkl", user="ann")["name"], "Ann & Co", "named as the site calls itself")
 
     def test_only_connected_sites_are_ever_reached(self):
         self.wordpress()
@@ -192,6 +202,7 @@ class EachPlatform(SitesCase):
         self.assertEqual(self.web.calls[1]["headers"]["X-Shopify-Access-Token"], "shpat_exchanged")
         sites.remove(self.cfg, site["id"])
         sites._TOKENS.clear()
+        sites._ROUTES.clear()
         with self.assertRaisesRegex(sites.SiteError, "did not give JARVIS a token"):
             sites.add(self.cfg, "shopify", "https://shop.myshopify.com", "client123:wrong")
         self.assertEqual(sites.listing(self.cfg), [], "and nothing is kept")

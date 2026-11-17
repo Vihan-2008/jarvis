@@ -50,11 +50,16 @@ def _agent(cfg, name: str, label: str, about: str, needed: bool, how: str) -> di
 
 def overview(cfg) -> list[dict]:
     from jcc import assistant, mailer, speech
+    from jcc import agents
+    codex = cfg.agents.get("codex")
+    has_chatgpt = bool(codex and agents.available(codex))
     items = [
-        _agent(cfg, "claude", "Claude", "JARVIS's mind. Uses your Claude subscription through Claude Code; no API key is needed.", True,
-               "Install Claude Code, then press Sign in in Settings, AI models & accounts, and sign in with your Claude account."),
-        _agent(cfg, "codex", "GPT (Codex)", "A second AI for building software. Optional.", False,
-               "Install the Codex CLI, then press Sign in in Settings, AI models & accounts. JARVIS works without it."),
+        _agent(cfg, "claude", "Claude", "JARVIS's mind. Uses your Claude subscription (Pro or Max) through Claude Code; no API key is needed. "
+               "Claude's free plan does not include Claude Code.", not has_chatgpt,
+               "Press Install and sign in in Settings, AI models & accounts, and sign in with your Claude account."),
+        _agent(cfg, "codex", "ChatGPT (Codex)", "Your ChatGPT account, the free plan included, through Codex: it answers as JARVIS's mind when Claude "
+               "cannot, and builds software. No API key is needed.", False,
+               "Press Install and sign in in Settings, AI models & accounts, and sign in with your ChatGPT account."),
     ]
     from jcc import providers
     others = [providers.label(cfg, ident).split(" (")[0] for ident in providers.CATALOG if providers.connected(cfg, ident)]

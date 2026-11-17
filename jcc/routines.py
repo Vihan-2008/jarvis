@@ -497,7 +497,7 @@ def _start_now(cfg, ident, send, now: float, allowed) -> dict:
         snapshot = _begin(routine, now, now, manual=True)
         _store(cfg, routines)
     _fire(cfg, snapshot, now, send, now)
-    return get(cfg, ident)
+    return get(cfg, ident, now)
 
 
 def run_now(cfg, ident, send, now: float | None = None) -> dict:

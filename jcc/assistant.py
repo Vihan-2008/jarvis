@@ -23,7 +23,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from jcc import live, memory, pcsound, policy, quick, receipts
+from jcc import live, memory, notch, pcsound, policy, quick, receipts
 from jcc.chats import Chats
 from jcc.config import ROOT
 from jcc.redact import redact
@@ -169,9 +169,9 @@ def valid_choice(value) -> bool:
     for a connected AI service."""
     if value == "auto" or value in MODELS:
         return True
-    from jcc import providers
+    from jcc import codex_brain, providers
     service, _, name = str(value or "").partition(":")
-    return service in providers.CATALOG and bool(re.fullmatch(r"[\w./:@\- ]{1,120}", name))
+    return (service in providers.CATALOG or service == codex_brain.KEY) and bool(re.fullmatch(r"[\w./:@\- ]{1,120}", name))
 
 
 def valid_research(value) -> bool:
@@ -214,7 +214,9 @@ def spec_name(cfg, spec: tuple) -> str:
     """What a brain is called when the owner is told about it."""
     if spec[0] == "claude":
         return "Claude " + spec[1].title()
-    from jcc import providers
+    from jcc import codex_brain, providers
+    if spec[1] == codex_brain.KEY:
+        return codex_brain.NAME
     return providers.label(cfg, spec[1]).split(" (")[0]
 
 
@@ -568,7 +570,8 @@ PLAIN = ("You answer for {name}, the user's assistant. Answer with what you find
 # A brain that cannot answer just now for a reason that is not the request's fault: another one is asked instead.
 TROUBLE = re.compile(r"/login|not logged in|log ?in again|authenticat|unauthori[sz]ed|\b401\b|\b403\b|overloaded|\b529\b|\b50[0234]\b|unavailable|capacity|"
                      r"did not accept the key|could not be reached|is having trouble|refused the request|does not have that model|stopped answering|"
-                     r"is not running on this pc|helper could not be started", re.I)
+                     r"is not running on this pc|helper could not be started|not signed in|sign in again|codex is not installed|could not be started|"
+                     r"requires? (?:a )?(?:claude )?(?:pro|max|paid|subscription)|not included in your plan|does not include claude code", re.I)
 COMPACT = ("Write a summary of this whole conversation that you could carry on from if it were all you had: what the user wanted and why, what was "
            "done and decided, facts and names that matter, the user's preferences that came up, and anything still open. Be exact about names, "
            "numbers, files and addresses. Plain prose and short lists, under 300 words. Reply with the summary only, and use no tools.")
@@ -708,6 +711,8 @@ class Assistant:
         self.cool: dict[str, float] = {}               # brain (or a whole service) -> until when its allowance is used up
         self.waiting: list[dict] = []                  # requests that wait for an allowance to come back, and are then carried on with
         self.stream, self.tool_helper = None, None     # (tests put stand-ins here)
+        # What the sign-ins say, for choosing a brain (see _accounts), and how ChatGPT's Codex is started. (Tests put stand-ins here.)
+        self.brains, self.codex_with = None, {}
         # The small "listening" window (jcc/mini.py), where there is one: which kind each open window is, and the thread
         # that puts the small one on screen while a conversation is going on and the app window is not the one in use.
         self.popup, self.kinds, self.popup_thread, self.popup_until = None, {}, None, 0.0
@@ -730,6 +735,7 @@ class Assistant:
         self.started = True
         self.reminders.start()
         self.apps.refresh_soon()
+        self._accounts(wait=False)                         # (read in the background now, so the first request does not wait for it)
         if self.popup and not light_mode(self.cfg):
             # The small listening window is made ready a little after starting, out of sight, so that it appears at once
             # the first time "Hey JARVIS" is said while another program is in use.
@@ -767,6 +773,7 @@ class Assistant:
                 drop = len(self.events) - 300
                 self.events, self.base = self.events[drop:], self.base + drop
             self.changed.notify_all()
+        notch.chat_event(self.cfg, what, fields, self.turns)   # (the NotchPixel island, where the owner has switched it on)
 
     def _seen(self, window: str) -> None:
         now = time.time()
@@ -1076,6 +1083,14 @@ class Assistant:
         """Start a brain: a Claude Code process, or a conversation with a stand-in service (jcc/standin.py)."""
         spec = ("claude", spec) if isinstance(spec, str) else spec
         ident = _rand.token_hex(8)
+        from jcc import codex_brain
+        if spec[0] != "claude" and spec[1] == codex_brain.KEY:
+            # ChatGPT, through Codex and the owner's ChatGPT sign-in: the same instructions and tools as Claude.
+            session = codex_brain.CodexSession(self.cfg, spec[2], system_prompt(self.cfg, options, helper), ident, self.port, self.key,
+                                               options["pc_control"], **({"popen": self.popen} | self.codex_with))
+            session.spec, session.heard, session.screen, session.context, session.cost, session.retire, session.plain = spec, 0, None, 0, 0.0, False, False
+            session.signature = self._signature(spec, options, helper)
+            return session
         if spec[0] != "claude":
             from jcc import standin
             port, key, state_dir, pc = self.port, self.key, self.cfg.state_dir, options["pc_control"]
@@ -1131,7 +1146,9 @@ class Assistant:
 
     def _signature(self, spec, options: dict, helper: dict) -> tuple:
         spec = ("claude", spec) if isinstance(spec, str) else spec
-        words = system_prompt(self.cfg, options, helper) if spec[0] == "claude" else standin_prompt(self.cfg, options, helper)
+        from jcc import codex_brain
+        whole = spec[0] == "claude" or spec[1] == codex_brain.KEY
+        words = system_prompt(self.cfg, options, helper) if whole else standin_prompt(self.cfg, options, helper)
         return spec_key(spec), options["pc_control"], hashlib.sha256(words.encode("utf-8")).hexdigest()[:16]
 
     def _session(self, chat_id: str, spec, options: dict, helper: dict) -> tuple:
@@ -1196,7 +1213,7 @@ class Assistant:
             try:
                 options, helper = settings(self.cfg), active_assistant(self.cfg)
                 spec = self._first(helper["model"] or options["model"], "")
-                if spec[0] != "claude" or self._blocked(spec):
+                if spec[0] != "claude" or self._blocked(spec) or self._accounts(wait=False)["claude"] in ("free", "off"):
                     return                                 # a stand-in needs no warming up, and a Claude that is out would only fail
                 with self.lock:
                     if self.spare and self.spare.alive() and self.spare.signature == self._signature(spec, options, helper):
@@ -1269,6 +1286,52 @@ class Assistant:
         second = ("claude", "sonnet" if turn.research else "haiku")
         if first[0] == "api" and second not in plan:
             plan.insert(1, second)
+        return self._with_accounts(turn, first, plan)
+
+    def _accounts(self, wait: bool = True) -> dict:
+        """What the sign-ins say, for choosing a brain: Claude "ok", "free" (its plan does not include Claude Code), "off"
+        (not installed or not signed in) or "" (not known); and whether ChatGPT can answer (Codex signed in)."""
+        if self.brains:
+            return self.brains()
+        if self.exe:                                       # (a test's own Claude: the PC's sign-ins have nothing to do with it)
+            return {"claude": "", "chatgpt": False}
+        from jcc import accounts
+        try:
+            claude, codex = accounts.known(self.cfg, "claude", wait), accounts.known(self.cfg, "codex", wait)
+        except Exception:  # noqa: BLE001 - only a hint for the order the brains are tried in
+            return {"claude": "", "chatgpt": False}
+        state = "" if not claude else "free" if claude.get("note") else "ok" if claude.get("installed") and claude.get("signed_in") else "off"
+        return {"claude": state, "chatgpt": bool(codex.get("installed") and codex.get("signed_in"))}
+
+    def _lead(self, spec: tuple) -> tuple | None:
+        """The brain started at once for a request (the rest of the plan waits until it is needed). Claude, unless the
+        accounts say it cannot answer: then ChatGPT when it is signed in. None: nothing is started before the plan is made."""
+        if spec[0] != "claude":
+            return spec
+        seen = self._accounts()
+        if seen["claude"] in ("free", "off") and seen["chatgpt"]:
+            from jcc import codex_brain
+            return ("api", codex_brain.KEY, codex_brain.DEFAULT)
+        return None if seen["claude"] == "free" else spec
+
+    def _with_accounts(self, turn: Turn, first: tuple, plan: list[tuple]) -> list[tuple]:
+        """The plan, put right for the accounts the owner has. ChatGPT (signed in through Codex) answers first when Claude
+        cannot (not installed, not signed in, or on Claude's free plan), and otherwise right after Claude's models when
+        Claude's allowance is out. A Claude free plan is left out altogether: it would only fail, and the owner is told why."""
+        from jcc import accounts, codex_brain
+        seen = self._accounts()
+        gpt = ("api", codex_brain.KEY, codex_brain.DEFAULT)
+        if seen["chatgpt"] and not any(spec[:2] == gpt[:2] for spec in plan):
+            if first[0] == "claude" and seen["claude"] in ("free", "off"):
+                plan.insert(0, gpt)
+            elif turn.options.get("standin", True):
+                lead = 1                                     # (after the first brain and the Claude models that follow it)
+                while lead < len(plan) and plan[lead][0] == "claude":
+                    lead += 1
+                plan.insert(lead, gpt)
+        if seen["claude"] == "free":
+            plan = [spec for spec in plan if spec[0] != "claude"]
+            turn.trouble = turn.trouble or accounts.FREE_CLAUDE
         return plan
 
     def _blocked(self, spec: tuple) -> float:
@@ -1426,7 +1489,7 @@ class Assistant:
         turn.how = str(entry.get("how") or "")
         turn.plan = self._plan(turn)
         blocked = [self._blocked(spec) for spec in turn.plan]
-        if all(blocked):                                    # still out: wait for the first one to come back
+        if blocked and all(blocked):                        # still out: wait for the first one to come back
             with self.lock:
                 entry["until"] = min(blocked) + 20
                 self._save_waiting()
@@ -1490,6 +1553,8 @@ class Assistant:
         choice = model if model and valid_choice(model) else (helper["model"] or options["model"])
         how = how if research and valid_research(how) else ""
         spec = self._first(choice, asked, research, spoken, how)
+        lead = self._lead(spec)
+        spec = lead or spec
         with self.lock:
             if chat_id and chat_id in self.turns:
                 raise ValueError("JARVIS is still answering in this chat. Press Stop first, or wait a moment.")
@@ -1513,7 +1578,7 @@ class Assistant:
             if interrupts is not None and spoken:
                 turn.interrupts = [redact(" ".join(str(step).split()))[:120] for step in (interrupts if isinstance(interrupts, list) else [])[-8:]]
             session = fresh = None
-            if not self._blocked(spec):
+            if lead and not self._blocked(spec):
                 try:
                     session, fresh = self._session(chat_id, spec, options, helper)
                     turn.tried.add(spec_key(spec))
@@ -1595,7 +1660,7 @@ class Assistant:
         project = None if plain else self.cfg.projects.get(Chats(self.cfg).get(chat_id).get("project") or "")
         if project:
             prompt += f"\n(This chat belongs to the project {project.name}, key {project.key}, folder {project.path}.)"
-        if turn.research and session.engine == "claude":
+        if turn.research and session.engine in ("claude", "codex"):
             prompt += ("\n\nThis is a deep research request. Search the web several times from different angles, read the most reliable "
                        "sources with read_web_page, cross-check what they say, and note where they disagree. Then write a clear report in "
                        "Markdown: a short answer first, then sections with the detail, then a Sources list with links. Say plainly "
@@ -1785,7 +1850,7 @@ class Assistant:
             fresh = max(0, int(usage.get("input") or 0) - cached)
         passes = outcome["rounds"] + 1
         session.context = (fresh + cached + written) // passes
-        if session.context > MAX_CONTEXT:
+        if session.context > MAX_CONTEXT and session.engine != "codex":    # (Codex starts afresh each time, with a short record of its own)
             session.retire = True                          # the next request starts on a new session with a short digest of this talk
         if fresh or cached or written or out or outcome["error"]:
             from jcc.usage import log_turn

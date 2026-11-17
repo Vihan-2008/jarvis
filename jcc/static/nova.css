@@ -1253,7 +1253,7 @@ body.nv-coding.nv-grouped #projects{display:none}
 .nv-local pre.nv-brief{max-height:min(60vh,520px);overflow:auto;font:inherit;font-size:13.5px;line-height:1.55;padding:12px 14px;border-radius:var(--r-xs);background:var(--surface-2)}
 
 /* Accounts (Settings, AI models & accounts): signed in with your own subscription. */
-.nv-account .nv-account-state{color:var(--ink-3)}.nv-account .nv-account-state.ok{color:var(--ok)}
+.nv-account .nv-account-state{color:var(--ink-3)}.nv-account .nv-account-state.ok{color:var(--ok)}.nv-account .nv-account-note{color:var(--warn,var(--ink-2));margin-top:2px}
 .nv-account-do{display:flex;justify-content:flex-end;gap:8px}
 
 /* A check chosen in the options menu, done when the message is sent (press it to take it off). */

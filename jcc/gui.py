@@ -1394,6 +1394,7 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                     action, ident = body.get('action'), str(body.get('id') or '')
                     if action == 'status': result = {'accounts': accounts.status(state.cfg, fresh=body.get('fresh') is True)}
                     elif action == 'sign_in': result = accounts.sign_in(state.cfg, ident)
+                    elif action == 'install': result = accounts.install(state.cfg, ident)
                     elif action == 'sign_out': result = accounts.sign_out(state.cfg, ident)
                     else: raise ValueError('Unknown request.')
                     self._json(HTTPStatus.OK, result);return
@@ -1426,7 +1427,8 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                     try:
                         if action == 'add':
                             got = {'site': sites.add(state.cfg, str(body.get('platform', '')), str(body.get('address', '')), str(body.get('key', '')),
-                                                     str(body.get('user', '')), str(body.get('site_id', '')), str(body.get('name', '')))}
+                                                     str(body.get('user', '')), str(body.get('site_id', '')), str(body.get('name', '')),
+                                                     client_id=str(body.get('client_id', '')), client_secret=str(body.get('client_secret', '')))}
                         elif action == 'remove':
                             got = {'removed': sites.remove(state.cfg, str(body.get('id', '')))}
                         elif action == 'rekey':
@@ -1528,7 +1530,11 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                 if self.path == '/api/providers':             # other AI services: Grok, Gemini, Perplexity and the rest (jcc/providers.py)
                     from jcc import providers
                     action, ident = body.get('action'), str(body.get('id', ''))
-                    if action == 'list': result = {'items': providers.listing(state.cfg, look=body.get('look') is True)}
+                    if action == 'list':
+                        from jcc import accounts, codex_brain
+                        # (and the brains that answer through an account the owner signed in with, rather than a key)
+                        result = {'items': providers.listing(state.cfg, look=body.get('look') is True),
+                                  'accounts': [{'id': codex_brain.KEY, 'name': codex_brain.NAME, 'model': codex_brain.DEFAULT}] if accounts.chatgpt_ready(state.cfg) else []}
                     elif action == 'connect': result = providers.connect(state.cfg, ident, str(body.get('key', '')), str(body.get('address', '')), str(body.get('name', '')))
                     elif action == 'disconnect': result = providers.disconnect(state.cfg, ident)
                     elif action == 'model': result = providers.choose_model(state.cfg, ident, str(body.get('model', '')))

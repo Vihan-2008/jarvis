@@ -173,9 +173,12 @@ def fetch(url: str, limit: int, accept: str = "*/*") -> bytes:
         with _open(url, accept) as answer:
             data = answer.read(limit + 1)
     except urllib.error.HTTPError as problem:
+        if problem.code in (403, 429):
+            raise UpdateError("GitHub is limiting how often this network may ask (it answered " + str(problem.code) + "). JARVIS asks again later.") from None
         raise UpdateError(f"GitHub answered {problem.code}.") from None
-    except (OSError, ValueError):
-        raise UpdateError("GitHub could not be reached. Check the internet connection.") from None
+    except (OSError, ValueError) as problem:
+        from jcc import net
+        raise UpdateError("GitHub could not be reached: " + net.reason(problem) + ".") from None
     if len(data) > limit:
         raise UpdateError("An update file was larger than it may be.")
     return data
@@ -201,7 +204,10 @@ def fetch_to(url: str, target: Path, size: int, digest: str) -> None:
         raise UpdateError(f"GitHub answered {problem.code}.") from None
     except (OSError, ValueError) as problem:
         partial.unlink(missing_ok=True)
-        raise problem if isinstance(problem, UpdateError) else UpdateError("The download stopped. It is tried again later.") from None
+        if isinstance(problem, UpdateError):
+            raise
+        from jcc import net
+        raise UpdateError("The download stopped (" + net.reason(problem) + "). It is tried again later.") from None
     if got != size or hasher.hexdigest() != digest:
         partial.unlink(missing_ok=True)
         raise UpdateError("The download does not match its signed fingerprint, so it was thrown away.")

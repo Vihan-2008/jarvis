@@ -825,13 +825,21 @@ N.researchChoices = () => {
   return { chosen, list, perplexity };
 };
 N.setResearch = async value => { options = { ...options, ...(await api('/api/voice', { action: 'settings', settings: { research: value } })) }; };
-let servicesProblem = '';
+let servicesProblem = '', signedBrains = [];   // signedBrains: AIs that answer through an account signed in to (ChatGPT, through Codex), not a key
 async function loadServices(look) {
-  try { services = (await api('/api/providers', { action: 'list', look: !!look })).items; servicesProblem = ''; } catch (error) { servicesProblem = error.message || 'The list could not be read.'; }
+  try { const got = await api('/api/providers', { action: 'list', look: !!look }); services = got.items; signedBrains = got.accounts || []; servicesProblem = ''; } catch (error) { servicesProblem = error.message || 'The list could not be read.'; }
   fillPicker(); return services;
 }
 function fillPicker() {
   const select = $('model'); if (!select) return;
+  let mine = select.querySelector('optgroup[data-account]');
+  if (!signedBrains.length) mine?.remove();
+  else {
+    if (!mine) { mine = document.createElement('optgroup'); mine.dataset.account = '1'; mine.label = 'ChatGPT, with your account (no key)'; select.append(mine); }
+    const keep = select.value;
+    mine.replaceChildren(...signedBrains.map(b => { const o = document.createElement('option'); o.value = 'api:' + b.id + ':' + b.model; o.textContent = b.name; o.dataset.about = o.title = 'Answers with your ChatGPT plan, through Codex. No API key.'; return o; }));
+    if ([...select.options].some(o => o.value === keep)) select.value = keep;
+  }
   let group = select.querySelector('optgroup[data-ai]');
   const on = services.filter(s => s.connected && s.model && s.tools !== false);
   if (!on.length) { group?.remove(); return; }
@@ -1003,6 +1011,7 @@ const BRAIN_NOTES = { haiku: 'Claude\u2019s fastest and lightest: quick question
 const brainNote = id => (modelNotes.find(m => m.provider === 'claude' && m.model === id) || {}).about || BRAIN_NOTES[id] || '';
 const brainChoices = () => [['auto', 'Automatic: the right model for each request (recommended)'],
   ...['haiku', 'sonnet', 'opus', 'fable'].map(id => [id, 'Claude ' + id[0].toUpperCase() + id.slice(1) + ' \u2014 ' + brainNote(id)]),
+  ...signedBrains.map(b => [b.id + ':' + b.model, b.name + ' \u2014 your ChatGPT plan, through Codex; no API key']),
   ...services.filter(s => s.connected && s.model && s.tools !== false).map(s => [s.id + ':' + s.model, s.name.split(' (')[0] + ': ' + s.model.split('/').pop() + (s.model_about ? ' \u2014 ' + s.model_about : '')])];
 const row = (label, control, note) => '<label class="nv-field"><span>' + label + (note ? '<small>' + note + '</small>' : '') + '</span>' + control + '</label>';
 const check = (id, label, note) => '<label class="assistant-check"><input type="checkbox" id="' + id + '"> <span>' + label + (note ? '<small>' + note + '</small>' : '') + '</span></label>';
@@ -1312,19 +1321,30 @@ async function openSettings(tab = 'assistant') {
     try { rows = (await api('/api/accounts', { action: 'status', fresh: !!fresh })).accounts; } catch (error) { spot.innerHTML = '<p class="small">' + esc(error.message) + '</p>'; return; }
     if (!spot.isConnected) return;
     spot.innerHTML = rows.map(a => '<div class="nv-field nv-account" data-account="' + esc(a.id) + '"><span>' + esc(a.name) + '<small>' + esc(a.about) + '</small>' +
-      '<small class="nv-account-state ' + (a.signed_in ? 'ok' : '') + '">' + (a.signed_in ? 'Signed in' + (a.how ? ' ' + esc(a.how) : '') : a.installed ? 'Not signed in' : esc(a.install)) + '</small></span>' +
-      '<div class="nv-account-do">' + (!a.installed ? '' : a.signed_in ? '<button class="plain" type="button" data-sign-out>Sign out</button>' : '<button class="primary" type="button" data-sign-in>Sign in</button>') +
+      '<small class="nv-account-state ' + (a.signed_in && !a.note ? 'ok' : '') + '">' + (a.signed_in ? 'Signed in' + (a.how ? ' ' + esc(a.how) : '') + (a.plan ? ' · ' + esc(a.plan[0].toUpperCase() + a.plan.slice(1)) + ' plan, as of your last sign-in' : '') : a.installed ? 'Not signed in' : a.can_install ? 'Not installed yet' : esc(a.install)) + '</small>' +
+      (a.note ? '<small class="nv-account-note">' + esc(a.note) + '</small>' : '') +
+      (a.plan && !a.note ? '<small>Changed your plan since? Sign out and sign in again so ' + (a.id === 'claude' ? 'Claude Code' : 'Codex') + ' picks it up.</small>' : '') + '</span>' +
+      '<div class="nv-account-do">' + (!a.installed ? (a.can_install ? '<button class="primary" type="button" data-install>Install and sign in</button>' : '') : a.signed_in ? '<button class="plain" type="button" data-sign-out>Sign out</button>' : '<button class="primary" type="button" data-sign-in>Sign in</button>') +
       (a.installed ? '<button class="plain" type="button" data-recheck>Check</button>' : '') + '</div></div>').join('');
     for (const line of spot.querySelectorAll('[data-account]')) {
       const id = line.dataset.account, name = rows.find(a => a.id === id)?.name || id;
-      const inB = line.querySelector('[data-sign-in]'), outB = line.querySelector('[data-sign-out]'), again = line.querySelector('[data-recheck]');
+      const inB = line.querySelector('[data-sign-in]'), outB = line.querySelector('[data-sign-out]'), again = line.querySelector('[data-recheck]'), getB = line.querySelector('[data-install]');
+      if (getB) getB.onclick = async () => {
+        getB.disabled = true;
+        try {
+          await api('/api/accounts', { action: 'install', id });
+          notify('Installing ' + (id === 'claude' ? 'Claude Code' : 'Codex') + ' in the window that opened, from its maker’s own site. Then sign in to ' + name + ' on the page it opens in your browser.');
+          // An install takes a minute or two, then the sign-in: it is asked again a few times meanwhile.
+          for (const wait of [20000, 45000, 90000, 150000, 240000]) setTimeout(() => { if (spot.isConnected) drawAccounts(spot, true).then(() => loadServices(false)); }, wait);
+        } catch (error) { toast(error.message); getB.disabled = false; }
+      };
       if (inB) inB.onclick = async () => {
         inB.disabled = true;
         try {
           await api('/api/accounts', { action: 'sign_in', id });
           notify('Sign in to ' + name + ' on the page that opened in your browser. This shows it once it is done.');
           // It is asked again a few times while the sign-in page is open.
-          for (const wait of [8000, 15000, 30000, 60000]) setTimeout(() => { if (spot.isConnected) drawAccounts(spot, true); }, wait);
+          for (const wait of [8000, 15000, 30000, 60000]) setTimeout(() => { if (spot.isConnected) drawAccounts(spot, true).then(() => loadServices(false)); }, wait);
         } catch (error) { toast(error.message); inB.disabled = false; }
       };
       if (outB) outB.onclick = async () => {

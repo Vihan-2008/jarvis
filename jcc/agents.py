@@ -117,6 +117,17 @@ def resolve_command(command: str) -> str | None:
     if os.name != "nt":
         return _usual_place(command)
     if os.name == "nt" and command == "codex":
+        # OpenAI's own installer (chatgpt.com/codex/install.ps1), then the program inside an npm install (whose codex.cmd
+        # launcher is not started; see _program), then the Codex desktop app's copy.
+        local, roaming = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData/Local"), Path(os.environ.get("APPDATA") or Path.home() / "AppData/Roaming")
+        candidate = local / "Programs/OpenAI/Codex/bin/codex.exe"
+        if candidate.is_file():
+            return str(candidate)
+        package = roaming / "npm/node_modules/@openai/codex"
+        if package.is_dir():
+            found_exe = next((str(p) for p in package.rglob("codex.exe") if "vendor" in p.parts), None)
+            if found_exe:
+                return found_exe
         try:
             result = subprocess.run(["powershell", "-NoProfile", "-Command",
                 "(Get-AppxPackage -Name OpenAI.Codex).InstallLocation"], capture_output=True,
