@@ -67,8 +67,9 @@ Or, in Terminal, from the unpacked package: `bash "Install JARVIS.app/Contents/R
 Other options: `--install-dir`, `--vault`, `--no-app`, `--install-obsidian` / `--no-obsidian`, `--wake-word` /
 `--no-wake-word`, `--login` / `--no-login`, `--open`, `--python`.
 
-JARVIS starts in the background when you log in (you can turn that off in its Settings), so "Hey JARVIS", the
-menu-bar icon and the shortcuts work without opening it first. The uninstaller removes that again.
+JARVIS starts in the background when you log in (you can turn that off in its Settings), so the menu-bar icon and
+the shortcuts work without opening it first. "Hey JARVIS" listens only while a JARVIS window is open. The uninstaller
+removes that again.
 
 The installer also puts in two small programs: one tells the Mac's own sound from your voice, the other is the icon
 in the menu bar and the shortcuts that work from any app (Control+Option with J, T, D or Delete). Each is built on your

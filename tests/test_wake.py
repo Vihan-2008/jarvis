@@ -169,6 +169,160 @@ class TestWakeWord(EngineTestCase):
         self.assertEqual(len(FakeListener.made), 2, "tried again after the wait")
 
 
+class TestOnlyWhileJarvisIsOpen(EngineTestCase):
+    """"Hey JARVIS" listens only while a JARVIS window is open: nothing at sign-in, and the microphone is let go when the
+    last window closes, crashes or stops asking for news. Fake listeners only: no test opens the real microphone."""
+
+    def setUp(self):
+        super().setUp()
+        self.cfg = config.load()
+        self.window_is_open, self.neural = False, []
+        FakeListener.made = []
+
+    def ears(self, **extra):
+        test = self
+
+        class Neural:
+            def __init__(self, heard, device):
+                self.alive = False
+                test.neural.append(self)
+
+            def start(self):
+                self.alive = True
+
+            def running(self):
+                return self.alive
+
+            def stop(self):
+                self.alive = False
+        return wake.Ears(self.cfg, lambda text: None, lambda text: None, FakeListener, FakeRecorder, lambda sound: "", spotter=Neural,
+                         window=extra.pop("window", lambda: self.window_is_open), **extra)
+
+    def wait(self, check, seconds=5.0):
+        until = time.time() + seconds
+        while time.time() < until and not check():
+            time.sleep(0.02)
+        return check()
+
+    def test_no_window_means_no_listener_and_it_follows_the_window(self):
+        ears = self.ears()
+        for _ in range(3):
+            self.assertFalse(ears.sync(), "signed in, no window: nothing listens")
+        self.assertEqual((FakeListener.made, self.neural, ears.waiting, ears.engine), ([], [], True, ""), "neither wake word touched the microphone")
+        self.window_is_open = True
+        self.assertTrue(ears.sync(), "the window opens: it listens")
+        self.assertEqual((len(FakeListener.made), len(self.neural), FakeListener.made[0].alive, self.neural[0].alive, ears.waiting), (1, 1, True, True, False))
+        self.assertTrue(ears.sync())
+        self.assertEqual((len(FakeListener.made), len(self.neural)), (1, 1), "while it stays open (minimised too), nothing is restarted")
+        self.window_is_open = False
+        self.assertFalse(ears.sync(), "the last window closed")
+        self.assertEqual((FakeListener.made[0].alive, self.neural[0].alive, ears.engine, ears.waiting), (False, False, "", True),
+                         "both wake words let go of the microphone")
+        self.assertFalse(ears.sync())
+        self.assertEqual((len(FakeListener.made), len(self.neural)), (1, 1), "and nothing starts them again while it is closed")
+        self.window_is_open = True
+        self.assertTrue(ears.sync())
+        self.assertEqual((len(FakeListener.made), len(self.neural)), (2, 2), "opened again: listening again")
+        ears.stop()
+
+    def test_switched_off_it_neither_listens_nor_looks_for_a_window(self):
+        speech.configure(self.cfg, {"wake": False})
+        asked = []
+
+        def window():
+            asked.append(1)
+            return True
+        ears = self.ears(window=window)
+        self.assertFalse(ears.sync())
+        self.assertEqual((FakeListener.made, ears.waiting, asked), ([], False, []))
+
+    def test_when_it_cannot_be_told_whether_a_window_is_open_nothing_listens(self):
+        def broken():
+            raise OSError("no answer")
+        ears = self.ears(window=broken)
+        self.assertFalse(ears.sync())
+        self.assertEqual((FakeListener.made, self.neural), ([], []))
+
+    def test_the_helpers_own_listener_always_waits_for_a_window(self):
+        self.assertIsNotNone(wake.Ears(self.cfg, lambda text: None).window, "without stand-ins (the tray helper itself) the window is always asked about")
+        self.assertIsNone(wake.Ears(self.cfg, lambda text: None, listener=FakeListener).window)
+
+    def test_windows_is_asked_first_and_the_services_heartbeat_where_it_cannot_be(self):
+        def never():
+            raise AssertionError("not asked")
+        self.assertTrue(wake.window_open(self.cfg, find=lambda: True, ask=never))
+        self.assertFalse(wake.window_open(self.cfg, find=lambda: False, ask=never), "Windows says it has gone (closed, crashed, ended): that settles it")
+        for answer, expected in (({"window": True, "app": True}, True), ({"window": True, "app": False}, False), ({"window": True}, True),
+                                 ({"window": False, "app": False}, False), (None, False)):
+            self.assertIs(wake.window_open(self.cfg, find=lambda: None, ask=lambda: answer), expected, answer)
+
+    def test_the_app_window_is_known_by_its_title_and_the_small_one_does_not_count(self):
+        from jcc import desktop
+        self.assertTrue(desktop.app_window_open(lambda: ["Notepad", "JARVIS · Workspace"]))
+        self.assertFalse(desktop.app_window_open(lambda: ["JARVIS · Listening", "JARVIS · Workspace - Microsoft Edge", "", None]),
+                         "the small listening window kept out of sight, or JARVIS's page in an ordinary browser tab, is not the app")
+
+        def broken():
+            raise OSError("the windows could not be listed")
+        self.assertIsNone(desktop.app_window_open(broken), "cannot be told: the service is asked instead")
+        self.assertIsNone(desktop.app_window_open(), "the tests never look at this PC's real windows")
+
+    def test_the_tray_helper_listens_only_while_a_window_is_open(self):
+        from jcc import tray
+        menus = []
+
+        def make_ears(cfg, deliver, notify, **ways):
+            return wake.Ears(cfg, deliver, notify, FakeListener, FakeRecorder, lambda sound: "", window=lambda: self.window_is_open)
+
+        class Menu:
+            icon, keys = False, {}
+
+            def __init__(self, actions, icon=True, keys=True):
+                self.actions = actions
+                menus.append(self)
+
+            def open(self):
+                return False
+
+            def dictating(self, on):
+                pass
+
+            def close(self):
+                pass
+
+        class Dictation:
+            listening = False
+
+            def __init__(self, cfg, notify, beep=None):
+                pass
+
+            def toggle(self):
+                pass
+        status = self.cfg.state_dir / "tray-status.json"
+
+        def seen():
+            try:
+                return json.loads(status.read_text("utf-8"))
+            except (OSError, ValueError):
+                return {}
+        helper = threading.Thread(target=lambda: tray.listen_only(self.cfg, pause=0.05, make_ears=make_ears, make_menu=Menu, make_dictation=Dictation), daemon=True)
+        helper.start()
+        try:
+            self.assertTrue(self.wait(lambda: seen().get("wake_waits") is True))
+            self.assertEqual((seen()["wake"], FakeListener.made), (False, []), "after sign-in the helper runs and the microphone is not used")
+            self.window_is_open = True
+            self.assertTrue(self.wait(lambda: seen().get("wake") is True), "JARVIS opened: it listens within a moment")
+            self.assertEqual((FakeListener.made[-1].alive, seen()["wake_waits"]), (True, False))
+            self.window_is_open = False
+            self.assertTrue(self.wait(lambda: seen().get("wake") is False), "the last window closed")
+            self.assertEqual((FakeListener.made[-1].alive, seen()["wake_waits"]), (False, True), "the microphone is let go")
+        finally:
+            if menus:
+                menus[0].actions["quit"]()
+            helper.join(timeout=5)
+        self.assertFalse(helper.is_alive())
+
+
 @unittest.skipUnless(os.name == "nt", "Windows only")
 class TestRealOfflineRecogniser(unittest.TestCase):
     def test_windows_spots_the_wake_word_in_a_recording_without_the_internet(self):
@@ -211,7 +365,7 @@ class TestWakeApi(GuiTestCase):
 
     def test_what_was_said_reaches_the_window_or_waits_for_it(self):
         self.state.assistant.hand_wait = 0.3
-        self.assertEqual(self.tray({"action": "status"}), (200, {"window": False, "voice": False, "phase": "idle", "waiting": False}))
+        self.assertEqual(self.tray({"action": "status"}), (200, {"window": False, "app": False, "voice": False, "phase": "idle", "waiting": False}))
         self.assertEqual(self.tray({"action": "say", "text": "  what   time is it "}), (200, {"window": False}), "no window yet: the tray opens one")
         self.assertTrue(self.req("GET", "/api/voice/events?since=0")[1]["waiting"], "any window that turns up is told something is waiting")
         self.assertEqual(self.req("POST", "/api/voice", {"action": "pending"})[1], {"text": "what time is it", "listen": False, "attend": False, "nudge": False}, "the new window picks the request up")
@@ -247,7 +401,7 @@ class TestWakeApi(GuiTestCase):
     def test_the_wake_word_does_not_cut_into_a_spoken_conversation(self):
         self.req("GET", "/api/voice/events?since=0")
         self.req("POST", "/api/voice", {"action": "presence", "phase": "speaking"})
-        self.assertEqual(self.tray({"action": "status"})[1], {"window": True, "voice": True, "phase": "speaking", "waiting": False})
+        self.assertEqual(self.tray({"action": "status"})[1], {"window": True, "app": True, "voice": True, "phase": "speaking", "waiting": False})
         self.assertEqual(self.tray({"action": "say", "text": "jarvis here how can I help"}), (200, {"busy": True}), "JARVIS's own voice is not taken as a request")
         self.req("POST", "/api/voice", {"action": "presence", "phase": "idle"})
         self.state.assistant.hand_wait = 0.3
@@ -259,3 +413,33 @@ class TestWakeApi(GuiTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_the_tray_is_told_whether_the_app_window_is_open(self):
+        """The heartbeat the tray helper goes by where it cannot ask the PC itself (jcc/wake.py window_open)."""
+        agent = self.state.assistant
+        self.assertFalse(self.tray({"action": "status"})[1]["app"], "signed in, no window")
+        self.req("GET", "/api/voice/events?since=0&w=small&kind=mini")
+        status = self.tray({"action": "status"})[1]
+        self.assertEqual((status["window"], status["app"]), (True, False), "the small listening window, kept ready out of sight, is not JARVIS being open")
+        self.req("GET", "/api/voice/events?since=0&w=app1&kind=main")
+        self.assertTrue(self.tray({"action": "status"})[1]["app"])
+        self.req("POST", "/api/voice", {"action": "presence", "phase": "idle", "w": "app1", "gone": True})
+        self.assertFalse(self.tray({"action": "status"})[1]["app"], "closed: the window said so")
+        self.req("GET", "/api/voice/events?since=0&w=app2&kind=main")
+        self.assertTrue(self.tray({"action": "status"})[1]["app"])
+        with agent.lock:
+            agent.windows["app2"] -= 46
+        self.assertFalse(self.tray({"action": "status"})[1]["app"], "crashed or ended: no goodbye, but it stopped asking for news")
+
+    def test_a_window_waits_for_the_helper_only_while_the_helper_runs(self):
+        """The helper says it is about to listen (a window has just opened): the window then does not listen itself. Said by
+        a helper that is no longer running, it is not believed, or nothing would ever listen."""
+        from jcc.lock import InstanceLock
+        (self.state.cfg.state_dir / "tray-status.json").write_text(json.dumps({"wake": False, "wake_waits": True}), "utf-8")
+        self.assertIs(self.req("GET", "/api/speech")[1]["shortcuts"]["wake_waits"], False, "no helper running")
+        helper = InstanceLock(self.state.cfg.state_dir / "tray.lock")
+        self.assertTrue(helper.acquire())
+        try:
+            self.assertIs(self.req("GET", "/api/speech")[1]["shortcuts"]["wake_waits"], True, "the helper is running")
+        finally:
+            helper.release()

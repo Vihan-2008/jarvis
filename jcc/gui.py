@@ -943,7 +943,12 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                         result = {**speech.status(state.cfg, True), 'mail': mailer.status(state.cfg), 'mic_muted': sound.mic_muted(state.cfg)}
                         try:   # which of the tray helper's shortcuts are active (another app may already own one)
                             result['shortcuts'] = json.loads((state.cfg.state_dir / 'tray-status.json').read_text('utf-8'))
-                        except (OSError, ValueError):
+                            # "Waiting for a window to listen" from a helper that is no longer running would keep the window
+                            # from listening for its name itself: only a running helper's word counts.
+                            if result['shortcuts'].get('wake_waits'):
+                                from jcc import connections
+                                result['shortcuts']['wake_waits'] = connections._held(state.cfg.state_dir / 'tray.lock')
+                        except (OSError, ValueError, AttributeError):
                             result['shortcuts'] = {}
                     elif url.path == '/api/speech/voices':
                         result = {'voices': speech.voices(state.cfg)}
@@ -1090,7 +1095,7 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                     said = str(json.loads(raw).get("text", "")) if action == "say" else ""
                 window = state.assistant.window_open()
                 if action == "status":
-                    self._json(HTTPStatus.OK, {"window": window, "voice": state.assistant.voice_busy(), "phase": state.assistant.voice_phase_now(),
+                    self._json(HTTPStatus.OK, {"window": window, "app": state.assistant.app_window_open(), "voice": state.assistant.voice_busy(), "phase": state.assistant.voice_phase_now(),
                                                "waiting": state.assistant._waiting()})
                 elif action == "say":
                     try:

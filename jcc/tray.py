@@ -9,7 +9,8 @@ Windows:
 
 A Mac: the same menu on an icon in the menu bar, and the same shortcuts with Control+Option (J, T, D, Delete). A small
 program shows the icon and hears the shortcuts (installer/mac/menu_bar.swift); this helper does what they ask for.
-On both, the helper also listens for "Hey JARVIS".
+On both, the helper also listens for "Hey JARVIS", but only while a JARVIS window is open (jcc/wake.py): with every window
+closed the microphone is free until a shortcut is pressed.
 Standard library only. Start with:  pythonw -m jcc.tray   (python3 -m jcc.tray on a Mac)
 """
 from __future__ import annotations
@@ -321,12 +322,13 @@ def listen_only(cfg, once: bool = False, pause: float = 4.0, make_ears=None, mak
                     listening = ears.sync()
                 except Exception:  # noqa: BLE001 - the wake word is optional; the helper must keep running
                     listening = False
-                seen = (ears.problem or ears.note, ears.engine, menu.icon, tuple(sorted(menu.keys.items())))
+                seen = (ears.problem or ears.note, ears.engine, getattr(ears, "waiting", False), menu.icon, tuple(sorted(menu.keys.items())))
                 if listening != state["wake"] or seen != state["seen"]:
                     state["wake"], state["seen"] = listening, seen
                     (cfg.state_dir / "tray-status.json").write_text(json.dumps({
                         "tray": bool(menu.icon), **{name + "_hotkey": name in menu.keys for name in NAMES.values()}, "keys": dict(menu.keys),
-                        "wake": bool(listening), "wake_problem": ears.problem or ears.note, "wake_mic": "", "wake_engine": ears.engine,
+                        "wake": bool(listening), "wake_waits": bool(getattr(ears, "waiting", False)),
+                        "wake_problem": ears.problem or ears.note, "wake_mic": "", "wake_engine": ears.engine,
                         "at": time.time()}), "utf-8")
             if dictation.listening != state["dictating"]:
                 state["dictating"] = dictation.listening
@@ -403,7 +405,8 @@ def main() -> int:
     def beep(pitch: int) -> None:       # on the speakers chosen in Voice and assistant, or the Windows default
         sound.beep(cfg, pitch)
     dictation = Dictation(cfg, balloon, beep=beep)
-    # "Hey JARVIS", all the time: spotted on this PC, then handed to JARVIS. Quiet while a spoken conversation is already going on.
+    # "Hey JARVIS" while a JARVIS window is open: spotted on this PC, then handed to JARVIS. Quiet while a spoken conversation
+    # is already going on, and off (the microphone free) while no window is open.
     ears = Ears(cfg, lambda text: say(cfg, text), balloon, beep=beep, busy=lambda: (ask_service(cfg, "status") or {}).get("voice") is True,
                 control=lambda word: ask_service(cfg, "control", word), attend=lambda: attend(cfg), listen=lambda: nudge(cfg), sound=pcsound.shared,
                 name_said=lambda at: ask_service(cfg, "name", str(at)))
@@ -415,7 +418,7 @@ def main() -> int:
         import json
         (cfg.state_dir / "tray-status.json").write_text(json.dumps({
             "tray": tray_added, **{NAMES[ident] + "_hotkey": ident in active for ident in NAMES},
-            "keys": {NAMES[ident]: label for ident, label in active.items()}, "wake": bool(state["wake"]),
+            "keys": {NAMES[ident]: label for ident, label in active.items()}, "wake": bool(state["wake"]), "wake_waits": ears.waiting,
             "wake_problem": ears.problem or ears.note, "wake_mic": ears.microphone(), "wake_engine": ears.engine}), "utf-8")
 
     def keep_ears() -> None:
@@ -423,7 +426,7 @@ def main() -> int:
             listening = ears.sync()
         except Exception:  # noqa: BLE001 - the wake word is optional; the tray must keep running
             listening = False
-        seen = (ears.problem or ears.note, ears.microphone(), ears.engine)
+        seen = (ears.problem or ears.note, ears.microphone(), ears.engine, ears.waiting)
         if listening != state["wake"] or seen != state.get("seen"):
             state["wake"], state["seen"] = listening, seen
             write_status()
@@ -464,7 +467,7 @@ def main() -> int:
             elif lparam == WM_RBUTTONUP:
                 menu(window)
             return 0
-        if message == 0x0113:   # the timer: keep the wake-word listener in step with the settings
+        if message == 0x0113:   # the timer: keep the wake-word listener in step with the settings and with JARVIS's window
             keep_ears()
             return 0
         if message == WM_HOTKEY:

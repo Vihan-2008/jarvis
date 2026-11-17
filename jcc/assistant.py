@@ -790,6 +790,14 @@ class Assistant:
         with self.lock:
             return any(now - at < 45 for at in self.windows.values())
 
+    def app_window_open(self) -> bool:
+        """Is JARVIS's app window open (not just the small listening window, which is kept ready out of sight)? The same
+        heartbeat: one that has not asked for news for 45 seconds has closed or crashed. (The tray helper's wake word
+        listens only while this is so, where it cannot ask the PC itself: jcc/wake.py.)"""
+        now = time.time()
+        with self.lock:
+            return any(now - at < 45 and self.kinds.get(key, "main") != "mini" for key, at in self.windows.items())
+
     def poll(self, since: int, wait: float = 0.0, window: str = "", kind: str = "") -> dict:
         self._seen(window)
         if window:

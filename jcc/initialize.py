@@ -66,7 +66,7 @@ def ensure_notes(cfg: Config) -> None:
 - With the ElevenLabs voice you can talk over it to interrupt.
 - The **microphone** button writes what you say into the message box, so you can check it before sending.
 - From anywhere in Windows: **Ctrl+Alt+Space** starts a voice chat, **Ctrl+Alt+D** types what you say into the app you are using.
-- **"Hey JARVIS"** works all the time, from anywhere, even with the window closed: "Hey JARVIS, what time is it?". It is spotted on this PC only; nothing is sent anywhere until JARVIS hears its name. Switch it off under Voice and assistant.
+- **"Hey JARVIS"** works from anywhere while JARVIS is open, even minimised: "Hey JARVIS, what time is it?". Close JARVIS and the microphone is off. It is spotted on this PC only; nothing is sent anywhere until JARVIS hears its name. Switch it off under Voice and assistant.
 - **Microphone and speakers**: JARVIS uses the ones Windows uses. To pick others, open Voice and assistant and choose them under "Microphone and speakers"; there is a test button for each. If a chosen device is unplugged, JARVIS carries on with the Windows default until it is back.
 
 ## Things you can just say

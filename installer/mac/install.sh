@@ -19,8 +19,9 @@
 #   7. Makes JARVIS.app, a plain app with JARVIS's icon that starts "python3 -m jcc.desktop": in the Applications
 #      folder (/Applications) when this account may write there, as most can without a password, otherwise in
 #      ~/Applications; or in --bundle-dir. An upgrade keeps it where it was.
-#   8. Optionally starts JARVIS in the background when you log in, as on Windows, so "Hey JARVIS", the menu-bar icon and
-#      the shortcuts work without opening it first (a LaunchAgent in ~/Library/LaunchAgents; the uninstaller removes it).
+#   8. Optionally starts JARVIS in the background when you log in, as on Windows, so the menu-bar icon and the shortcuts
+#      work without opening it first (a LaunchAgent in ~/Library/LaunchAgents; the uninstaller removes it). "Hey JARVIS"
+#      listens only while a JARVIS window is open.
 #   9. Optionally installs Obsidian (Homebrew, or opens its download page).
 #  10. Writes uninstall.sh into the install folder, and offers to open JARVIS.
 #
@@ -396,15 +397,15 @@ PLIST
 fi
 
 # ----------------------------------------------------------------------------------------------- start at login
-# As on Windows: JARVIS starts in the background when you log in (no window), so "Hey JARVIS", the menu-bar icon and
-# the shortcuts are there at once. It is started through JARVIS.app, so what macOS allows JARVIS (the microphone,
+# As on Windows: JARVIS starts in the background when you log in (no window), so the menu-bar icon and the shortcuts
+# are there at once ("Hey JARVIS" listens once a JARVIS window is open). It is started through JARVIS.app, so what macOS allows JARVIS (the microphone,
 # Accessibility) is the same either way. It takes effect from the next login.
 agent="$HOME/Library/LaunchAgents/local.jarvis.background.plist"
 want_login=0
 if [ "$LOGIN" = yes ]; then want_login=1
 elif [ "$LOGIN" = ask ] && [ -f "$agent" ]; then want_login=1          # chosen at an earlier install: kept
 elif [ "$LOGIN" = ask ] && [ "$QUIET" = 0 ]; then
-  if ask_yes 'Start JARVIS in the background when you log in, so "Hey JARVIS" works without opening it?' y; then want_login=1; fi
+  if ask_yes 'Start JARVIS in the background when you log in, so its menu-bar icon and shortcuts work without opening it?' y; then want_login=1; fi
 elif [ "$LOGIN" = ask ]; then want_login=1                            # --quiet: as on Windows
 fi
 if [ "$want_login" = 1 ]; then

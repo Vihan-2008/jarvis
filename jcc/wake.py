@@ -1,11 +1,14 @@
-"""Always listening for "Hey JARVIS", from anywhere, without sending anything anywhere.
+"""Listening for "Hey JARVIS" while JARVIS is open, from anywhere, without sending anything anywhere.
 
 Windows' own offline speech recogniser listens to the microphone on this PC and knows one thing:
 the wake word. Ordinary talk is recognised as ordinary talk and dropped on the spot; it never leaves
 the computer. Only a sentence that begins with the wake word is passed on: that one sentence is
 transcribed properly by Whisper and given to JARVIS as a spoken request.
 
-This runs inside the tray helper, so it works whether or not the JARVIS window is open.
+This runs inside the tray helper, which starts when the owner signs in, but it listens only while a JARVIS window is open
+(a minimised one counts): it starts when the window opens and stops within a few seconds of the last one closing,
+crashing or being ended, and the microphone is then free. Talk and Dictate, the keyboard shortcuts, open the microphone
+only when they are pressed (jcc/tray.py).
 """
 from __future__ import annotations
 
@@ -275,11 +278,36 @@ class Listener:
                 pass
 
 
+def window_open(cfg, find=None, ask=None) -> bool:
+    """Is a JARVIS window open, so that the wake word may listen? (A minimised one counts.)
+
+    Windows itself is asked first, every time: it knows at once when the window has closed, crashed or been ended. Where
+    it cannot be asked (a Mac), JARVIS's service is: every app window asks it for news at least every twenty-five seconds,
+    and one that has stopped asking for 45 seconds is taken to be gone, so a window that crashed lets the microphone go
+    too. When neither can be asked, no window is taken to be open and nothing listens.
+    find, ask: tests give stand-ins for asking Windows (jcc/desktop.py) and the service (jcc/tray.py)."""
+    if find is None:
+        from jcc import desktop
+        find = desktop.app_window_open
+    seen = find()
+    if seen is not None:
+        return bool(seen)
+    if ask is None:
+        from jcc.tray import ask_service
+
+        def ask():
+            return ask_service(cfg, "status")
+    answer = ask() or {}
+    return bool(answer.get("app", answer.get("window")))
+
+
 class Ears:
-    """Decides what to do when the wake word is heard, and keeps the listener in step with the settings."""
+    """Decides what to do when the wake word is heard, and keeps the listener in step with the settings and with whether
+    a JARVIS window is open."""
 
     def __init__(self, cfg, deliver, notify=None, listener=None, recorder=None, hear=None, beep=None, busy=None, device=None,
-                 control=None, attend=None, listen=None, sound=None, spotter=None, name_said=None, volume=None, muted=None):
+                 control=None, attend=None, listen=None, sound=None, spotter=None, name_said=None, volume=None, muted=None,
+                 window=None):
         self.cfg, self.deliver, self.notify = cfg, deliver, notify or (lambda text: None)
         self.make_listener, self.make_recorder, self.hear, self.beep = listener or Listener, recorder, hear, beep or (lambda pitch: None)
         self.busy = busy or (lambda: False)          # True while JARVIS is already in a spoken conversation (so it never answers itself)
@@ -305,6 +333,10 @@ class Ears:
         # with it no question about the real microphone.)
         self.muted = muted if muted is not None else (None if listener is not None else self._real_mute)
         self.mute_seen, self.mute_at = False, 0.0
+        # window(): is a JARVIS window open? The wake word listens only then (see window_open above). Tests that bring their
+        # own listener and no window() are taken to have one open.
+        self.window = window if window is not None else (None if listener is not None else (lambda: window_open(self.cfg)))
+        self.waiting = False                         # switched on, and waiting for a window to open before it listens
 
     def _chosen(self):
         from jcc import sound
@@ -347,14 +379,30 @@ class Ears:
         except (IndexError, OSError):
             return ""
 
-    def wanted(self) -> bool:
+    def switched_on(self) -> bool:
+        """"Hey JARVIS" is switched on in Settings, and what follows the name can be written down."""
         from jcc import speech
         return bool(speech.settings(self.cfg)["wake"]) and (self.hear is not None or bool(speech.whisper_provider()))
 
+    def _window_open(self) -> bool:
+        if self.window is None:
+            return True
+        try:
+            return bool(self.window())
+        except Exception:  # noqa: BLE001 - when it cannot be told, nothing listens
+            return False
+
+    def wanted(self) -> bool:
+        """Should it be listening now: switched on, and a JARVIS window is open."""
+        return self.switched_on() and self._window_open()
+
     def sync(self) -> bool:
-        """Start, stop or restart the listener so it matches the settings. Returns whether it is listening."""
+        """Start, stop or restart the listener so it matches the settings and whether a JARVIS window is open. Returns
+        whether it is listening."""
         with self.lock:
-            wanted, current = self.wanted(), names(self.cfg)
+            on = self.switched_on()
+            wanted, current = on and self._window_open(), names(self.cfg)
+            self.waiting = on and not wanted
             device = self.find_device() if wanted else None
             neural = self._sync_neural(wanted, device)
             if self.listener and not self.listener.running():
@@ -371,11 +419,13 @@ class Ears:
                     else:
                         self.notify(self.problem)
                 self.listener = None
-            if self.listener and (not wanted or current != self.names or device != self.device):   # switched off, renamed, or another microphone
+            if self.listener and (not wanted or current != self.names or device != self.device):   # switched off, every window closed, renamed, or another microphone
                 self.listener.stop()
                 self.listener = None
-            if not wanted:
+            if not on:
                 self.problem, self.retry_at = "", 0.0
+            # (With every window closed, a listener that could not start is not tried again at once when one opens: the
+            # owner is not told the same thing each time JARVIS is opened.)
             if wanted and not self.listener and time.time() >= self.retry_at:
                 self.names, self.device = current, device
                 listener = self.make_listener(self._heard, current, **({} if device is None else {"device": device}))

@@ -62,6 +62,40 @@ def open_window() -> int | None:
         return None
 
 
+def _shown_titles() -> list[str]:
+    """The titles of this Windows session's top-level windows that are shown (a minimised one is shown, just not on screen)."""
+    import ctypes
+    from ctypes import wintypes
+    user32, found = ctypes.windll.user32, []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def each(handle, _):
+        if handle and user32.IsWindowVisible(handle):
+            buffer = ctypes.create_unicode_buffer(200)
+            user32.GetWindowTextW(handle, buffer, 200)
+            found.append(buffer.value)
+        return True
+
+    if not user32.EnumWindows(each, 0):
+        raise OSError("the windows could not be listed")
+    return found
+
+
+def app_window_open(titles=None) -> bool | None:
+    """Is JARVIS's app window open right now (minimised counts)? Asked of Windows itself, so the answer is right the moment
+    the window is closed, crashes or is ended from Task Manager. The small listening window (jcc/mini.py), which is kept
+    ready out of sight, does not count. None when this cannot be told here: not Windows, or the tests, which never look at
+    this PC's real windows (tests/__init__.py). titles: tests give the list of window titles."""
+    if titles is None:
+        if os.environ.get("JCC_NO_WINDOW_FIND") or system.kind() != "windows":
+            return None
+        titles = _shown_titles
+    try:
+        return any(MAIN_TITLE.match(title or "") for title in titles())
+    except Exception:  # noqa: BLE001 - cannot be told; whoever asks has another way to find out
+        return None
+
+
 def bring_forward(handle: int) -> bool:
     try:
         from jcc import winctl

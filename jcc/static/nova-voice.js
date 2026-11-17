@@ -568,8 +568,10 @@ const wake = localCapture('wake', { maxMs: 9000 });
 // Whenever none of the listeners above is listening (JARVIS is thinking, or asleep), this one follows what the room
 // sounds like, so that the next one knows it from its first moment. Nothing it hears is kept or sent anywhere.
 const ambient = A.detector({});
-// The tray helper normally listens for the wake word (even with no window open). The window only does it itself when that helper is not running.
-const wakeWanted = () => speech.settings.wake && DIRECT && !muted && !dictating && !(speech.shortcuts && speech.shortcuts.wake);
+// The tray helper normally listens for the wake word while a JARVIS window is open (wake_waits: it is about to, because one
+// has just opened). The window only does it itself when that helper is not running or cannot listen.
+const helperWake = () => !!(speech.shortcuts && (speech.shortcuts.wake || speech.shortcuts.wake_waits));
+const wakeWanted = () => speech.settings.wake && DIRECT && !muted && !dictating && !helperWake();
 function wakeHeard(text) {
   const match = text.match(wakeWord()); if (!match) return;
   const rest = match[1].trim();
@@ -1090,8 +1092,8 @@ async function openSettings(tab = 'assistant') {
       'While a video, a film or music is playing on this PC, JARVIS ignores that sound and only takes what you say to it by name.</p>' +
       check('vs-barge', 'Let me interrupt by talking', 'JARVIS falls silent the moment you start, and “stop” ends what it is saying. While it is working, saying its name or a correction (“no, I meant…”) stops the work and takes the new request. Use headphones if it cuts itself off.') +
       check('vs-duck', 'Turn the PC’s sound down while I speak', 'After “Hey JARVIS”, a film or music playing on this PC is turned down until you have finished speaking, so it does not drown what you say.') +
-      check('vs-wake', 'Wake word: say “Hey JARVIS” at any time', (speech.shortcuts && speech.shortcuts.wake_problem ? esc(speech.shortcuts.wake_problem) + ' ' : speech.shortcuts && speech.shortcuts.wake ? 'Listening now' + (speech.shortcuts.wake_mic ? ' on ' + esc(speech.shortcuts.wake_mic) : '') + '. ' : '') +
-        'JARVIS listens on this PC only, even with this window closed. Nothing is sent anywhere until it hears its name; then that one sentence is transcribed. Windows shows the microphone as in use while this is on.') +
+      check('vs-wake', 'Wake word: say “Hey JARVIS” while JARVIS is open', (speech.shortcuts && speech.shortcuts.wake_problem ? esc(speech.shortcuts.wake_problem) + ' ' : speech.shortcuts && speech.shortcuts.wake ? 'Listening now' + (speech.shortcuts.wake_mic ? ' on ' + esc(speech.shortcuts.wake_mic) : '') + '. ' : '') +
+        'JARVIS listens for its name while a JARVIS window is open, minimised included, and on this PC only. Close JARVIS and the microphone is off; the Talk and Dictate shortcuts still work and use it only while you use them. Nothing is sent anywhere until it hears its name; then that one sentence is transcribed. Windows shows the microphone as in use while it listens.') +
       check('vs-sounds', 'Soft sounds when listening starts and stops') +
       '<h3>From anywhere in Windows</h3><div class="nv-keys">' + [['Talk to JARVIS', 'Ctrl+Alt+Space', 'talk'], ['Dictate into the app you are using', 'Ctrl+Alt+D', 'dictate'], ['Open JARVIS', 'Ctrl+Alt+J', 'open'], ['Stop everything', 'Ctrl+Alt+Backspace', 'stop']]
         .map(([what, usual, name]) => { const now = (speech.shortcuts || {}).keys, missing = now && !now[name]; return '<span>' + what + (missing ? '<small> — not available: other apps use these shortcuts</small>' : '') + '</span><kbd>' + esc(((now && now[name]) || usual).replace(/\+/g, ' + ')) + '</kbd>'; }).join('') + '</div>' +
@@ -1711,7 +1713,9 @@ new MutationObserver(() => hydrate($('messages'))).observe($('messages'), { chil
 
 if (window.speechSynthesis) speechSynthesis.onvoiceschanged = () => {};
 setPhase('idle'); pump();
-loadSpeech().then(() => micSync());
+// The helper starts listening a few seconds after a window opens. Asked again then: if it could not (no recogniser on
+// this PC), the window listens for its name itself.
+loadSpeech().then(() => { micSync(); if (speech.shortcuts?.wake_waits) setTimeout(() => loadSpeech().then(() => micSync()), 9000); });
 
 // Once per version: an update that is ready (or a version just installed) is mentioned, with where to find more.
 setTimeout(async () => {

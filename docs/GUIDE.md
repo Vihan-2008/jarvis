@@ -54,8 +54,9 @@ agents instead, as before.
   by itself if a service is busy. The free Groq tier allows about twenty requests a minute.
 - **Speaking**: ElevenLabs when you add a key under Voice and assistant (kept in Windows
   Credential Manager), streamed as it is made; otherwise the natural voices built into Edge.
-- **Wake word, all the time**: say "Hey JARVIS" (or "Hey JARVIS, open Notepad" in one breath)
-  from anywhere, with or without the window open. The tray helper listens with Windows' own
+- **Wake word, while JARVIS is open**: say "Hey JARVIS" (or "Hey JARVIS, open Notepad" in one breath)
+  from anywhere while a JARVIS window is open, minimised included. Close JARVIS and nothing listens:
+  the microphone is free until you press Talk or Dictate. The tray helper listens with Windows' own
   offline recogniser (`jcc/wake.py`), which knows only the wake word: ordinary talk never leaves
   the PC. A sentence that starts with it is transcribed by Whisper and handed to JARVIS, and the
   window opens by itself to answer. It stays out of a spoken conversation that is already going

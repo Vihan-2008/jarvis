@@ -103,16 +103,16 @@ def overview(cfg) -> list[dict]:
     helper_running = _held(cfg.state_dir / "tray.lock")
     from jcc import system
     if not helper_running and system.kind() == "linux":
-        items.append(_item("helper", "voice", "\"Hey JARVIS\" and shortcuts", "Listens for its name and for the keyboard shortcuts, with or without a window open.",
+        items.append(_item("helper", "voice", "\"Hey JARVIS\" and shortcuts", "Listens for its name while JARVIS is open, and for the keyboard shortcuts at any time.",
                            "off", "Not available on Linux yet"))
     elif not helper_running:
-        items.append(_item("helper", "voice", "\"Hey JARVIS\" and shortcuts", "Listens for its name and for the keyboard shortcuts, with or without a window open.",
+        items.append(_item("helper", "voice", "\"Hey JARVIS\" and shortcuts", "Listens for its name while JARVIS is open, and for the keyboard shortcuts at any time.",
                            "problem", "The background helper is not running",
                            how="It starts with JARVIS. Open JARVIS to start it now." if system.kind() == "mac" else
                            "It starts when you sign in to Windows. Open JARVIS from the Start menu to start it now."))
     else:
         wake = "listening for \"Hey JARVIS\"" if tray.get("wake") else ("\"Hey JARVIS\" is off" if not chosen.get("wake") else "\"Hey JARVIS\" is not listening")
-        items.append(_item("helper", "voice", "\"Hey JARVIS\" and shortcuts", "Listens for its name and for the keyboard shortcuts, with or without a window open.",
+        items.append(_item("helper", "voice", "\"Hey JARVIS\" and shortcuts", "Listens for its name while JARVIS is open, and for the keyboard shortcuts at any time.",
                            "problem" if tray.get("wake_problem") else "ok", "Running, " + wake,
                            detail=str(tray.get("wake_problem") or ", ".join(f"{what} {keys_}" for what, keys_ in (tray.get("keys") or {}).items()))[:200], open="voice"))
     options = assistant.settings(cfg)

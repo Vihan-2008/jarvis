@@ -35,7 +35,7 @@ param(
 # -Friendly is how JARVIS-Setup.exe runs it: no questions (notes in Documents\JARVIS Vault, no Obsidian), JARVIS
 # listed in Settings > Apps so it can be removed from there, a running JARVIS restarted, and JARVIS opened at the end.
 if ($Friendly) {
-    $Quiet = $true; $NoObsidian = $true; $Autostart = $true          # (it starts in the background at sign-in, for "Hey JARVIS")
+    $Quiet = $true; $NoObsidian = $true; $Autostart = $true          # (it starts in the background at sign-in, for the tray icon and the shortcuts)
     try { Start-Transcript -Path (Join-Path $env:TEMP 'jarvis-install.log') -Force | Out-Null } catch { }
 }
 
