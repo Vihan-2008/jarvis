@@ -6,7 +6,7 @@ import time
 import urllib.request
 import urllib.error
 from urllib.parse import urlparse
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 from jcc import secrets
 from jcc.lock import InstanceLock
@@ -98,6 +98,58 @@ def _post(endpoint, key, body):
             time.sleep(1 + attempt)
 
 
+# Each request carries one chunk and runs one inference within Supabase's free CPU allowance, so a request is slow
+# (seconds) while the PC is idle. Up to four are kept in flight: a new one starts as soon as any finishes, instead of
+# four at a time waiting for the slowest. More at once would risk the function's resource limit (HTTP 546).
+IN_FLIGHT = 4
+LEDGER_SAVE_EVERY = 10   # seconds: the ledger is a few MB, so it is saved now and then while a long note uploads
+FORGET_TIME = 30         # seconds each pass gives to removing deleted or private notes, apart from the upload budget
+
+
+def _send_note(post, endpoint, key, rel, parts, digest, offset, started, budget, record):
+    """Upload one note's chunks from `offset`, IN_FLIGHT at a time, until done, a failure, or the budget is used up.
+    `record(acknowledged)` is told how many chunks from `offset` on the cloud has, counting only an unbroken run (a
+    later chunk that arrived early is sent again next time), now and then and when this stops. Returns whether the
+    note is done; raises the first failure once the requests in flight have finished."""
+    payloads = [{"action": "ingest", "path": rel, "chunks": [{"ordinal": i, "content": parts[i], "digest": digest}]}
+                for i in range(offset, len(parts))] or [{"action": "ingest", "path": rel, "chunks": []}]
+    # The last chunk tells the function how long the note is now; it only removes chunks past that end, so the order
+    # replies arrive in does not matter.
+    payloads[-1]["total"] = len(parts)
+    acknowledged, run, failure, saved, nxt = set(), 0, None, time.monotonic(), 0
+    with ThreadPoolExecutor(max_workers=IN_FLIGHT) as pool:
+        flying = {}
+        while True:
+            while failure is None and nxt < len(payloads) and len(flying) < IN_FLIGHT and time.monotonic() - started < budget:
+                flying[pool.submit(post, endpoint, key, payloads[nxt])] = nxt
+                nxt += 1
+            if not flying:
+                break
+            finished, _ = wait(flying, return_when=FIRST_COMPLETED)
+            for future in finished:
+                n = flying.pop(future)
+                try:
+                    ok = future.result().get("ok")
+                except Exception as e:  # noqa: BLE001 - the first failure ends this pass once the rest have landed
+                    failure = failure or e
+                    continue
+                if ok:
+                    acknowledged.add(n)
+                else:
+                    failure = failure or ValueError("Cloud did not acknowledge the memory batch.")
+            before = run
+            while run in acknowledged:
+                run += 1
+            if run > before and time.monotonic() - saved >= LEDGER_SAVE_EVERY:
+                record(run)
+                saved = time.monotonic()
+    if run:
+        record(run)
+    if failure is not None:
+        raise failure
+    return run == len(payloads)
+
+
 def sync(cfg, post=None, budget=20):
     from jcc.governor import reason
     deferred=reason(cfg,network=True)
@@ -152,37 +204,31 @@ def sync(cfg, post=None, budget=20):
             # stale trailing chunks when a note was shortened.
             if offset == len(parts) and parts:
                 offset -= 1
-            while offset < len(parts) or not parts:
-                # Each HTTP request runs one inference within the free CPU
-                # allowance. Four independent requests reduce initial backfill
-                # time without placing a multi-inference load on one request.
-                batch = [{"ordinal": i, "content": parts[i], "digest": digest} for i in range(offset, min(offset + 4, len(parts)))]
-                final = offset + len(batch) >= len(parts)
-                payloads = [{"action": "ingest", "path": rel, "chunks": [part]} for part in batch]
-                if not payloads:
-                    payloads = [{"action": "ingest", "path": rel, "chunks": []}]
-                if final:
-                    payloads[-1]["total"] = len(parts)
-                with ThreadPoolExecutor(max_workers=4) as pool:
-                    responses = list(pool.map(lambda payload: post(settings["endpoint"], key, payload), payloads))
-                if not all(response.get("ok") for response in responses):
-                    raise ValueError("Cloud did not acknowledge the memory batch.")
-                offset += len(batch)
-                ledger[rel] = {"digest": digest, "offset": offset, "done": final, "hashes": hashes[:offset]}
+
+            def record(acknowledged, rel=rel, digest=digest, hashes=hashes, start=offset, total=len(parts)):
+                # (An empty note is one request with no chunks: once it is acknowledged, upto == total == 0.)
+                upto = min(start + acknowledged, total)
+                ledger[rel] = {"digest": digest, "offset": upto, "done": upto == total, "hashes": hashes[:upto]}
                 atomic_write(ledger_path, json.dumps(ledger))
-                if final:
-                    uploaded += 1
-                    pending -= 1
-                    break
-                if time.monotonic() - started >= budget:
-                    break
-        # Deleted/private notes must also disappear from cloud search.
-        for rel in list(ledger):
-            if rel not in seen and time.monotonic() - started < budget:
+
+            if _send_note(post, settings["endpoint"], key, rel, parts, digest, offset, started, budget, record):
+                uploaded += 1
+                pending -= 1
+        # Deleted/private notes must also disappear from cloud search, even while a long backlog uses up the upload
+        # budget of every pass: removals get time of their own.
+        forgets_started = time.monotonic()
+        removed = False
+        try:
+            for rel in list(ledger):
+                if rel in seen or time.monotonic() - forgets_started >= FORGET_TIME:
+                    continue
                 response = post(settings["endpoint"], key, {"action": "forget", "path": rel})
                 if not response.get("ok"):
                     raise ValueError("Cloud did not acknowledge removal.")
                 del ledger[rel]
+                removed = True
+        finally:
+            if removed:
                 atomic_write(ledger_path, json.dumps(ledger))
         status = {"at": time.time(), "status": "indexing" if pending else "synced", "updated_notes": uploaded,
                   "indexed_notes": sum(bool(v.get("done")) for v in ledger.values()), "pending_notes": pending,
@@ -205,6 +251,8 @@ SYNCED_WAIT = 300        # everything is sent: new, changed or newly private not
 IDLE_WAIT = 30           # off, not set up, or deferred: those checks are cheap and stop before the vault is read
 ERROR_WAIT = 30          # the first retry after a failure ...
 ERROR_WAIT_MAX = 900     # ... doubles with each failure in a row, up to fifteen minutes
+UPLOAD_BUDGET = 120      # seconds a pass may upload: the vault is read again only between passes, so longer passes
+                         # spend more of the time sending while a backlog waits (a pass with nothing to send is short)
 
 
 def wait_after(status, failures):
@@ -229,7 +277,7 @@ def main():
     try:
         while True:
             try:
-                status = sync(cfg, budget=45)
+                status = sync(cfg, budget=UPLOAD_BUDGET)
             except Exception as e:
                 status = {"at": time.time(), "status": "error", "error": redact(str(e))[:200]}
                 atomic_write(cfg.state_dir / "cloud-memory-status.json", json.dumps(status))

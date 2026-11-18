@@ -35,7 +35,7 @@ param(
 # -Friendly is how JARVIS-Setup.exe runs it: no questions (notes in Documents\JARVIS Vault, no Obsidian), JARVIS
 # listed in Settings > Apps so it can be removed from there, a running JARVIS restarted, and JARVIS opened at the end.
 if ($Friendly) {
-    $Quiet = $true; $NoObsidian = $true; $Autostart = $true          # (it starts in the background at sign-in, for the tray icon and the shortcuts)
+    $Quiet = $true; $NoObsidian = $true          # (start at sign-in is decided below, once it is known whether this is an update)
     try { Start-Transcript -Path (Join-Path $env:TEMP 'jarvis-install.log') -Force | Out-Null } catch { }
 }
 
@@ -78,6 +78,13 @@ if ($Friendly -and -not $PSBoundParameters.ContainsKey('InstallDir')) {
     # Running Setup again updates the JARVIS that is there; it never installs a second one.
     $there = Find-Installed
     if ($there) { $InstallDir = $there }
+}
+if ($Friendly -and -not $PSBoundParameters.ContainsKey('Autostart')) {
+    # A first install starts JARVIS in the background at sign-in, for the tray icon and the shortcuts. Setup run again
+    # keeps the owner's choice: if they deleted the Startup shortcut, it stays deleted.
+    $startupFolder = if ($ShortcutDir) { $ShortcutDir } else { [Environment]::GetFolderPath('Startup') }
+    $isUpdate = Test-Path -LiteralPath (Join-Path $InstallDir '.jarvis-files')
+    $Autostart = (-not $isUpdate) -or (Test-Path -LiteralPath (Join-Path $startupFolder 'JARVIS (background).lnk'))
 }
 
 # Files and folders that are never copied into the install folder: the person's own settings, the build and test

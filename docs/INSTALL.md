@@ -37,7 +37,9 @@ downloaded as a program, so there is nothing to warn about.
 1. Open `JARVIS-Setup.exe`. It needs no administrator rights and asks nothing: it checks there is room, unpacks
    JARVIS's own Python, puts the app in `%LOCALAPPDATA%\Programs\JARVIS`, makes your notes vault in
    `Documents\JARVIS Vault`, adds JARVIS to the Desktop and the Start menu, sets it to start when you sign in, and
-   opens it. A JARVIS that is already running is closed first and opened again.
+   opens it. A JARVIS that is already running is closed first and opened again. To start JARVIS only yourself,
+   delete **JARVIS (background)** from your Startup folder (press Win+R, type `shell:startup`); updates and running
+   Setup again leave it off.
 2. Type `open calculator` and press Enter.
 
 To choose places yourself, or to install without the window, unpack `JARVIS-windows.zip` and run:

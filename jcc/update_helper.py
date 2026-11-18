@@ -217,8 +217,9 @@ def installer_argv(installer: Path, app_dir: Path) -> list[str]:
         argv = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(installer), "-Quiet", "-InstallDir", str(app_dir),
                 "-NoObsidian", "-NoShortcuts"]
         listed = app_dir / ".shortcuts"
-        if listed.exists() and "JARVIS (background).lnk" in listed.read_text("utf-8", errors="replace"):
-            argv.append("-Autostart")                            # (it started at sign-in before: it still does)
+        lines = listed.read_text("utf-8", errors="replace").splitlines() if listed.exists() else []
+        if any(line.strip().endswith("JARVIS (background).lnk") and Path(line.strip()).is_file() for line in lines):
+            argv.append("-Autostart")    # (it starts at sign-in now: it still will. A shortcut the owner removed stays removed.)
         return argv
     agent = Path.home() / "Library" / "LaunchAgents" / "local.jarvis.background.plist"
     return ["/bin/bash", str(installer), "--quiet", "--install-dir", str(app_dir), "--no-obsidian",

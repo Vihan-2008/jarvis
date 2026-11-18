@@ -86,6 +86,8 @@ jobs:
           $startup = Join-Path ([Environment]::GetFolderPath('Startup')) 'JARVIS (background).lnk'
           if (-not (Test-Path $startup)) { throw 'Setup did not make JARVIS start at sign-in.' }
           'JARVIS starts at sign-in: ' + $startup
+          # The owner turns that off by deleting the Startup shortcut; Setup run again must keep it off.
+          Remove-Item -LiteralPath $startup
           # Setup run a second time updates that JARVIS; it never installs another.
           $proc = Start-Process -FilePath $setup -ArgumentList '/Q' -PassThru
           $null = $proc.Handle
@@ -93,6 +95,7 @@ jobs:
           if ((Get-Content (Join-Path $env:TEMP 'jarvis-install.log') -Raw) -notmatch 'Upgraded the app') { throw 'Setup run again did not update the JARVIS that was there.' }
           $copies = @(Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA 'Programs') -Directory -Filter 'JARVIS*')
           if ($copies.Count -ne 1) { throw "There are $($copies.Count) JARVIS folders after running Setup again." }
+          if (Test-Path $startup) { throw 'Setup run again put back the start at sign-in that the owner had removed.' }
           $up = $false
           for ($i = 0; $i -lt 120; $i++) { try { Invoke-WebRequest http://127.0.0.1:8765/ -UseBasicParsing -TimeoutSec 3 | Out-Null; $up = $true; break } catch { Start-Sleep 1 } }
           if (-not $up) { throw 'JARVIS did not open again after Setup updated it.' }

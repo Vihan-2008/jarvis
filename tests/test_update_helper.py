@@ -165,8 +165,14 @@ class TestAnUpdate(HelperCase):
         if os.name == "nt":
             self.assertEqual([a for a in argv if a.startswith("-") and a not in ("-NoProfile", "-ExecutionPolicy", "-File", "-InstallDir")],
                              ["-Quiet", "-NoObsidian", "-NoShortcuts"])
-            (self.app / ".shortcuts").write_text("C:\\x\\JARVIS (background).lnk\n", "utf-8")
-            self.assertIn("-Autostart", helper.installer_argv(installer, self.app), "it started at sign-in before: it still does")
+            startup = self.tmp / "Startup" / "JARVIS (background).lnk"
+            startup.parent.mkdir()
+            startup.write_bytes(b"lnk")
+            (self.app / ".shortcuts").write_text(f"C:\\x\\JARVIS.lnk\r\n{startup}\r\n", "utf-8")
+            self.assertIn("-Autostart", helper.installer_argv(installer, self.app), "it starts at sign-in now: it still will")
+            startup.unlink()
+            self.assertNotIn("-Autostart", helper.installer_argv(installer, self.app),
+                             "the owner deleted the Startup shortcut: an update must not put it back, though .shortcuts still names it")
         else:
             self.assertIn("--quiet", argv)
             self.assertTrue("--login" in argv or "--no-login" in argv)

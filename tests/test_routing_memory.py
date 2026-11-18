@@ -131,6 +131,87 @@ class CloudMemoryTests(EngineTestCase):
         ordinals=[c['chunks'][0]['ordinal'] for c in calls if c.get('chunks')]
         self.assertEqual(ordinals,[2])
 
+    def _cloud_on(self):
+        self.state.mkdir(parents=True, exist_ok=True)
+        (self.state/'cloud-memory.json').write_text(json.dumps({'enabled': True, 'endpoint': 'https://example.supabase.co/functions/v1/jarvis-brain'}))
+        return config.load()
+
+    def _parts(self, cfg, rel):
+        return cloud_memory.chunks(cloud_memory.note_text(cfg.vault / rel, cfg.vault))
+
+    def test_a_chunk_that_fails_keeps_only_the_unbroken_run_before_it_and_the_next_pass_resumes_there(self):
+        cfg = self._cloud_on()
+        self.note('Notes/Long.md', ' '.join(f'passage{i:04d}' for i in range(700)))
+        total = len(self._parts(cfg, 'Notes/Long.md'))
+        self.assertGreater(total, 6)
+        calls = []
+        def failing(endpoint, key, body):
+            calls.append(body)
+            if body['chunks'] and body['chunks'][0]['ordinal'] == 2:
+                raise OSError('the cloud is busy')
+            return {'ok': True}
+        with patch.object(cloud_memory.secrets, 'get', return_value='test-key'):
+            status = cloud_memory.sync(cfg, failing)
+        self.assertEqual(status['status'], 'error')
+        ledger = json.loads((self.state/'cloud-memory-ledger.json').read_text('utf-8'))['Notes/Long.md']
+        self.assertEqual((ledger['offset'], ledger['done'], len(ledger['hashes'])), (2, False, 2))
+        self.assertLessEqual(max(c['chunks'][0]['ordinal'] for c in calls), 3, 'nothing new is started after a failure')
+        calls.clear()
+        with patch.object(cloud_memory.secrets, 'get', return_value='test-key'):
+            status = cloud_memory.sync(cfg, lambda e, k, body: calls.append(body) or {'ok': True})
+        self.assertEqual(status['status'], 'synced')
+        self.assertEqual(sorted(c['chunks'][0]['ordinal'] for c in calls), list(range(2, total)))
+        self.assertEqual([c['chunks'][0]['ordinal'] for c in calls if 'total' in c], [total - 1])
+        self.assertEqual(next(c for c in calls if 'total' in c)['total'], total)
+        ledger = json.loads((self.state/'cloud-memory-ledger.json').read_text('utf-8'))['Notes/Long.md']
+        self.assertEqual((ledger['offset'], ledger['done']), (total, True))
+
+    def test_at_most_four_requests_are_in_flight_and_the_ledger_is_saved_per_note_not_per_request(self):
+        import threading
+        import time
+        cfg = self._cloud_on()
+        self.note('Notes/Long.md', ' '.join(f'passage{i:04d}' for i in range(2000)))
+        self.note('Notes/Empty.md', '')
+        busy, most, guard = [0], [0], threading.Lock()
+        def slow(endpoint, key, body):
+            with guard:
+                busy[0] += 1
+                most[0] = max(most[0], busy[0])
+            time.sleep(0.01)
+            with guard:
+                busy[0] -= 1
+            return {'ok': True}
+        writes = []
+        real = cloud_memory.atomic_write
+        def counting(path, text):
+            writes.append(path.name)
+            return real(path, text)
+        with patch.object(cloud_memory.secrets, 'get', return_value='test-key'), patch.object(cloud_memory, 'atomic_write', counting):
+            status = cloud_memory.sync(cfg, slow)
+        self.assertEqual(status['status'], 'synced')
+        self.assertGreater(len(self._parts(cfg, 'Notes/Long.md')), 20)
+        self.assertEqual(most[0], cloud_memory.IN_FLIGHT)
+        self.assertLessEqual(writes.count('cloud-memory-ledger.json'), 3, 'once per note, not after every request')
+        ledger = json.loads((self.state/'cloud-memory-ledger.json').read_text('utf-8'))
+        self.assertTrue(ledger['Notes/Long.md']['done'])
+
+    def test_private_or_deleted_notes_leave_cloud_search_even_while_a_backlog_uses_up_the_upload_time(self):
+        cfg = self._cloud_on()
+        self.note('Notes/Kept.md', 'kept ' * 50)
+        self.note('Notes/Gone.md', 'gone ' * 50)
+        calls = []
+        post = lambda e, k, body: calls.append(body) or {'ok': True}
+        with patch.object(cloud_memory.secrets, 'get', return_value='test-key'):
+            cloud_memory.sync(cfg, post)
+            self.note('Notes/Gone.md', '---\nprivate: true\n---\nsecret now')
+            self.note('Notes/Backlog.md', 'waiting ' * 3000)
+            calls.clear()
+            status = cloud_memory.sync(cfg, post, budget=0)
+        self.assertEqual([c['action'] for c in calls], ['forget'])
+        self.assertEqual(calls[0]['path'], 'Notes/Gone.md')
+        self.assertEqual(status['status'], 'indexing')
+        self.assertNotIn('Notes/Gone.md', json.loads((self.state/'cloud-memory-ledger.json').read_text('utf-8')))
+
     def test_notes_reach_the_cloud_as_the_same_text_without_looking_like_an_attack_to_its_firewall(self):
         # Cloudflare refused a conversation note quoting a path-traversal string, and every later note waited on it.
         text = 'GET /..%2f..%2fWindows/win.ini <script>alert(1)</script> \' OR 1=1 -- "q" \\ tab\tnl\n\x7f é 中 🙂 \ud800'
