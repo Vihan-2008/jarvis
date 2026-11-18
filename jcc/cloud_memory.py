@@ -170,12 +170,35 @@ def sync(cfg, post=None, budget=20):
     return status
 
 
+# Every pass reads, redacts and fingerprints the whole vault before it knows whether anything changed, which costs
+# several seconds of CPU on a large vault. So the worker rests longer when there is nothing left to send, and a cloud
+# that keeps refusing (a wrong key, an outage) is asked less and less often instead of every half minute forever.
+INDEXING_WAIT = 5        # notes are still waiting to be sent
+SYNCED_WAIT = 300        # everything is sent: new, changed or newly private notes are noticed within five minutes
+IDLE_WAIT = 30           # off, not set up, or deferred: those checks are cheap and stop before the vault is read
+ERROR_WAIT = 30          # the first retry after a failure ...
+ERROR_WAIT_MAX = 900     # ... doubles with each failure in a row, up to fifteen minutes
+
+
+def wait_after(status, failures):
+    """Seconds to rest after a pass, from its status and the number of failed passes in a row."""
+    state = (status or {}).get("status")
+    if state == "indexing":
+        return INDEXING_WAIT
+    if state == "synced":
+        return SYNCED_WAIT
+    if state == "error":
+        return min(ERROR_WAIT * 2 ** min(max(failures - 1, 0), 10), ERROR_WAIT_MAX)
+    return IDLE_WAIT
+
+
 def main():
     from jcc.config import load
     cfg = load()
     lock = InstanceLock(cfg.state_dir / "cloud-worker.lock")
     if not lock.acquire():
         return
+    failures = 0
     try:
         while True:
             try:
@@ -183,7 +206,8 @@ def main():
             except Exception as e:
                 status = {"at": time.time(), "status": "error", "error": redact(str(e))[:200]}
                 atomic_write(cfg.state_dir / "cloud-memory-status.json", json.dumps(status))
-            time.sleep(5 if status and status.get("status") == "indexing" else 30)
+            failures = failures + 1 if status and status.get("status") == "error" else 0
+            time.sleep(wait_after(status, failures))
     finally:
         lock.release()
 

@@ -131,6 +131,30 @@ class CloudMemoryTests(EngineTestCase):
         ordinals=[c['chunks'][0]['ordinal'] for c in calls if c.get('chunks')]
         self.assertEqual(ordinals,[2])
 
+    def test_a_cloud_that_keeps_refusing_is_asked_less_often_and_a_success_resets_the_wait(self):
+        # Each pass reads the whole vault, so a wrong key used to cost that work every half minute, forever.
+        self.state.mkdir(parents=True, exist_ok=True)
+        passes = iter([{'status': 'error'}] * 3 + [{'status': 'synced'}, {'status': 'error'}])
+        waits = []
+        def sleep(seconds):
+            waits.append(seconds)
+            if len(waits) == 5:
+                raise KeyboardInterrupt      # the only way out of the worker's endless loop
+        with patch.object(cloud_memory, 'sync', lambda cfg, budget: next(passes)), \
+                patch.object(cloud_memory.time, 'sleep', sleep), self.assertRaises(KeyboardInterrupt):
+            cloud_memory.main()
+        self.assertEqual(waits, [30, 60, 120, 300, 30])
+
+    def test_failures_in_a_row_wait_at_most_fifteen_minutes(self):
+        waits = [cloud_memory.wait_after({'status': 'error'}, n) for n in range(1, 8)]
+        self.assertEqual(waits, [30, 60, 120, 240, 480, 900, 900])
+        self.assertEqual(cloud_memory.wait_after({'status': 'error'}, 10**6), 900)
+
+    def test_unsent_notes_keep_the_worker_busy_and_cheap_checks_stay_frequent(self):
+        self.assertEqual(cloud_memory.wait_after({'status': 'indexing'}, 0), 5)
+        for status in (None, {'status': 'deferred'}):
+            self.assertEqual(cloud_memory.wait_after(status, 0), 30)
+
 
 class CloudApiTests(GuiTestCase):
     def test_pairing_is_authenticated_and_secrets_not_in_state(self):
