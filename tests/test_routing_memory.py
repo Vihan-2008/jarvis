@@ -131,6 +131,29 @@ class CloudMemoryTests(EngineTestCase):
         ordinals=[c['chunks'][0]['ordinal'] for c in calls if c.get('chunks')]
         self.assertEqual(ordinals,[2])
 
+    def test_notes_reach_the_cloud_as_the_same_text_without_looking_like_an_attack_to_its_firewall(self):
+        # Cloudflare refused a conversation note quoting a path-traversal string, and every later note waited on it.
+        text = 'GET /..%2f..%2fWindows/win.ini <script>alert(1)</script> \' OR 1=1 -- "q" \\ tab\tnl\n\x7f é 中 🙂 \ud800'
+        body = {'action': 'ingest', 'path': 'Conversations/a b.md', 'chunks': [{'ordinal': 3, 'content': text, 'digest': 'ab12'}], 'total': 4, 'final': True, 'none': None}
+        wire = cloud_memory.wire_json(body)
+        self.assertEqual(json.loads(wire), body)
+        strings = wire.replace('\\u', '').replace('"', '')
+        self.assertRegex(strings, r'^[A-Za-z0-9{}\[\]:,]*$')
+        sent = []
+        class Reply:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self, *a): return b'{"ok": true}'
+        def urlopen(request, timeout):
+            sent.append(request.data)
+            return Reply()
+        with patch.object(cloud_memory.urllib.request, 'urlopen', urlopen):
+            self.assertEqual(cloud_memory._post('https://example.supabase.co/functions/v1/jarvis-brain', 'k', body), {'ok': True})
+        self.assertNotIn(b'..', sent[0])
+        self.assertEqual(json.loads(sent[0]), body)
+        emoji = cloud_memory.wire_json({'action': 'ingest', 'path': 'p' * 500 + '.md', 'chunks': [{'ordinal': 9, 'content': '🙂' * 1100, 'digest': 'f' * 64}], 'total': 10})
+        self.assertLess(len(emoji), 25000)
+
     def test_a_cloud_that_keeps_refusing_is_asked_less_often_and_a_success_resets_the_wait(self):
         # Each pass reads the whole vault, so a wrong key used to cost that work every half minute, forever.
         self.state.mkdir(parents=True, exist_ok=True)

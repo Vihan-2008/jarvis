@@ -14,7 +14,7 @@ def cloud(cfg,query):
     if not saved.get('enabled') or parsed.scheme!='https' or not re.fullmatch(r'[a-z0-9]+\.supabase\.co',parsed.hostname or '') or parsed.path!='/functions/v1/jarvis-brain' or parsed.username or parsed.password:raise ValueError('Cloud memory endpoint is unavailable.')
     key=secrets.get('supabase-query')
     if not key:raise ValueError('The saved read-only search connection is unavailable.')
-    request=urllib.request.Request(endpoint,data=json.dumps({'action':'search','query':query}).encode(),headers={'Content-Type':'application/json','x-jarvis-key':key})
+    request=urllib.request.Request(endpoint,data=cloud_memory.wire_json({'action':'search','query':query}).encode(),headers={'Content-Type':'application/json','x-jarvis-key':key})
     with urllib.request.urlopen(request,timeout=5) as response:
         raw=response.read(200001)
         if len(raw)>200000:raise ValueError('Cloud search reply exceeded its limit.')
