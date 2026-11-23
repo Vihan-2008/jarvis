@@ -452,7 +452,7 @@ class GuiState:
             whole = {"full": True} if args.get("full") is True and args.get("change") is not True else {}      # the whole of a message, when its owner asked to read it
             got = (getattr(self, "accounts_runner", None) or online.run)(cfg, str(args.get("request", "")), change=args.get("change") is True, name=active_assistant(cfg)["name"], **whole)
             spent = got.get("usage") or {}
-            used.log_turn(cfg.state_dir, {"engine": "claude", "model": str(got.get("model") or "sonnet") + " (accounts)", "status": "done", "input": spent.get("input_tokens"),
+            used.log_turn(cfg.state_dir, {"engine": str(got.get("engine") or "claude"), "model": str(got.get("model") or "sonnet") + " (accounts)", "status": "done", "input": spent.get("input_tokens"),
                                           "cached": spent.get("cache_read_input_tokens"), "written": spent.get("cache_creation_input_tokens"), "output": spent.get("output_tokens"),
                                           "cost": got.get("cost"), "seconds": time.time() - began})
             return {"text": str(got.get("text") or "")}

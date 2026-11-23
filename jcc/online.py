@@ -288,14 +288,15 @@ def _rules(name: str, change: bool, full: bool, connect: bool) -> str:
     return RULES.format(name=name) + ((CONNECT_RULE if connect else ACT_RULE) if change else READ_RULE + (FULL_RULE if full else BRIEF_RULE))
 
 
-def gate_argv(exe: str, tier: str, apps: list[str], model: str, name: str = "JARVIS", full: bool = False) -> list[str]:
+def gate_argv(exe: str, tier: str, apps: list[str], model: str, name: str = "JARVIS", full: bool = False, marker: Path | None = None) -> list[str]:
     """The helper's command line with a ck_ key: its only tools are JARVIS's gate (jcc/composio_gate.py), started with the
     request's kind and the connected apps, and of the gate's tools only those the kind allows, each by its own name. The
     gate reads the key from the key store itself: it is not in the helper's environment."""
     from jcc.config import ROOT
     python = Path(sys.executable)
     python = python.with_name("python.exe") if python.name.lower() == "pythonw.exe" else python
-    servers = {"mcpServers": {"accounts": {"type": "stdio", "command": str(python), "args": ["-m", "jcc.composio_gate", tier, ",".join(apps)],
+    servers = {"mcpServers": {"accounts": {"type": "stdio", "command": str(python),
+                                           "args": ["-m", "jcc.composio_gate", tier, ",".join(apps)] + ([str(marker)] if marker else []),
                                            "env": {"PYTHONPATH": str(ROOT), "PYTHONIOENCODING": "utf-8"}}}}
     allowed = ",".join("mcp__accounts__" + tool for tool in composio_gate.TIERS[tier])
     return [exe, "-p", "--model", model, "--output-format", "json", "--tools", "", "--disable-slash-commands", "--setting-sources", "",
@@ -312,22 +313,160 @@ def argv_for(exe: str, url: str, change: bool, model: str, name: str = "JARVIS",
             "--system-prompt", _rules(name, change, full, connect)]
 
 
-def run(cfg, request: str, change: bool = False, name: str = "JARVIS", exe: str | None = None, runner=None, opener=None, timeout: float = 170.0,
-        full: bool = False) -> dict:
-    """Have the helper do one thing in the owner's online accounts. Returns {"text", "model", "usage", "cost"}.
-    full: the owner asked to read the whole of one message, thread or document (only for looking up, never with change)."""
+# ---------------------------------------------------------------------- which helper, when one is at its limit
+# Claude answers first (sonnet, then haiku when sonnet's allowance is used up). With a ck_ key, ChatGPT (through Codex,
+# signed in with the owner's ChatGPT account) takes over when Claude is at its limit, through the same gate. Only a
+# usage limit moves the request on to the next helper; any other trouble is said as it is. A helper at its limit is not
+# started again until it is back. The owner hears about limits only when every helper is at one.
+TOTAL = 190.0                    # every helper of one request together (the assistant waits 200 seconds for the answer)
+EACH = 170.0                     # one helper, at most
+REST, REST_LEAST, REST_MOST = 900.0, 300.0, 5 * 3600.0
+CLAUDE_HELPERS = ("claude:sonnet", "claude:haiku")
+CHATGPT = "codex"
+_resting: dict[str, tuple[float, bool]] = {}   # helper -> (when it may be started again, whether it said that time itself)
+# What ChatGPT may do as this helper. Codex ignores a setting it does not know, so the switches that keep it from the web
+# and the shell are checked again here, in what it did: an answer made any other way is not used.
+STEPS = frozenset({"agent_message", "reasoning", "mcp_tool_call", "error", "todo_list"})
+ALL_OUT = "Claude and ChatGPT have both reached their usage limits, so nothing was {did} in your accounts. "
+SIGNED_OUT_CHATGPT_OUT = "Claude is not signed in, and ChatGPT has reached its usage limit, so nothing was {did} in your accounts. "
+CLAUDE_OUT ="Claude has reached its usage limit, so nothing was {did} in your accounts. "
+SIGN_IN_CHATGPT = " Sign in to ChatGPT in Settings, AI models & accounts, and JARVIS will switch to it when this happens."
+PARTLY = "The usage limit was reached partway through, so this may be only partly done. Check before asking again."
+NOT_USED = "ChatGPT tried to do something it may not do here, so its answer was not used. Nothing else was done."
+INVENTED = "ChatGPT answered without looking in your accounts, so its answer was not used. Nothing was done."
+TOO_LONG = "That took too long, so it was stopped. Nothing more was done."
+
+
+def back_at(text: str, at: float | None = None) -> tuple[float, bool]:
+    """(when a helper that said it is at its limit may be started again, whether it said when): the time it gives
+    ("resets 1:10am", "try again in 2 hours"), kept between five minutes and five hours; else a quarter of an hour."""
+    from jcc.assistant import limit_until
+    at = time.time() if at is None else at
+    until = limit_until(text or "", at)
+    if until is None:
+        return at + REST, False
+    return at + min(REST_MOST, max(REST_LEAST, until - at)), True
+
+
+def resting(helper: str, at: float | None = None) -> bool:
+    return _resting.get(helper, (0.0, False))[0] > (time.time() if at is None else at)
+
+
+def _rest(helper: str, said: str) -> None:
+    _resting[helper] = back_at(said)
+
+
+def _clock(at: float) -> str:
+    moment = time.localtime(at)
+    return f"{moment.tm_hour % 12 or 12}:{moment.tm_min:02d} " + ("am" if moment.tm_hour < 12 else "pm")
+
+
+def _all_out(helpers: list[str], did: str, could_sign_in: bool) -> str:
+    """What the owner is told when every helper is at its usage limit."""
+    known = sorted((_resting[helper][0], helper) for helper in helpers if resting(helper) and _resting[helper][1])
+    if CHATGPT in helpers:
+        first = ("ChatGPT" if known[0][1] == CHATGPT else "Claude") if known else ""
+        return ALL_OUT.format(did=did) + (f"{first} is back first, at {_clock(known[0][0])}." if known else "Try again in a little while.")
+    return (CLAUDE_OUT.format(did=did) + (f"It is back at {_clock(known[0][0])}." if known else "Try again in a little while.")
+            + (SIGN_IN_CHATGPT if could_sign_in else ""))
+
+
+def codex_argv(exe: str, tier: str, apps: list[str], instructions: Path, work: Path, marker: Path | None = None) -> list[str]:
+    """ChatGPT as the helper (through `codex exec`): its only tools are the gate's, for this kind of request; none of
+    Codex's own (no shell, no files, no web search, no apps or plugins); without the owner's Codex settings; nothing kept."""
+    from jcc import codex_brain
+    from jcc.config import ROOT
+    gate = ["-m", "jcc.composio_gate", tier, ",".join(apps)] + ([str(marker)] if marker else [])
+    argv = [exe, "exec", "--json", "--ephemeral", "--ignore-user-config", "--skip-git-repo-check", "-s", "read-only", "-C", str(work)]
+    for feature in codex_brain.OFF:
+        argv += ["-c", f"features.{feature}=false"]
+    return argv + ["-c", 'web_search="disabled"', "-c", 'approval_policy="never"',
+                   "-c", "include_permissions_instructions=false", "-c", "include_environment_context=false",
+                   "-c", "model_instructions_file=" + json.dumps(str(instructions)),
+                   "-c", "mcp_servers.accounts.command=" + json.dumps(codex_brain._python()),
+                   "-c", "mcp_servers.accounts.args=" + json.dumps(gate),
+                   "-c", "mcp_servers.accounts.cwd=" + json.dumps(str(ROOT)),
+                   # (the gate reads the key from the key store itself: nothing of the owner's passes to it, or to Codex)
+                   "-c", "mcp_servers.accounts.env_vars=" + json.dumps(["PYTHONPATH", "PYTHONIOENCODING"]),
+                   "-c", "mcp_servers.accounts.enabled_tools=" + json.dumps(list(composio_gate.TIERS[tier])),
+                   "-c", "mcp_servers.accounts.startup_timeout_sec=30", "-c", "mcp_servers.accounts.tool_timeout_sec=150",
+                   "-c", 'mcp_servers.accounts.default_tools_approval_mode="approve"', "-"]
+
+
+def _codex_answer(out: str) -> dict:
+    """What ChatGPT answered, from `codex exec --json`'s events: {"text", "problem", "usage", "calls" (the gate's tools it
+    used), "bad" (anything else it did)}."""
+    said, problem, usage, calls, bad = [], "", {}, 0, []
+    for raw in (out or "").splitlines():
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        kind, item = data.get("type"), data.get("item") if isinstance(data.get("item"), dict) else {}
+        what = item.get("type")
+        if kind in ("item.started", "item.updated", "item.completed") and what not in STEPS:
+            bad.append(str(what))
+        elif what == "mcp_tool_call" and kind == "item.completed":
+            if item.get("server") not in (None, "accounts") or str(item.get("tool") or "") not in composio_gate.TIERS["connect"] + composio_gate.TIERS["act"]:
+                bad.append("tool " + str(item.get("server")) + "/" + str(item.get("tool")))
+            else:
+                calls += 1
+        if kind == "item.completed" and what == "agent_message" and str(item.get("text") or "").strip():
+            said.append(str(item["text"]).strip())
+        elif kind == "item.completed" and what == "error":
+            message = str(item.get("message") or "")
+            if not message.startswith("Codex is ignoring"):         # (a setting this version of Codex does not know)
+                problem = message
+        elif kind == "error":
+            problem = str(data.get("message") or problem)
+        elif kind == "turn.failed":
+            failed = data.get("error")
+            problem = str((failed or {}).get("message") if isinstance(failed, dict) else failed or problem or "ChatGPT could not answer.")
+        elif kind == "turn.completed" and isinstance(data.get("usage"), dict):
+            numbers = data["usage"]
+            usage = {"input_tokens": int(numbers.get("input_tokens") or 0), "cache_read_input_tokens": int(numbers.get("cached_input_tokens") or 0),
+                     "output_tokens": int(numbers.get("output_tokens") or 0)}
+    return {"text": "\n\n".join(said), "problem": problem, "usage": usage, "calls": calls, "bad": bad}
+
+
+def _chatgpt(cfg, chatgpt: bool | None, codex: str | None = None) -> str:
+    """Codex, when ChatGPT can answer as the helper ("" when not): installed and signed in."""
+    if chatgpt is None:
+        from jcc import accounts
+        chatgpt = accounts.chatgpt_ready(cfg)          # (read now when not known: "not signed in" must not be a guess)
+    if not chatgpt:
+        return ""
+    from jcc.agents import resolve_command
+    return codex or resolve_command("codex") or ""
+
+
+def run(cfg, request: str, change: bool = False, name: str = "JARVIS", exe: str | None = None, runner=None, opener=None, timeout: float = EACH,
+        full: bool = False, codex: str | None = None, chatgpt: bool | None = None) -> dict:
+    """Have the helper do one thing in the owner's online accounts. Returns {"text", "model", "engine", "usage", "cost"}.
+    full: the owner asked to read the whole of one message, thread or document (only for looking up, never with change).
+    codex / chatgpt: the Codex program and whether ChatGPT is signed in (asked of jcc/accounts.py when not given)."""
     full = bool(full) and not change
     request = redact(" ".join(str(request or "").split()))[:3000]
     if not request:
         raise OnlineError("Say what to look up or do.")
     connect = bool(change) and wants_connection(request)
-    if consumer():
+    did = "changed" if change else "looked up"
+    work = cfg.state_dir / "assistant"
+    work.mkdir(parents=True, exist_ok=True)
+    ticket = os.urandom(8).hex()
+    ready = consumer()
+    # (With the gate, a request that may change something leaves a mark once anything is handed on: after a usage limit
+    # no other helper then does it again, which could do the same thing twice.)
+    marker = work / f"accounts-{ticket}.started" if ready and change else None
+    if ready:
         # A ck_ key: the helper's only way to Composio is JARVIS's gate, which holds the key itself.
         tier = "connect" if connect else "act" if change else "read"
         apps = [] if connect else connected_apps(cfg, opener)
         if not connect and not apps:
             raise OnlineError("No account is connected yet. Ask JARVIS to connect one (for example “connect my Gmail”): it gives you the link to sign in.")
-        command = lambda model: gate_argv(exe, tier, apps, model, name, full)        # noqa: E731
+        command = lambda model: gate_argv(exe, tier, apps, model, name, full, marker)        # noqa: E731
         given = {}
     else:
         url = session(cfg, change, opener=opener, connect=connect)
@@ -336,40 +475,106 @@ def run(cfg, request: str, change: bool = False, name: str = "JARVIS", exe: str 
     if exe is None:
         from jcc.agents import resolve_command
         exe = resolve_command("claude")
-    if not exe:
-        raise OnlineError("Claude Code is not installed, so the helper for online accounts cannot start.")
-    from jcc.agents import is_limit_message
+    from jcc.agents import is_limit_message, is_signed_out
+    from jcc.config import ROOT
     from jcc.jobs import scrub_env
     env = {**scrub_env(os.environ), **given}
-    work = cfg.state_dir / "assistant"
-    work.mkdir(parents=True, exist_ok=True)
-    last = ""
-    for model in ("sonnet", "haiku"):                      # the smaller model only when the first one's allowance is used up
-        try:
-            done = (runner or subprocess.run)(command(model), input=request, capture_output=True, text=True, timeout=timeout, env=env,
-                                              cwd=str(work), encoding="utf-8", errors="replace",
-                                              creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-        except subprocess.TimeoutExpired:
-            forget_sessions()
-            raise OnlineError("That took too long, so it was stopped. Nothing more was done.") from None
-        except OSError:
-            raise OnlineError("The helper for online accounts could not be started.") from None
-        try:
-            answer = json.loads(done.stdout or "{}")
-        except ValueError:
-            answer = {}
-        text = redact(str(answer.get("result") or "")).strip()
-        if answer.get("is_error") or not text:
-            last = text or redact((done.stderr or "").strip())[-300:] or "The helper gave no answer."
-            if is_limit_message(last):
+    helpers = list(CLAUDE_HELPERS if exe else ()) + ([CHATGPT] if ready else [])
+    deadline, last, could_sign_in, tried = time.monotonic() + TOTAL, "", False, []
+    signed_out = ""                                         # (what Claude said when it is not signed in: ChatGPT is tried then too)
+    instructions = work / f"accounts-{ticket}.md"
+
+    def begun() -> bool:
+        return bool(marker and marker.exists())
+
+    try:
+        for helper in helpers:
+            if resting(helper) or (signed_out and helper != CHATGPT):
                 continue
-            forget_sessions()                               # (a session that has gone stale is the usual reason: the next request gets a new one)
-            raise OnlineError(last[:400])
-        usage = answer.get("usage") if isinstance(answer.get("usage"), dict) else {}
-        if change:
-            forget_sessions()                               # (an account may have been connected or removed just now)
-        most = FULL_MOST if full else 6000
-        if len(text) > most:
-            text = text[:most] + "\n(It goes on: this is as much as is read in one go.)"
-        return {"text": text, "model": model, "usage": usage, "cost": float(answer.get("total_cost_usd") or 0.0)}
-    raise OnlineError(last[:400] or "Claude has reached its limit, so the helper could not run.")
+            if helper == CHATGPT:
+                codex = _chatgpt(cfg, chatgpt, codex)
+                if not codex:
+                    could_sign_in = True
+                    continue
+            left = deadline - time.monotonic()
+            if left < 15:
+                raise OnlineError(TOO_LONG)
+            if begun():
+                raise OnlineError(PARTLY)
+            tried.append(helper)
+            if helper == CHATGPT:
+                atomic_write(instructions, _rules(name, tier != "read", full, tier == "connect"))
+                argv, given_env = codex_argv(codex, tier, apps, instructions, work, marker), {**scrub_env(os.environ), "PYTHONPATH": str(ROOT), "PYTHONIOENCODING": "utf-8"}
+            else:
+                argv, given_env = command(helper.split(":")[1]), env
+            try:
+                done = (runner or subprocess.run)(argv, input=request, capture_output=True, text=True, timeout=min(timeout, left), env=given_env,
+                                                  cwd=str(work), encoding="utf-8", errors="replace",
+                                                  creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            except subprocess.TimeoutExpired:
+                forget_sessions()
+                raise OnlineError(PARTLY if begun() else TOO_LONG) from None
+            except OSError:
+                raise OnlineError("The helper for online accounts could not be started.") from None
+            if helper == CHATGPT:
+                seen = _codex_answer(done.stdout)
+                if seen["bad"]:
+                    raise OnlineError(NOT_USED)
+                text = redact(seen["text"]).strip()
+                last = redact(seen["problem"] or ("" if text else " ".join((done.stderr or "").split())[-300:])).strip()
+                if last and (not text or is_limit_message(last)):
+                    if is_limit_message(last):
+                        _rest(helper, last)
+                        if begun():
+                            raise OnlineError(PARTLY)
+                        continue
+                    raise OnlineError(last[:400])
+                if not text:
+                    raise OnlineError("ChatGPT gave no answer.")
+                if not seen["calls"]:
+                    raise OnlineError(INVENTED)
+                usage, model, engine, cost = seen["usage"], "ChatGPT", "codex", 0.0
+            else:
+                try:
+                    answer = json.loads(done.stdout or "{}")
+                except ValueError:
+                    answer = {}
+                text = redact(str(answer.get("result") or "")).strip()
+                if answer.get("is_error") or not text:
+                    last = text or redact((done.stderr or "").strip())[-300:] or "The helper gave no answer."
+                    if is_limit_message(last):
+                        _rest(helper, last)
+                        # (Without the gate there is no mark: a helper that got past its first step may have begun.)
+                        if begun() or (change and not ready and int(answer.get("num_turns") or 0) > 1):
+                            raise OnlineError(PARTLY)
+                        continue
+                    if ready and is_signed_out(last) and not begun():
+                        signed_out = last
+                        continue
+                    forget_sessions()                       # (a session that has gone stale is the usual reason: the next request gets a new one)
+                    raise OnlineError(last[:400])
+                usage = answer.get("usage") if isinstance(answer.get("usage"), dict) else {}
+                model, engine, cost = helper.split(":")[1], "claude", float(answer.get("total_cost_usd") or 0.0)
+            if change:
+                forget_sessions()                           # (an account may have been connected or removed just now)
+            most = FULL_MOST if full else 6000
+            if len(text) > most:
+                text = text[:most] + "\n(It goes on: this is as much as is read in one go.)"
+            return {"text": text, "model": model, "engine": engine, "usage": usage, "cost": cost}
+        if signed_out:
+            if resting(CHATGPT):
+                back = _resting[CHATGPT]
+                raise OnlineError(SIGNED_OUT_CHATGPT_OUT.format(did=did) + (f"ChatGPT is back at {_clock(back[0])}." if back[1] else "Try again in a little while."))
+            raise OnlineError(signed_out[:400])
+        if not exe and not ready:
+            raise OnlineError("Claude Code is not installed, so the helper for online accounts cannot start.")
+        if not tried and not any(resting(helper) for helper in helpers):
+            raise OnlineError("Claude Code is not installed, and ChatGPT is not signed in, so the helper for online accounts cannot start.")
+        raise OnlineError(_all_out([helper for helper in helpers if helper != CHATGPT or codex], did, could_sign_in))
+    finally:
+        for left_over in (marker, instructions):
+            if left_over is not None:
+                try:
+                    left_over.unlink(missing_ok=True)
+                except OSError:
+                    pass

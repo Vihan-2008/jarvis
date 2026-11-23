@@ -66,6 +66,8 @@ def command(exe: str, instructions: Path, work: Path, model: str = DEFAULT, pyth
              # The tools helper's key reaches it through the environment, never on a command line other programs can read.
              "-c", "mcp_servers.jarvis.env_vars=" + _toml(list(PASSED)),
              "-c", "mcp_servers.jarvis.startup_timeout_sec=30",
+             # (a tool can take as long as the service lets it, 200 s for online accounts: Codex's own limit is shorter)
+             "-c", "mcp_servers.jarvis.tool_timeout_sec=210",
              "-c", 'mcp_servers.jarvis.default_tools_approval_mode="approve"']
     if model and model != DEFAULT:
         argv += ["-m", model]

@@ -28,6 +28,7 @@ import re
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from jcc.redact import redact, register_secret
 
@@ -268,9 +269,24 @@ def passed(name: str, arguments, tier: str, apps: list[str]) -> tuple[dict | Non
 
 
 # ---------------------------------------------------------------------- the gate itself (an MCP server on stdin/stdout)
+MOST_CALLS = 25                 # tool calls one request may make through the gate
+TOO_MANY = "This request has used as many lookups as it may. Answer with what you have found."
+_MARKER = re.compile(r"accounts-[0-9a-f]{8,32}\.started")
+
+
 class Gate:
-    def __init__(self, tier: str, apps: list[str], connect: Connect):
+    def __init__(self, tier: str, apps: list[str], connect: Connect, marker: Path | None = None):
         self.tier, self.apps, self.connect, self.offered = tier, apps, connect, None
+        self.marker, self.calls = marker, 0
+
+    def _begun(self) -> None:
+        """Leave word that something was handed on that may change the owner's accounts: then no other helper does this
+        request again after a usage limit (it might do the same thing twice)."""
+        if self.marker is not None and self.tier != "read":
+            try:
+                self.marker.touch()
+            except OSError:
+                pass
 
     def handle(self, message: dict) -> dict | None:
         method, ident = message.get("method"), message.get("id")
@@ -284,7 +300,10 @@ class Gate:
                 result = {"tools": self.offered}
             elif method == "tools/call":
                 params = message.get("params") or {}
-                kept, why = passed(params.get("name"), params.get("arguments"), self.tier, self.apps)
+                self.calls += 1
+                kept, why = (None, TOO_MANY) if self.calls > MOST_CALLS else passed(params.get("name"), params.get("arguments"), self.tier, self.apps)
+                if kept is not None and params.get("name") in (RUN, MANAGE):
+                    self._begun()
                 result = self.connect.call(params["name"], kept) if kept is not None else {"content": [{"type": "text", "text": why}], "isError": True}
             elif method == "ping":
                 result = {}
@@ -310,7 +329,8 @@ def main(argv: list[str] | None = None) -> int:
     key = secrets.get("composio") or given
     if not key.startswith("ck_"):
         return 2
-    gate = Gate(tier, apps, Connect(key))
+    marker = Path(argv[2]) if len(argv) > 2 and _MARKER.fullmatch(Path(argv[2]).name) else None
+    gate = Gate(tier, apps, Connect(key), marker)
     stdin, stdout = sys.stdin.buffer, sys.stdout.buffer
     for raw in stdin:
         try:

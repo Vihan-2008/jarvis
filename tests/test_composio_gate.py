@@ -214,3 +214,35 @@ class TheLookupRulesHoldForToolsNobodyListed(unittest.TestCase):
         kept, why = composio_gate.passed(composio_gate.MANAGE, {"toolkits": ["gmail"]}, "connect", [])
         self.assertEqual(why, "")
         self.assertEqual(kept["toolkits"], [{"name": "gmail", "action": "add"}])
+
+
+class TheGateKeepsCount(unittest.TestCase):
+    def test_a_request_may_make_only_so_many_calls_and_a_change_leaves_its_mark(self):
+        import tempfile
+        from pathlib import Path
+        from jcc import composio_gate as g
+        with tempfile.TemporaryDirectory() as folder:
+            marker = Path(folder) / "accounts-0123456789abcdef.started"
+            sent = []
+
+            class Upstream:
+                def call(self, name, arguments):
+                    sent.append(name)
+                    return {"content": [{"type": "text", "text": "ok"}]}
+            gate = g.Gate("act", ["gmail"], Upstream(), marker)
+            search = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": g.SEARCH, "arguments": {"queries": [{"use_case": "mail"}]}}}
+            gate.handle(search)
+            self.assertFalse(marker.exists(), "looking for a tool changes nothing")
+            gate.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                         "params": {"name": g.RUN, "arguments": {"tools": [{"tool_slug": "GMAIL_SEND_EMAIL", "arguments": {}}]}}})
+            self.assertTrue(marker.exists(), "something that may change the accounts was handed on")
+            for number in range(3, g.MOST_CALLS + 1):
+                self.assertNotIn("isError", gate.handle({**search, "id": number})["result"])
+            refused = gate.handle({**search, "id": 99})["result"]
+            self.assertTrue(refused["isError"])
+            self.assertEqual(refused["content"][0]["text"], g.TOO_MANY)
+            self.assertEqual(len(sent), g.MOST_CALLS)
+            looked = g.Gate("read", ["gmail"], Upstream(), Path(folder) / "accounts-fedcba9876543210.started")
+            looked.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                           "params": {"name": g.RUN, "arguments": {"tools": [{"tool_slug": "GMAIL_FETCH_EMAILS", "arguments": {}}]}}})
+            self.assertFalse((Path(folder) / "accounts-fedcba9876543210.started").exists(), "a lookup leaves no mark")

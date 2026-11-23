@@ -4,6 +4,7 @@ import json
 import subprocess
 import unittest
 import urllib.error
+from pathlib import Path
 
 from jcc import config, connections, online, policy, secrets, usage, voice_tools
 from tests.helpers import EngineTestCase
@@ -42,6 +43,8 @@ class Done:
 
 class OnlineCase(EngineTestCase):
     def setUp(self):
+        online._resting.clear()
+        self.addCleanup(online._resting.clear)
         super().setUp()
         self.cfg = config.load()
         self.composio = FakeComposio()
@@ -134,9 +137,10 @@ class TestAKeyForComposiosOwnServer(OnlineCase):
     def test_a_change_and_a_connection_get_their_own_kinds_of_gate(self):
         secrets.store("composio", self.ck)
         _, _, gate, allowed = self.started("Reply to Anna: yes", change=True)
-        self.assertEqual(gate["args"][2:], ["act", "github,gmail,google_classroom"])
+        self.assertEqual(gate["args"][2:4], ["act", "github,gmail,google_classroom"])
+        self.assertRegex(gate["args"][4], r"accounts-[0-9a-f]{16}\.started$", "a change leaves its mark once it has begun")
         _, _, gate, allowed = self.started("Connect my Outlook", change=True)
-        self.assertEqual(gate["args"][2:], ["connect", ""])
+        self.assertEqual(gate["args"][2:4], ["connect", ""])
         self.assertEqual(allowed, "mcp__accounts__COMPOSIO_SEARCH_TOOLS,mcp__accounts__COMPOSIO_MANAGE_CONNECTIONS")
 
     def test_when_composio_does_not_say_what_is_connected_nothing_is_looked_up(self):
@@ -144,6 +148,191 @@ class TestAKeyForComposiosOwnServer(OnlineCase):
         with self.assertRaises(online.OnlineError) as unknown:
             online.run(self.cfg, "what is in my inbox", exe="claude", opener=self.Fake(connected=""), runner=lambda *a, **k: self.fail("nothing should be started"))
         self.assertEqual(str(unknown.exception), online.UNKNOWN_APPS)
+
+
+def codex_events(*items, failed="", usage=True):
+    """What `codex exec --json` prints, for the items given as (type, fields)."""
+    lines = [{"type": "thread.started", "thread_id": "t1"}, {"type": "turn.started"}]
+    for kind, fields in items:
+        lines.append({"type": "item.started", "item": {"id": "i", "type": kind, **fields}})
+        lines.append({"type": "item.completed", "item": {"id": "i", "type": kind, **fields}})
+    if failed:
+        lines.append({"type": "turn.failed", "error": {"message": failed}})
+    elif usage:
+        lines.append({"type": "turn.completed", "usage": {"input_tokens": 900, "cached_input_tokens": 100, "output_tokens": 40}})
+    return "\n".join(json.dumps(line) for line in lines)
+
+
+LOOKED = ("mcp_tool_call", {"server": "accounts", "tool": "COMPOSIO_MULTI_EXECUTE_TOOL", "arguments": {}, "status": "completed"})
+LIMIT = "You've hit your limit · resets 1:10am (Asia/Calcutta)"
+
+
+class TestWhenClaudeIsAtItsLimit(OnlineCase):
+    """Claude (sonnet, then haiku), then ChatGPT through Codex: the owner hears about limits only when every one is at one."""
+
+    def setUp(self):
+        super().setUp()
+        from tests.test_composio_gate import KEY as CK, FakeConnect
+        secrets.store("composio", CK)
+        self.ck, self.server, self.seen = CK, FakeConnect(), []
+
+    def runner(self, claude=(LIMIT, LIMIT), codex=None):
+        answers = {"sonnet": claude[0], "haiku": claude[1]}
+
+        def run(argv, **kw):
+            self.seen.append((argv, kw))
+            if argv[0] == "codex":
+                return Done(codex if codex is not None else codex_events(LOOKED, ("agent_message", {"text": "Two new emails, from Mira and Sam."})))
+            said = answers[argv[argv.index("--model") + 1]]
+            return Done({"result": said, "is_error": True})
+        return run
+
+    def ask(self, request="what are my latest emails", change=False, chatgpt=True, **kw):
+        return online.run(self.cfg, request, change=change, exe="claude", codex="codex", chatgpt=chatgpt, opener=self.server,
+                          runner=kw.pop("runner", None) or self.runner(**kw))
+
+    def started(self):
+        return [argv[0] if argv[0] == "codex" else argv[argv.index("--model") + 1] for argv, _ in self.seen]
+
+    def test_chatgpt_answers_when_both_claude_models_are_at_their_limit(self):
+        got = self.ask()
+        self.assertEqual((got["text"], got["model"], got["engine"]), ("Two new emails, from Mira and Sam.", "ChatGPT", "codex"))
+        self.assertEqual(self.started(), ["sonnet", "haiku", "codex"])
+        self.assertEqual(got["usage"]["input_tokens"], 900)
+
+    def test_chatgpt_gets_the_gate_and_nothing_else(self):
+        self.ask()
+        argv, kw = self.seen[-1]
+        settings = [argv[i + 1] for i, part in enumerate(argv) if part == "-c"]
+        self.assertIn('web_search="disabled"', settings)
+        self.assertIn("features.shell_tool=false", settings)
+        self.assertEqual({s.split(".")[1] for s in settings if s.startswith("mcp_servers.")}, {"accounts"}, "exactly one tools server")
+        self.assertIn("mcp_servers.accounts.enabled_tools=" + json.dumps(["COMPOSIO_SEARCH_TOOLS", "COMPOSIO_GET_TOOL_SCHEMAS", "COMPOSIO_MULTI_EXECUTE_TOOL"]), settings)
+        self.assertIn('mcp_servers.accounts.args=["-m", "jcc.composio_gate", "read", "github,gmail,google_classroom"]', settings)
+        self.assertIn('mcp_servers.accounts.env_vars=["PYTHONPATH", "PYTHONIOENCODING"]', settings)
+        self.assertNotIn("voice_tools", json.dumps(argv))
+        self.assertIn("--ignore-user-config", argv)
+        self.assertEqual(argv[argv.index("-s") + 1], "read-only")
+        self.assertNotIn(self.ck, json.dumps(argv))
+        self.assertNotIn(self.ck, json.dumps(kw["env"]))
+        self.assertNotIn("JCC_COMPOSIO_KEY", kw["env"])
+        self.assertEqual(kw["input"], "what are my latest emails")
+        rules = next(s for s in settings if s.startswith("model_instructions_file="))
+        self.assertIn("accounts-", rules)
+        self.assertEqual(list((self.cfg.state_dir / "assistant").glob("accounts-*")), [], "its instructions are not left behind")
+
+    def test_an_answer_made_any_other_way_is_not_used(self):
+        for step in (("web_search", {"query": "mira email"}), ("command_execution", {"command": "type secrets.txt"}),
+                     ("mcp_tool_call", {"server": "jarvis", "tool": "run_shell"})):
+            online._resting.clear()
+            with self.subTest(step[0]), self.assertRaises(online.OnlineError) as refused:
+                self.ask(codex=codex_events(LOOKED, step, ("agent_message", {"text": "Mira wrote at 9."})))
+            self.assertEqual(str(refused.exception), online.NOT_USED)
+            self.assertNotIn("Mira", str(refused.exception))
+
+    def test_an_answer_without_looking_in_the_accounts_is_not_used(self):
+        with self.assertRaises(online.OnlineError) as invented:
+            self.ask(codex=codex_events(("agent_message", {"text": "You have no new mail."})))
+        self.assertEqual(str(invented.exception), online.INVENTED)
+
+    def test_a_claude_that_is_not_signed_in_hands_over_to_chatgpt(self):
+        got = self.ask(claude=("Not logged in · Please run /login", "unused"))
+        self.assertEqual((got["model"], self.started()), ("ChatGPT", ["sonnet", "codex"]), "the other Claude model is not tried: it is signed out too")
+
+    def test_claude_signed_out_and_chatgpt_at_its_limit_says_so(self):
+        with self.assertRaises(online.OnlineError) as out:
+            self.ask(claude=("Not logged in · Please run /login", "unused"), codex=codex_events(failed=LIMIT, usage=False))
+        self.assertTrue(str(out.exception).startswith("Claude is not signed in, and ChatGPT has reached its usage limit"), str(out.exception))
+        self.assertNotIn("both", str(out.exception))
+        online._resting.clear()
+        with self.assertRaises(online.OnlineError) as alone:
+            self.ask(claude=("Not logged in · Please run /login", "unused"), chatgpt=False)
+        self.assertEqual(str(alone.exception), "Not logged in · Please run /login")
+
+    def test_a_slow_lookup_is_not_cut_short_by_codex(self):
+        self.ask()
+        self.assertIn("mcp_servers.accounts.tool_timeout_sec=150", self.seen[-1][0])
+        from jcc import codex_brain
+        brain = codex_brain.command("codex.exe", Path("i.md"), Path("."), python="python.exe")
+        self.assertIn("mcp_servers.jarvis.tool_timeout_sec=210", brain, "the chat brain waits for online accounts as long as the service does")
+
+    def test_only_a_usage_limit_moves_on_to_the_next_helper(self):
+        with self.assertRaises(online.OnlineError) as failed:
+            self.ask(claude=("The session has expired.", "unused"))
+        self.assertEqual(str(failed.exception), "The session has expired.")
+        self.assertEqual(self.started(), ["sonnet"])
+
+        def slow(argv, **kw):
+            self.seen.append((argv, kw))
+            raise subprocess.TimeoutExpired(argv, 1)
+        self.seen.clear()
+        with self.assertRaises(online.OnlineError) as late:
+            self.ask(runner=slow)
+        self.assertEqual(str(late.exception), online.TOO_LONG)
+        self.assertEqual(self.started(), ["sonnet"])
+
+    def test_a_change_that_began_before_the_limit_is_not_done_again(self):
+        def begins_then_limit(argv, **kw):
+            self.seen.append((argv, kw))
+            gate = json.loads(argv[argv.index("--mcp-config") + 1])["mcpServers"]["accounts"]["args"]
+            open(gate[4], "w").close()                      # (the gate passed something on before the limit came)
+            return Done({"result": LIMIT, "is_error": True})
+        with self.assertRaises(online.OnlineError) as partly:
+            self.ask("Reply to Anna: yes, Friday works", change=True, runner=begins_then_limit)
+        self.assertEqual(str(partly.exception), online.PARTLY)
+        self.assertEqual(self.started(), ["sonnet"], "no other helper does it again")
+        self.assertEqual(list((self.cfg.state_dir / "assistant").glob("accounts-*")), [])
+
+    def test_a_change_that_had_not_begun_moves_on(self):
+        got = self.ask("Reply to Anna: yes, Friday works", change=True)
+        self.assertEqual((got["model"], self.started()), ("ChatGPT", ["sonnet", "haiku", "codex"]))
+        settings = [self.seen[-1][0][i + 1] for i, part in enumerate(self.seen[-1][0]) if part == "-c"]
+        self.assertIn("COMPOSIO_MULTI_EXECUTE_TOOL", next(s for s in settings if s.startswith("mcp_servers.accounts.enabled_tools=")))
+        self.assertRegex(next(s for s in settings if s.startswith("mcp_servers.accounts.args=")), r'"act", "github,gmail,google_classroom", ".*accounts-[0-9a-f]{16}\.started"')
+
+    def test_a_helper_at_its_limit_is_not_started_again_until_it_is_back(self):
+        self.ask()
+        self.seen.clear()
+        self.ask()
+        self.assertEqual(self.started(), ["codex"])
+        self.assertTrue(online.resting("claude:sonnet"))
+        self.assertFalse(online.resting("claude:sonnet", at=online._resting["claude:sonnet"][0] + 1))
+
+    def test_a_rest_is_between_five_minutes_and_five_hours(self):
+        at = 1_800_000_000.0
+        self.assertEqual(online.back_at("Try again in 20 hours.", at), (at + 5 * 3600, True))
+        self.assertEqual(online.back_at("Try again in 30 seconds.", at), (at + 300, True))
+        self.assertEqual(online.back_at("rate limit", at), (at + 900, False))
+
+    def test_the_owner_hears_of_limits_only_when_every_helper_is_at_one_with_the_first_one_back(self):
+        with self.assertRaises(online.OnlineError) as out:
+            self.ask(codex=codex_events(failed="You've hit your usage limit. Try again in 3 hours."))
+        said = str(out.exception)
+        self.assertTrue(said.startswith("Claude and ChatGPT have both reached their usage limits, so nothing was looked up in your accounts. "), said)
+        claude_back = online._resting["claude:sonnet"][0]
+        first = "Claude" if claude_back <= online._resting["codex"][0] else "ChatGPT"
+        self.assertIn(first + " is back first, at " + online._clock(min(claude_back, online._resting["codex"][0])) + ".", said)
+        self.seen.clear()
+        with self.assertRaises(online.OnlineError) as again:
+            self.ask()
+        self.assertEqual(self.started(), [], "with every helper resting nothing is started")
+        self.assertEqual(str(again.exception), said)
+
+    def test_without_chatgpt_signed_in_the_owner_is_told_how_to_have_it_switch(self):
+        with self.assertRaises(online.OnlineError) as out:
+            self.ask("Reply to Anna: yes", change=True, chatgpt=False)
+        said = str(out.exception)
+        self.assertTrue(said.startswith("Claude has reached its usage limit, so nothing was changed in your accounts. It is back at "), said)
+        self.assertTrue(said.endswith(online.SIGN_IN_CHATGPT.strip()), said)
+        self.assertEqual(self.started(), ["sonnet", "haiku"])
+
+    def test_with_a_project_key_chatgpt_is_never_started(self):
+        secrets.store("composio", KEY)
+        with self.assertRaises(online.OnlineError) as out:
+            online.run(self.cfg, "any new mail?", exe="claude", codex="codex", chatgpt=True, opener=self.composio, runner=self.runner())
+        self.assertEqual(self.started(), ["sonnet", "haiku"])
+        self.assertTrue(str(out.exception).startswith("Claude has reached its usage limit"))
+        self.assertNotIn("ChatGPT", str(out.exception))
 
 
 class TestTheTwoKindsOfHelper(OnlineCase):
