@@ -1539,7 +1539,13 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                         from jcc import accounts, codex_brain
                         # (and the brains that answer through an account the owner signed in with, rather than a key)
                         result = {'items': providers.listing(state.cfg, look=body.get('look') is True),
-                                  'accounts': [{'id': codex_brain.KEY, 'name': codex_brain.NAME, 'model': codex_brain.DEFAULT}] if accounts.chatgpt_ready(state.cfg) else []}
+                                  'accounts': [{'id': codex_brain.KEY, 'name': codex_brain.NAME, 'model': codex_brain.DEFAULT}] if accounts.chatgpt_ready(state.cfg) else [],
+                                  'resting': state.assistant.resting()}
+                    elif action == 'resting': result = {'resting': state.assistant.resting()}    # (for the model menu: which brains are at their limit just now)
+                    elif action == 'account_models':                  # the models the owner's ChatGPT plan offers, for the model menu
+                        from jcc import codex_brain
+                        if ident != codex_brain.KEY: raise ValueError('Unknown account.')
+                        result = {'models': codex_brain.models(refresh=body.get('refresh') is True)}
                     elif action == 'connect': result = providers.connect(state.cfg, ident, str(body.get('key', '')), str(body.get('address', '')), str(body.get('name', '')))
                     elif action == 'disconnect': result = providers.disconnect(state.cfg, ident)
                     elif action == 'model': result = providers.choose_model(state.cfg, ident, str(body.get('model', '')))

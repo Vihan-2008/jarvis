@@ -196,8 +196,18 @@ class TestWhoAnswers(BrainCase):
         agent.say("hello there", spoken=True)
         events = self.finish(agent)
         self.assertEqual(events[-1]["text"], "Carrying on.")
-        self.assertRegex(next(e["text"] for e in events if e["k"] == "notice"), r"I am carrying on with ChatGPT\.")
+        notice = next(e for e in events if e["k"] == "notice")
+        self.assertEqual((notice["text"], notice["say"]), ("ChatGPT answered this.", False), "a quiet line, not spoken, even to a spoken request")
+        self.assertNotIn("limit", json.dumps([e for e in events if e["k"] == "notice"]).lower(), "limits are only mentioned when nothing can answer")
         self.assertEqual(self.asked, [], "the Groq key was not needed")
+
+    def test_a_picked_model_that_is_resting_already_is_named_quietly(self):
+        agent = self.with_accounts(self.agent([[("text", "From Sonnet.")]]), "ok", False)
+        agent.cool["claude:opus"] = time.time() + 3600
+        agent.say("hello there", spoken=True, model="opus")
+        events = self.finish(agent)
+        self.assertEqual(events[-1]["text"], "From Sonnet.")
+        self.assertEqual([(e["text"], e["say"]) for e in events if e["k"] == "notice"], [("Claude Sonnet answered this.", False)])
 
     def test_chatgpt_can_be_picked(self):
         self.assertTrue(assistant.valid_choice("chatgpt:default"))
@@ -206,6 +216,67 @@ class TestWhoAnswers(BrainCase):
         agent.say("hello there")
         self.assertEqual(self.finish(agent)[-1]["text"], "From ChatGPT.")
         self.assertEqual(self.procs, [])
+
+
+class ThePickedModelAndWhatFollowsIt(BrainCase):
+    """The model bar's pick answers first; then its maker's other models, nearest first; then the accounts signed in with;
+    then the services connected with a key."""
+    LISTED = ("gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-terra", "gpt-6.1-sol")
+
+    def plan(self, choice, standin=True, chatgpt=True):
+        from jcc import providers
+        agent = self.agent()
+        agent.brains = lambda: {"claude": "ok", "chatgpt": chatgpt}
+        turn = assistant.Turn("t", "c", "auto", False, None)
+        turn.choice, turn.text, turn.options = choice, "hello there", {"standin": standin}
+        keys = {"groq": ["llama-a", "llama-b"], "gemini": ["gemini-pro", "gemini-flash"]}
+        with mock.patch.object(codex_brain, "_listed", (time.time(), [{"id": m, "name": m} for m in self.LISTED])), \
+                mock.patch.object(providers, "ready", lambda cfg, need_tools=False: ["groq", "gemini"]), \
+                mock.patch.object(providers, "choices", lambda cfg, ident, most=2: keys[ident]):
+            return [assistant.spec_key(spec) for spec in agent._plan(turn)]
+
+    def test_claude_opus_then_the_smaller_claudes_then_chatgpt_then_the_keys(self):
+        self.assertEqual(self.plan("opus"), ["claude:opus", "claude:sonnet", "claude:haiku", "chatgpt:default",
+                                             "groq:llama-a", "gemini:gemini-pro", "groq:llama-b", "gemini:gemini-flash"])
+
+    def test_a_chatgpt_model_then_the_nearest_ones_then_the_plan_default_then_claude(self):
+        self.assertEqual(self.plan("chatgpt:gpt-6.2-sol"), ["chatgpt:gpt-6.2-sol", "chatgpt:gpt-6.2-astra", "chatgpt:gpt-6.1-terra", "chatgpt:default",
+                                                            "claude:sonnet", "claude:haiku", "groq:llama-a", "gemini:gemini-pro", "groq:llama-b", "gemini:gemini-flash"])
+
+    def test_a_gemini_model_then_geminis_own_then_claude_and_chatgpt_then_other_keys(self):
+        self.assertEqual(self.plan("gemini:gemini-3-ultra"), ["gemini:gemini-3-ultra", "gemini:gemini-pro", "gemini:gemini-flash", "claude:sonnet", "claude:haiku",
+                                                              "chatgpt:default", "groq:llama-a", "groq:llama-b"])
+
+    def test_without_stand_ins_the_accounts_signed_in_with_are_still_tried(self):
+        self.assertEqual(self.plan("opus", standin=False), ["claude:opus", "claude:sonnet", "claude:haiku", "chatgpt:default"])
+        self.assertEqual(self.plan("gemini:gemini-3-ultra", standin=False, chatgpt=False), ["gemini:gemini-3-ultra", "gemini:gemini-pro", "gemini:gemini-flash",
+                                                                                            "claude:sonnet", "claude:haiku"])
+
+    def test_a_refused_model_rests_alone(self):
+        refused = "The 'gpt-9' model is not supported when using Codex with a ChatGPT account."
+        self.assertTrue(codex_brain.REFUSED_MODEL.search(refused))
+        self.assertFalse(codex_brain.REFUSED_MODEL.search("You've hit your usage limit. Try again at 1:10 AM."))
+        agent = self.agent()
+        session = mock.Mock(spec=["spec"]); session.spec = ("api", "chatgpt", "gpt-9")
+        with mock.patch.object(agent, "_end"):
+            agent._cooled(assistant.Turn("t", "c", "auto", False, None), session, {"error": refused, "limit": "trouble", "until": None, "model_problem": True})
+        self.assertIn("api:chatgpt:gpt-9", agent.cool)
+        self.assertNotIn("api:chatgpt", agent.cool, "the plan's other ChatGPT models can still answer")
+        self.assertIn("api:chatgpt:gpt-9", agent.resting())
+
+    def test_the_menu_lists_the_models_codex_shows(self):
+        listing = json.dumps({"models": [{"slug": "gpt-b", "display_name": "GPT B", "visibility": "list", "priority": 2},
+                                         {"slug": "gpt-hidden", "display_name": "Hidden", "visibility": "hide", "priority": 1},
+                                         {"slug": "gpt-a", "display_name": "GPT A", "visibility": "list", "priority": 1},
+                                         {"slug": "bad slug; rm", "display_name": "x", "visibility": "list", "priority": 0}]})
+        done = mock.Mock(stdout=listing)
+        with mock.patch.object(codex_brain, "_listed", None), mock.patch("jcc.agents.resolve_command", return_value="codex.exe"), \
+                mock.patch.object(codex_brain.subprocess, "run", return_value=done) as ran:
+            self.assertEqual(codex_brain.models(), [{"id": "gpt-a", "name": "GPT A"}, {"id": "gpt-b", "name": "GPT B"}])
+            self.assertEqual(ran.call_args[0][0], ["codex.exe", "debug", "models"])
+            self.assertEqual(codex_brain.models_known(), ["gpt-a", "gpt-b"])
+        with mock.patch.object(codex_brain, "_listed", None), mock.patch("jcc.agents.resolve_command", return_value=None):
+            self.assertEqual(codex_brain.models(), [], "without Codex: only the plan's default is offered")
 
 
 class TestAccounts(unittest.TestCase):

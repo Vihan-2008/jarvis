@@ -131,7 +131,7 @@ function tipText(node) {
   return TIPS[text] || (node.querySelector('svg') && node.getAttribute('aria-label')) || '';
 }
 function showTip(node) {
-  const text = tipText(node); if (!text) return;
+  const text = tipText(node); if (!text || node.getAttribute('aria-expanded') === 'true') return;     // (not over the menu it opened)
   tip.innerHTML = esc(text) + (node.dataset.key ? '<kbd>' + esc(node.dataset.key) + '</kbd>' : '');
   const r = node.getBoundingClientRect(); tip.classList.add('show');
   const w = tip.offsetWidth, h = tip.offsetHeight, above = r.top > h + 14;
@@ -161,7 +161,7 @@ function openPop(anchor, fill, options = {}) {
   const above = r.top - 2 * edge, below = innerHeight - r.bottom - 2 * edge;
   let up = options.up ?? (below < h && above > below);
   if ((up ? above : below) < h && (up ? below : above) > (up ? above : below)) up = !up;
-  const room = Math.max(96, Math.min(innerHeight - 2 * edge, up ? above : below)), tall = Math.min(h, room);
+  const room = Math.max(96, Math.min(options.most || Infinity, innerHeight - 2 * edge, up ? above : below)), tall = Math.min(h, room);
   pop.style.maxHeight = room + 'px';
   const left = Math.max(edge, Math.min(innerWidth - w - edge, options.right ? r.right - w : r.left));
   pop.style.left = left + 'px'; pop.style.top = Math.max(edge, Math.min(innerHeight - tall - edge, up ? r.top - tall - edge : r.bottom + edge)) + 'px';
@@ -175,8 +175,13 @@ function openPop(anchor, fill, options = {}) {
 // Up and Down walk the lines of a menu (round and round), Home and End go to its ends, a letter goes to the next line
 // that begins with it. The line that has the keyboard is brought into sight by the browser itself.
 function popKeys(e) {
-  if (!pop || e.ctrlKey || e.metaKey || e.altKey || e.target.matches?.('select,input,textarea')) return;
-  const lines = [...pop.querySelectorAll('button:not([disabled])')].filter(b => b.offsetParent !== null);
+  if (!pop || e.ctrlKey || e.metaKey || e.altKey) return;
+  // As in any menu, Tab leaves it: the keyboard goes on from the button that opened it, to the next control or the one before.
+  if (e.key === 'Tab') { popAnchor?.focus(); closePop(); return; }
+  // A menu's own filter field (the model menu's) is one of its lines: Up and Down leave it; letters are typed into it.
+  const filtering = e.target.matches?.('input.nv-brain-filter');
+  if (e.target.matches?.('select,input,textarea') && !(filtering && (e.key === 'ArrowDown' || e.key === 'ArrowUp'))) return;
+  const lines = [...pop.querySelectorAll('button:not([disabled]),input.nv-brain-filter')].filter(b => b.offsetParent !== null);
   if (!lines.length) return;
   const at = lines.indexOf(document.activeElement);
   let next = -1;
@@ -286,7 +291,7 @@ function setWorkMode(next, byHand) {
     if (box && typed && !box.value) { box.value = typed; box.dispatchEvent(new Event('input')); }   // what was typed comes along
     box?.focus();
   } else if (!byHand && next === 'chat' && selectedProject && !chat?.project) { selectedProject = ''; localStorage.setItem('jcc-project-filter', ''); }
-  listSig = ''; renderLists?.(); projectChip?.();
+  listSig = ''; renderLists?.(); projectChip?.(); modelLabel();
 }
 // Sidebar: one-click new chat, search, my work, then projects and chats.
 const newChat = el('button', { class: 'nv-nav', type: 'button', data: { tip: 'Start a fresh conversation', key: 'Ctrl+Shift+O' } }, icon('plus') + '<span>New chat</span>');
@@ -1313,6 +1318,11 @@ function runBuiltin(name, words = '') {
   else if (name === 'usage') runCommand('usage');
   else if (name === 'mods') window.Nova.voiceSettings?.('mods');
   else if (name === 'research') { setResearch(true); message.focus(); }
+  else if (name === 'model') {          // /model opens the model menu; /model opus (or chatgpt, gemini, auto) picks
+    if (!String(words || '').trim()) setTimeout(() => modelB.click(), 0);
+    else if (workMode === 'code') notify('In Code, choose the model for coding jobs with the button next to the message box.');
+    else { try { notify('Answering with ' + window.Nova.pickBrain(words) + '.'); } catch (error) { toast(error.message); } }
+  }
   else if (name === 'help') { const line = (c, from) => '<li><b>/' + esc(c.name) + '</b><span>' + esc(c.about || '') + '</span>' + (from ? '<small>' + from + '</small>' : '') + '</li>';
     localReply('Commands', '<p class="small">Type / in the message box to pick one.</p><ul class="nv-cmdlist">' + modsData.commands.map(c => line(c, 'Yours')).join('') + modsData.builtin.map(c => line(c, '')).join('') + modsData.packs.map(c => line(c, 'Skill pack')).join('') + '</ul>' +
       '<button class="plain" type="button" data-nv-cmd="settings" data-arg="mods">Add or change your own</button>'); }
@@ -1409,7 +1419,7 @@ form.onsubmit = async e => {
     const name = command[1].toLowerCase(), words = (command[2] || '').trim();
     if (name === 'research' && words) { setResearch(true); text = words; }
     else if (BEFORE_COMMANDS[name]) { message.value = words; grow(); if (words) beforeSending(BEFORE_COMMANDS[name]); else arm(BEFORE_COMMANDS[name]); return; }   // what follows stays in the box, unsent
-    else if ((name === 'mode' || name === 'permissions') && words && runBuiltin(name, words)) { message.value = ''; grow(); return; }
+    else if ((name === 'mode' || name === 'permissions' || name === 'model') && words && runBuiltin(name, words)) { message.value = ''; grow(); return; }
     else if (!words && runBuiltin(name)) { message.value = ''; grow(); return; }
   }
   if (workMode === 'code' && !current && !selectedProject) {   // which project is this for? Then it is sent.
@@ -1563,8 +1573,15 @@ async function beforeSending(name) {
   }
   spot.innerHTML = '<p>That took too long. Try again in a moment.</p>';
 }
-function modelLabel() { const option = $('model')?.selectedOptions[0]; $('nv-model-name').textContent = !option || option.value === 'auto' ? 'Auto' : option.textContent; }
-modelB.onclick = () => openPop(modelB, p => {
+// Outside Code the button chooses who answers (nova-voice.js: the model bar); in Code, the model for coding jobs.
+const brainBar = () => workMode !== 'code' && !!window.Nova?.brainMenu;
+function modelLabel() {
+  if (brainBar()) { const now = window.Nova.brainLabel(); $('nv-model-name').textContent = now.label; modelB.setAttribute('aria-label', now.aria); return; }
+  const option = $('model')?.selectedOptions[0], label = !option || option.value === 'auto' ? 'Auto' : option.textContent;
+  $('nv-model-name').textContent = label; modelB.setAttribute('aria-label', 'Model for coding jobs: ' + label + '. Change model');
+}
+modelB.setAttribute('aria-haspopup', 'menu');
+modelB.onclick = () => brainBar() ? openPop(modelB, p => window.Nova.brainMenu(p), { up: !home, right: true, most: Math.min(560, innerHeight - 96) }) : openPop(modelB, p => {
   const select = $('model');
   item(p, 'Auto', 'spark', () => pick('auto'), { note: 'JARVIS picks the right model for each request: quick ones for small things, strong ones for hard ones, and it saves your allowance', tick: select.value === 'auto' });
   for (const group of select.querySelectorAll('optgroup')) { if (!group.children.length) continue; p.append(el('h5', {}, group.label)); for (const option of group.children) item(p, option.textContent, '', () => pick(option.value), { tick: select.value === option.value, note: option.dataset.about || '' }); }
@@ -1648,7 +1665,7 @@ document.addEventListener('keydown', e => {
 /* ---------- start ---------- */
 welcome = () => '<div class="welcome"></div>';
 setWorkMode(workMode, false);
-window.Nova = { command: (name, words) => runCommand(name, words || ''), localReply, taskModelsInto, taskModels, loadMods, mods: () => modsData, hook: runHooks, unregisterPane, setFull, isFull, icon, el, openPop, closePop, item, dialog, confirmBox, ask, notify, registerPane, openPane, closePanel, rich, setDraft, store, panel, liveUpdate, applyLight, micButton: micB, refreshMode: () => updateMode(), newChat: () => newChat.click(),
+window.Nova = { command: (name, words) => runCommand(name, words || ''), modelLabel, localReply, taskModelsInto, taskModels, loadMods, mods: () => modsData, hook: runHooks, unregisterPane, setFull, isFull, icon, el, openPop, closePop, item, dialog, confirmBox, ask, notify, registerPane, openPane, closePanel, rich, setDraft, store, panel, liveUpdate, applyLight, micButton: micB, refreshMode: () => updateMode(), newChat: () => newChat.click(),
   setTheme: name => { store.set('nv-theme', name); applyTheme(); }, get pane() { return currentPane; } };
 applyTheme(); drawTabs(); drawTopButtons();
 body.classList.add('nova', 'nv-home'); body.classList.remove('workspace-open');

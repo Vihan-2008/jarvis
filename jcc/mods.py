@@ -62,6 +62,7 @@ BUILTIN = (("work", "What is running, waiting for you and finished, here in the 
            ("settings", "Open Settings"),
            ("voice", "Voice settings"),
            ("connections", "What JARVIS is connected to"),
+           ("model", "Choose which AI answers: /model opus, /model chatgpt, /model auto"),
            ("models", "The AIs JARVIS can use"),
            ("updates", "Updates"),
            ("mods", "Change these commands, hooks, panels and the status line"),

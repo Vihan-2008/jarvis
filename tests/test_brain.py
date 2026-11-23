@@ -134,8 +134,8 @@ class TestStandIn(BrainCase):
         self.assertEqual((events[-1]["status"], events[-1]["text"]), ("done", "It is four o'clock."))
         notice = next(e for e in events if e["k"] == "notice")
         self.assertEqual(notice["kind"], "switch")
-        self.assertRegex(notice["text"], r"Claude Haiku has reached its limit until .*\. I am carrying on with Groq\.")
-        self.assertTrue(notice["say"], "said out loud, because the request was spoken")
+        self.assertEqual(notice["text"], "Groq answered this.", "only who answered: limits are told only when nothing can answer")
+        self.assertFalse(notice["say"], "a quiet line, not said out loud even to a spoken request")
         self.assertEqual((self.asked[0]["service"], self.asked[0]["model"]), ("groq", "openai/gpt-oss-120b"))
         self.assertIn("[spoken] what time is it in Tokyo", self.asked[0]["messages"][-1]["content"])
         self.assertNotIn("see_screen", self.asked[0]["tools"], "a stand-in is not given tools that need it to look at pictures")
@@ -152,7 +152,7 @@ class TestStandIn(BrainCase):
         self.assertEqual(len(self.procs), 1, "no new Claude process was started")
         self.assertFalse([e for e in later if e["k"] == "notice"], "and the owner is not told again")
         self.assertEqual(len(self.asked[1]["messages"]), 4, "the same stand-in conversation carries on: instructions, question, answer, question")
-        self.assertTrue(agent.poll(0)["brain"]["until"] > time.time())
+        self.assertEqual(agent.poll(0)["brain"], {}, "nothing to show while another AI answers: only requests that wait are shown")
         # When the allowance is back, Claude answers again.
         agent.cool.clear()
         self.assertEqual(agent.poll(0)["brain"], {})
@@ -228,7 +228,7 @@ class TestStandIn(BrainCase):
         agent.say("hello there")
         events = self.finish(agent)
         self.assertEqual(events[-1]["status"], "done")
-        self.assertIn("could not answer just now", next(e["text"] for e in events if e["k"] == "notice"))
+        self.assertEqual(next(e["text"] for e in events if e["k"] == "notice"), "Groq answered this.")
 
     def test_a_picked_stand_in_answers_first_and_claude_is_its_stand_in(self):
         assistant.configure(self.cfg, {"model": "groq:openai/gpt-oss-20b"})

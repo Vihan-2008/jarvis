@@ -410,6 +410,15 @@ body.nv-home .nv-jump{display:none}
 .nv-pop label{display:block;padding:6px 10px;font-size:12.5px}.nv-pop label select{display:block;width:100%;margin-top:5px}
 .nv-pop .easy-option-body>p{font-size:12.5px;color:var(--ink-3);padding:4px 10px;margin:0}
 .nv-pop .easy-message-options>summary{display:none}
+.nv-pop [hidden]{display:none!important}
+/* The model menu (nova-voice.js, N.brainMenu): notes and headings a step darker to be read at this size; a model at its
+   limit says until when, in the warning colour, and can still be picked. */
+.nv-pop.nv-brains h5,.nv-pop.nv-brains button.nv-item small{color:var(--ink-2)}
+.nv-pop button.nv-item.nv-resting>span:first-of-type{color:var(--ink-2)}
+.nv-pop button.nv-item.nv-resting small{color:var(--warn);opacity:.85}
+.nv-brain-filter{display:block;width:calc(100% - 12px);margin:4px 6px 6px;height:32px;padding:0 10px;font-size:13px;color:var(--ink);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--r-xs)}
+.nv-brain-filter:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+#nv-model-name{display:inline-block;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
 .nv-seg{display:flex;gap:3px;padding:3px;margin:4px 6px 8px;border-radius:10px;background:var(--surface)}
 .nv-seg button{flex:1;border:0;background:none;border-radius:8px;padding:7px 4px;font-size:12.5px;color:var(--ink-2);transition:background var(--fast),color var(--fast)}
 .nv-seg button.on{background:var(--surface-3);color:var(--ink);font-weight:600}

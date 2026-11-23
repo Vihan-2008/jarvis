@@ -692,7 +692,7 @@ function rest() {   // "stop", "never mind", the Stop button: be quiet and wait 
   if (voiceMode) { setPhase('idle'); hint(speech.settings.wake ? 'Say “Hey ' + (options.assistant?.name || 'JARVIS') + '” or press Space to talk again.' : 'Press Space or tap Talk when you need me.'); }
 }
 async function send(text, spoken, extra = {}) {
-  const picked = String($('model')?.value || 'auto'), model = picked.startsWith('claude:') ? picked.slice(7) : picked.startsWith('api:') ? picked.slice(4) : undefined;
+  const model = brainPick === 'auto' ? undefined : brainPick;      // the model bar's pick, typed and spoken alike (Automatic: the default decides)
   expecting = true;
   try {
     const started = await api('/api/voice', { action: 'say', text, chat: current || null, spoken: !!spoken, model, project: current ? undefined : (selectedProject || undefined), ...extra });
@@ -705,7 +705,7 @@ async function send(text, spoken, extra = {}) {
   finally { expecting = false; }
 }
 N.assistantSend = (text, extra) => send(text, false, extra);
-N.assistantUsable = attachments => $('mode').value !== 'code' && !String($('model')?.value || '').startsWith('codex:') && !(attachments.uploads || []).some(u => u.image_id);
+N.assistantUsable = attachments => $('mode').value !== 'code' && !(attachments.uploads || []).some(u => u.image_id);
 N.assistantLive = rid => turns.has(rid);
 N.assistantStop = async () => {
   speaker.hush();
@@ -788,7 +788,7 @@ function showBrain(now) {
 brainChip.onclick = () => {
   const waiting = brain.waiting || [], out = brain.until && brain.until * 1000 > Date.now();
   const d = dialog('<h2>' + (out ? esc(brain.out) + ' is resting until ' + esc(clockTime(brain.until)) : 'Waiting requests') + '</h2>' +
-    (out ? '<p>Its usage allowance is used up for now. Until it is back, JARVIS answers with another AI you have connected, and tells you when it does. You can connect more under <b>AI models</b>.</p>' : '') +
+    (out ? '<p>Its usage allowance is used up for now. Until it is back, JARVIS answers with another AI you have connected. You can connect more under <b>AI models</b>.</p>' : '') +
     (waiting.length ? '<p>These could not be answered by anything just now. JARVIS carries on with them by itself:</p><ul class="nv-waiting">' +
       waiting.map(w => '<li><span>' + esc(w.text) + '<small>at about ' + esc(clockTime(w.until)) + '</small></span><button class="plain" data-unwait="' + esc(w.id) + '">Do not</button></li>').join('') + '</ul>' : '') +
     '<div class="actions"><button class="plain" data-models>AI models</button>' + (waiting.length ? '<button class="plain" data-now>Try now</button>' : '') + '<button class="primary" data-ok>Got it</button></div>');
@@ -833,25 +833,154 @@ async function loadServices(look) {
   fillPicker(); return services;
 }
 function fillPicker() {
+  // The coding jobs' list (#model) holds only what a coding job can use: who answers a message is the model bar's pick.
   const select = $('model'); if (!select) return;
-  let mine = select.querySelector('optgroup[data-account]');
-  if (!signedBrains.length) mine?.remove();
-  else {
-    if (!mine) { mine = document.createElement('optgroup'); mine.dataset.account = '1'; mine.label = 'ChatGPT, with your account (no key)'; select.append(mine); }
-    const keep = select.value;
-    mine.replaceChildren(...signedBrains.map(b => { const o = document.createElement('option'); o.value = 'api:' + b.id + ':' + b.model; o.textContent = b.name; o.dataset.about = o.title = 'Answers with your ChatGPT plan, through Codex. No API key.'; return o; }));
-    if ([...select.options].some(o => o.value === keep)) select.value = keep;
-  }
-  let group = select.querySelector('optgroup[data-ai]');
-  const on = services.filter(s => s.connected && s.model && s.tools !== false);
-  if (!on.length) { group?.remove(); return; }
-  if (!group) { group = document.createElement('optgroup'); group.dataset.ai = '1'; group.label = 'Other AI services'; select.append(group); }
-  const keep = select.value;
-  group.replaceChildren(...on.map(s => { const o = document.createElement('option'); o.value = 'api:' + s.id + ':' + s.model; o.textContent = s.name.split(' (')[0] + ' · ' + s.model.split('/').pop(); o.dataset.about = o.title = s.model_about || ''; return o; }));
-  if ([...select.options].some(o => o.value === keep)) select.value = keep;
+  select.querySelectorAll('optgroup[data-account],optgroup[data-ai]').forEach(group => group.remove());
+  N.modelLabel?.();
 }
 const earlierPicker = window.updateModelPicker; window.updateModelPicker = d => { earlierPicker?.(d); if (Array.isArray(d?.models)) modelNotes = d.models; fillPicker(); };
 N.aiChanged = () => loadServices(false);
+
+/* ---------- the model bar: which AI answers in this window, typed and spoken alike ----------
+   The button next to the message box (outside Code). A pick is this window's own and is kept on this PC; it never changes
+   the default, which is set in Settings, AI models & accounts. Automatic sends no model: the default decides. */
+const CLAUDE_PICKS = ['haiku', 'sonnet', 'opus', 'fable'];
+const PICK_SHAPE = /^[\w.\/:@\- ]{1,140}$/;
+let brainPick = (() => { const kept = String(store.get('jcc-brain', 'auto') || 'auto'); return PICK_SHAPE.test(kept) ? kept : 'auto'; })();
+let gptModels = null, gptAll = false, resting = {};
+const serviceModels = {}, serviceOpen = {};      // serviceModels[id]: 'loading', {error}, or the names
+const titled = s => s ? s[0].toUpperCase() + s.slice(1) : '';
+function brainName(value) {
+  if (!value || value === 'auto') return 'Automatic';
+  if (CLAUDE_PICKS.includes(value)) return titled(value);
+  const at = value.indexOf(':'), service = value.slice(0, at), model = value.slice(at + 1);
+  if (service === 'chatgpt') return model === 'default' ? 'ChatGPT' : ((gptModels || []).find(m => m.id === model) || {}).name || model;
+  return modelTitle(model) || service;
+}
+// A service's model id as a name: "gemini-2.5-flash-lite" is "Gemini 2.5 Flash Lite".
+function modelTitle(id) { return String(id || '').split('/').pop().replace(/[-_]+/g, ' ').replace(/\b[a-z]/g, c => c.toUpperCase()); }
+const usualBrain = () => String(options.assistant?.model || options.model || 'auto');
+N.brainLabel = () => {
+  const label = brainPick !== 'auto' ? brainName(brainPick) : usualBrain() !== 'auto' ? 'Auto · ' + brainName(usualBrain()) : 'Auto';
+  return { label, aria: 'Model: ' + label + '. Change model' };
+};
+function restingUntil(value) {
+  const at = value.indexOf(':'), keys = CLAUDE_PICKS.includes(value) ? ['claude', 'claude:' + value] : ['api:' + value.slice(0, at), 'api:' + value];
+  const until = Math.max(0, ...keys.map(k => Number(resting[k]) || 0));
+  return until * 1000 > Date.now() ? until : 0;
+}
+function setBrain(value) {
+  brainPick = PICK_SHAPE.test(value) ? value : 'auto'; store.set('jcc-brain', brainPick); N.modelLabel?.();
+  document.getElementById('nv-model-name')?.closest('button')?.focus();
+}
+// "/model" opens the menu; "/model opus", "/model chatgpt", "/model gemini" or "/model auto" picks.
+N.pickBrain = words => {
+  const want = String(words || '').trim().toLowerCase(); if (!want) return '';
+  let value = '';
+  if (['auto', 'automatic'].includes(want)) value = 'auto';
+  else if (CLAUDE_PICKS.includes(want.replace(/^claude\s+/, ''))) value = want.replace(/^claude\s+/, '');
+  else if (/^(chatgpt|gpt|codex)$/.test(want) && signedBrains.some(b => b.id === 'chatgpt')) value = 'chatgpt:default';
+  else if ((gptModels || []).some(m => m.id === want || m.name.toLowerCase() === want)) value = 'chatgpt:' + gptModels.find(m => m.id === want || m.name.toLowerCase() === want).id;
+  else { const s = services.find(x => x.connected && x.model && x.tools !== false && (x.id === want || x.name.toLowerCase().startsWith(want))); if (s) value = s.id + ':' + s.model; }
+  if (!value) throw new Error('There is no model called “' + words.trim() + '” to pick. Type /model to see them.');
+  setBrain(value); return brainName(value);
+};
+const MENU_NOTES = { haiku: 'Fastest. Quick questions and small tasks.', sonnet: 'Balanced. Most everyday work.', opus: 'Stronger. Complex work, slower.',
+  fable: 'Most capable. Hardest problems, slowest.' };
+N.brainMenu = p => {
+  p.classList.add('nv-brains');
+  const chatgpt = signedBrains.some(b => b.id === 'chatgpt');
+  // Each time it opens, the long lists are folded again, unless the model in use is in one.
+  gptAll = false;
+  for (const id of Object.keys(serviceOpen)) delete serviceOpen[id];
+  const pickedIn = services.find(s => s.id !== 'chatgpt' && brainPick.startsWith(s.id + ':'));
+  if (pickedIn && brainPick !== pickedIn.id + ':' + pickedIn.model) serviceOpen[pickedIn.id] = true;
+  const filters = {};
+  let focusAfter = '';      // a list just unfolded: once it is there, the keyboard goes to its filter, or its first model
+  if (chatgpt && gptModels === null) api('/api/providers', { action: 'account_models', id: 'chatgpt' }).then(got => { gptModels = got.models || []; }, () => { gptModels = []; }).then(() => { if (p.isConnected) draw(); });
+  api('/api/providers', { action: 'resting' }).then(got => { resting = got.resting || {}; if (p.isConnected) draw(); }, () => {});
+  function draw() {
+    const was = document.activeElement?.dataset?.brain;
+    let moved = false;
+    p.replaceChildren();
+    const group = (label, id) => { const g = el('div', { role: 'group', 'aria-labelledby': 'nv-brains-' + id }); g.append(el('h5', { id: 'nv-brains-' + id }, esc(label))); p.append(g); return g; };
+    const row = (parent, value, label, note = '') => {
+      const until = restingUntil(value), on = brainPick === value;
+      const b = N.item(parent, label, value === 'auto' ? 'spark' : '', () => setBrain(value), { tick: on, note: until ? 'Resting until ' + clockTime(until) : note });
+      b.setAttribute('role', 'menuitemradio'); b.setAttribute('aria-checked', String(on)); b.dataset.brain = value;
+      if (until) b.classList.add('nv-resting');
+      return b;
+    };
+    const link = (parent, label, iconName, action, keep = false) => { const b = N.item(parent, label, iconName, action, { keep }); b.dataset.brain = 'link:' + label; return b; };
+    const fold = (parent, label, action) => { const b = link(parent, label, 'chev', action, true); b.setAttribute('aria-expanded', 'false'); return b; };
+    const waiting = parent => { parent.setAttribute('aria-busy', 'true'); link(parent, 'Loading models\u2026', '', () => {}, true).disabled = true; };
+    const usual = usualBrain();
+    row(group('Automatic', 'auto'), 'auto', 'Automatic', 'Uses your default: ' + brainName(usual) + '.' + (usual === 'auto' ? ' JARVIS picks a model for each request.' : ''));
+    const claude = group('Claude', 'claude');
+    for (const id of CLAUDE_PICKS) row(claude, id, titled(id), MENU_NOTES[id]);
+    const gpt = group('ChatGPT \u00b7 your plan', 'chatgpt');
+    if (!chatgpt) link(gpt, 'Sign in to ChatGPT\u2026', 'keys', () => openSettings('models'));
+    else {
+      row(gpt, 'chatgpt:default', 'ChatGPT default', 'The model your ChatGPT plan gives.');
+      if (gptModels === null) waiting(gpt);
+      else {
+        const shown = gptAll || gptModels.slice(4).some(m => brainPick === 'chatgpt:' + m.id) ? gptModels : gptModels.slice(0, 4);
+        for (const m of shown) row(gpt, 'chatgpt:' + m.id, m.name);
+        if (shown.length < gptModels.length) fold(gpt, (gptModels.length - shown.length) + ' more ChatGPT models', () => {
+          gptAll = true; draw(); [...p.querySelectorAll('button')].find(b => b.dataset.brain === 'chatgpt:' + gptModels[4].id)?.focus();
+        });
+      }
+    }
+    // The services connected with a key, Gemini first. Without a Gemini key, only the way to add one.
+    const on = services.filter(s => s.connected && s.model && s.tools !== false).sort((a, b) => (b.id === 'gemini') - (a.id === 'gemini'));
+    if (!on.some(s => s.id === 'gemini') && services.some(s => s.id === 'gemini')) link(group('Gemini', 'gemini'), 'Add a Gemini key (free)\u2026', 'keys', () => openSettings('models'));
+    for (const s of on) {
+      const name = s.name.split(' (')[0], g = group(name, s.id);
+      row(g, s.id + ':' + s.model, modelTitle(s.model), 'Its usual model.');
+      if (!serviceOpen[s.id]) {
+        fold(g, 'All ' + name + ' models\u2026', () => { serviceOpen[s.id] = true; focusAfter = s.id; loadModels(s.id); draw(); });
+        continue;
+      }
+      const listed = serviceModels[s.id];
+      if (listed === undefined) loadModels(s.id);
+      if (listed === undefined || listed === 'loading') {
+        waiting(g);
+        if (focusAfter === s.id && !moved) { g.querySelector('button')?.focus(); moved = true; }      // (meanwhile on its usual model)
+        continue;
+      }
+      if (listed.error) { link(g, 'The models could not be listed. Try again.', 'retry', () => { loadModels(s.id); draw(); g.isConnected || p.querySelector('[aria-labelledby="nv-brains-' + s.id + '"] button')?.focus(); }, true); continue; }
+      const others = listed.filter(m => m !== s.model);
+      const filter = others.length > 12 ? el('input', { type: 'search', class: 'nv-brain-filter', placeholder: 'Filter models', 'aria-label': 'Filter ' + name + ' models' }) : null;
+      if (filter) g.append(filter);
+      const rows = others.map(m => row(g, s.id + ':' + m, modelTitle(m)));
+      if (filter) {
+        const none = link(g, 'No models match.', '', () => {}, true); none.disabled = true; none.hidden = true;
+        const apply = () => {
+          const q = filter.value.trim().toLowerCase(); let shown = 0;
+          for (const b of rows) { const hit = !q || (b.dataset.brain + ' ' + b.textContent).toLowerCase().includes(q); b.hidden = !hit; shown += hit; }
+          none.hidden = shown > 0; filters[s.id] = filter.value;
+        };
+        filter.value = filters[s.id] || ''; filter.oninput = apply; if (filter.value) apply();
+      }
+      if (focusAfter === s.id) { focusAfter = ''; (filter || rows[0])?.focus(); moved = true; }
+    }
+    p.append(el('hr'));
+    link(p, 'Set the default\u2026', 'gear', () => openSettings('models'));
+    link(p, 'Add another AI\u2026', 'plus', () => openSettings('models'));
+    // Drawn again (models or limits came in): the keyboard stays on the line it was on, and a menu that opened upwards
+    // still ends just above the button.
+    if (was && !moved) ([...p.querySelectorAll('button')].find(b => b.dataset.brain === was) || p.querySelector('[aria-checked="true"]'))?.focus({ preventScroll: true });
+    const anchor = document.getElementById('nv-model-name')?.closest('button'), r = anchor?.getBoundingClientRect();
+    if (r && p.isConnected && p.getBoundingClientRect().top < r.top) p.style.top = Math.max(8, r.top - p.offsetHeight - 8) + 'px';
+  }
+  function loadModels(id) {
+    if (serviceModels[id] === 'loading' || Array.isArray(serviceModels[id])) return;
+    serviceModels[id] = 'loading';
+    api('/api/providers', { action: 'models', id }).then(got => { serviceModels[id] = Array.isArray(got.models) ? got.models : []; },
+      error => { serviceModels[id] = { error: error.message || 'They could not be listed.' }; }).then(() => { if (p.isConnected) draw(); });
+  }
+  draw();
+};
 
 /* ---------- events from the assistant ---------- */
 function handle(event) {
@@ -976,7 +1105,7 @@ async function pump() {
   for (;;) {
     try {
       const data = await api('/api/voice/events?since=' + Math.max(0, since) + '&wait=' + (since < 0 ? 0 : 20) + '&w=' + WINDOW + '&kind=' + KIND);
-      options = data.settings; showBrain(data.brain);
+      options = data.settings; showBrain(data.brain); N.modelLabel?.();
       if (N.lightHint !== options.light_now) { N.lightHint = options.light_now; N.applyLight?.(options.light_now); }
       if (since < 0) { since = data.next; if (data.busy) body.classList.add('nv-working'); if (data.confirm) askConfirm(data.confirm); if (data.waiting) pickUp(false); continue; }
       since = data.next; data.events.forEach(handle); if (data.waiting) pickUp(false);
@@ -1044,7 +1173,7 @@ async function openSettings(tab = 'assistant') {
     try { speech = { ...speech, ...(await api('/api/speech', { action: 'settings', settings: values })) }; await A.use(speech.settings.mic || '', speech.settings.speaker || '').catch(() => {}); saved(); micSync(); }
     catch (error) { toast(error.message); }
   };
-  const setAssistant = async values => { try { options = { ...options, ...(await api('/api/voice', { action: 'settings', settings: values })) }; saved(); } catch (error) { toast(error.message); } };
+  const setAssistant = async values => { try { options = { ...options, ...(await api('/api/voice', { action: 'settings', settings: values })) }; saved(); N.modelLabel?.(); } catch (error) { toast(error.message); } };
   const bind = (id, read, write, apply) => { const node = pane.querySelector('#' + id); if (!node) return; if (node.type === 'checkbox') node.checked = !!read; else node.value = read ?? ''; node.onchange = () => apply({ [write]: node.type === 'checkbox' ? node.checked : node.value }); };
 
   async function voiceTab() {
@@ -1370,7 +1499,7 @@ async function openSettings(tab = 'assistant') {
     const on = services.filter(s => s.connected), rest = services.filter(s => !s.connected);
     pane.innerHTML = '<h3>Accounts</h3><p class="small">Sign in with your own subscription: no key needed. Each one signs in on its own page, in your browser.</p><div class="nv-accounts" data-accounts><p class="small nv-set-wait"><i class="nv-spin"></i>Asking each one whether it is signed in…</p></div>' +
       '<h3>Who answers</h3>' + row('JARVIS’s brain', pick('mo-model', brainChoices()), 'For talking, quick questions and controlling the PC. Building software has its own choice, next to the message box.') +
-      check('mo-standin', 'When that AI reaches its usage limit, carry on with another one', 'The same request simply continues with the next connected AI, and JARVIS tells you. It switches back by itself when the limit is over.') +
+      check('mo-standin', 'When that AI reaches its usage limit, carry on with another one', 'The same request simply continues with the next AI you connected with a key. Your Claude and ChatGPT sign-ins are always tried first. It switches back by itself when the limit is over.') +
       '<h3>Model for each kind of task</h3><div class="nv-task-models-here" data-task-models></div>' +
       check('mo-resume', 'If nothing can answer, carry on by itself as soon as something can', 'The request waits, and is picked up where it stopped. You are told when it happens.') +
       '<h3>API keys: connected</h3>' + (on.length ? on.map(one).join('') : '<p class="small">None yet. Connect at least one so that JARVIS can keep going when Claude’s allowance runs out. Groq and Gemini have free keys.</p>') +

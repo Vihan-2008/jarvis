@@ -823,7 +823,7 @@ class Assistant:
         return {"events": events, "next": upto, "busy": bool(running), "running": running, "waiting": self._waiting(), "brain": self.brain_now(),
                 "confirm": {k: waiting[k] for k in ("id", "question", "detail", "kind", "chat")} if waiting else None,
                 "settings": {**settings(self.cfg), "light_now": light_mode(self.cfg), "assistant": {"id": helper["id"], "name": helper["name"],
-                                                                                                  "voice_id": helper["voice_id"]}}}
+                                                                                                  "voice_id": helper["voice_id"], "model": helper["model"]}}}
 
     # ------------------------------------------------------------------ the wake word, heard by the tray helper
     def presence(self, phase: str, window: str = "", gone: bool = False, wake: bool = False, kind: str = "") -> dict:
@@ -1270,8 +1270,9 @@ class Assistant:
         return ("claude", "sonnet") if research and spec == ("claude", "haiku") else spec
 
     def _plan(self, turn: Turn) -> list[tuple]:
-        """Every brain that may answer this request, best first. After the one that suits it: a smaller Claude model (for
-        when only the bigger one's own allowance is out), then the other AI services the owner has connected."""
+        """Every brain that may answer this request, best first: the one picked (or that suits it); its maker's other models,
+        nearest first; the accounts the owner signed in with (Claude, ChatGPT); then the AI services connected with a key."""
+        from jcc import codex_brain
         first = self._first(turn.choice, turn.text, turn.research, turn.spoken, turn.how)
         plan = [first]
         if first[0] == "claude":
@@ -1280,6 +1281,22 @@ class Assistant:
                 from jcc import providers
                 if providers.connected(self.cfg, "perplexity"):     # research, and Claude cannot: the service that searches comes before any that cannot
                     plan.append(("api", "perplexity", "medium"))
+        else:
+            # The same maker first, nearest model first: ChatGPT's next two listed models, then whatever the owner's plan
+            # gives; a service's usual model, then its second. (A model the owner picked may be the one that is refused.)
+            if first[1] == codex_brain.KEY:
+                listed = codex_brain.models_known()
+                near = listed[listed.index(first[2]) + 1:listed.index(first[2]) + 3] if first[2] in listed else []
+                plan += [("api", first[1], name) for name in near + [codex_brain.DEFAULT]]
+            elif not turn.research:         # (research: Claude with its web search comes next, not another depth of the same service)
+                from jcc import providers
+                try:
+                    plan += [("api", first[1], name) for name in providers.choices(self.cfg, first[1])]
+                except providers.ProviderError:
+                    pass
+            # then Claude, at much the same strength: Sonnet (and Haiku, unless this is research)
+            plan += [("claude", "sonnet")] + ([] if turn.research else [("claude", "haiku")])
+            plan = list(dict.fromkeys(plan))
         if turn.options.get("standin", True):
             from jcc import providers
             ready = providers.ready(self.cfg, need_tools=True)
@@ -1291,9 +1308,6 @@ class Assistant:
                         names = []
                     if len(names) > place and ("api", ident, names[place]) not in plan:
                         plan.append(("api", ident, names[place]))
-        second = ("claude", "sonnet" if turn.research else "haiku")
-        if first[0] == "api" and second not in plan:
-            plan.insert(1, second)
         return self._with_accounts(turn, first, plan)
 
     def _accounts(self, wait: bool = True) -> dict:
@@ -1332,9 +1346,11 @@ class Assistant:
         if seen["chatgpt"] and not any(spec[:2] == gpt[:2] for spec in plan):
             if first[0] == "claude" and seen["claude"] in ("free", "off"):
                 plan.insert(0, gpt)
-            elif turn.options.get("standin", True):
-                lead = 1                                     # (after the first brain and the Claude models that follow it)
-                while lead < len(plan) and plan[lead][0] == "claude":
+            else:
+                # After the first brain, its maker's other models and Claude's: before any service that needs a key. (An
+                # account the owner signed in with is always tried: the stand-in setting is about the key services.)
+                lead = 1
+                while lead < len(plan) and (plan[lead][0] == "claude" or plan[lead][:2] == first[:2]):
                     lead += 1
                 plan.insert(lead, gpt)
         if seen["claude"] == "free":
@@ -1362,7 +1378,23 @@ class Assistant:
             return {}
         with self.lock:
             waiting = [{"id": w["id"], "chat": w["chat"], "until": w["until"], "text": w["text"][:80]} for w in self.waiting]
-        return {"out": spec_name(self.cfg, spec), "until": until, "waiting": waiting} if until or waiting else {}
+        # (only while requests wait: a brain at its limit while another answers is not worth the owner's attention)
+        return {"out": spec_name(self.cfg, spec), "until": until, "waiting": waiting} if waiting else {}
+
+    def resting(self) -> dict:
+        """Every brain that cannot be used just now, and until when: {"claude", "claude:opus", "api:chatgpt",
+        "api:chatgpt:<model>", "api:gemini", ...: time}. For the model menu, which shows them dimmed but still to be picked."""
+        now = time.time()
+        with self.lock:
+            out = {scope: until for scope, until in self.cool.items() if until > now}
+        for name in MODELS:
+            try:
+                until = allowance_out(self.cfg, name, now)
+            except Exception:  # noqa: BLE001 - only a hint for the menu
+                until = 0.0
+            if until > now:
+                out["claude:" + name] = max(out.get("claude:" + name, 0.0), until)
+        return out
 
     def _next(self, turn: Turn):
         """The next brain that can answer this turn right now, with a session for it: (session, is it new). None: none can."""
@@ -1407,12 +1439,9 @@ class Assistant:
             pass
 
     def _switch_words(self, turn: Turn, session) -> str:
-        """What the owner is told when another brain takes over: who had to stop, until when, and who carries on."""
-        old = turn.left[0]
-        until = self._blocked(old)
-        why = turn.left_why or "has reached its limit"
-        return (f"{spec_name(self.cfg, old)} {why}" + (f" until {clock(until)}" if until and "limit" in why else "") +
-                f". I am carrying on with {spec_name(self.cfg, session.spec)}.")
+        """The quiet line shown when another brain takes over: only who answered. Nothing about a limit: the owner hears of
+        limits only when nothing at all can answer (_all_out)."""
+        return f"{spec_name(self.cfg, session.spec)} answered this."
 
     def _all_out(self, turn: Turn, state: dict) -> tuple[str, bool]:
         """No brain can answer right now. Returns (what to tell the owner, whether the request now waits to be carried on with)."""
@@ -1732,7 +1761,8 @@ class Assistant:
                 with self.lock:
                     turn.session, turn.model = session, session.spec[-1]
                 prompt = self._compose(turn, session, fresh, state["steps"], state["text"] or state["said"])
-                if turn.left:
+                # (also when the first was resting already: once, as that other brain starts in this chat)
+                if turn.left or (fresh and turn.plan and session.spec != turn.plan[0]):
                     state["switch"] = self._switch_words(turn, session)
             outcome = self._listen(turn, session, prompt, feed, state)
             self._count(turn, session, outcome, state)
@@ -1761,7 +1791,7 @@ class Assistant:
         def announce() -> None:                 # a stand-in is named to the owner the moment it really starts to answer, not before
             words, state["switch"] = state.get("switch"), None
             if words:
-                self.emit("notice", kind="switch", say=bool(turn.spoken), text=words)
+                self.emit("notice", kind="switch", say=False, text=words)
 
         def might_be_the_mark() -> bool:        # while the reply could still turn out to be "[not for me]", none of it is shown or spoken
             said = state["text"][base:].strip().lower()

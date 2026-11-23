@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -217,7 +218,8 @@ class CodexSession:
                 problem = " ".join((proc.stderr.read() or "").split())[-300:]
             except (OSError, ValueError):
                 problem = ""
-        yield {"type": "result", "is_error": True, "result": redact(_plain(problem))[:300] or "ChatGPT (through Codex) stopped without answering.", "usage": usage}
+        yield {"type": "result", "is_error": True, "result": redact(_plain(problem))[:300] or "ChatGPT (through Codex) stopped without answering.", "usage": usage,
+               "model_problem": bool(REFUSED_MODEL.search(problem))}      # (then only that model rests: the plan's others can answer)
 
     def _kill(self) -> None:
         proc = self.proc
@@ -235,6 +237,40 @@ class CodexSession:
             self.instructions.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+# "The 'x' model is not supported when using Codex with a ChatGPT account.", and the like: that one model, not all of ChatGPT.
+REFUSED_MODEL = re.compile(r"\bmodel\b.{0,80}\b(?:is not supported|not supported|not found|does not exist|is not available|no access)\b", re.I)
+_listed: tuple[float, list[dict]] | None = None
+
+
+def models(refresh: bool = False) -> list[dict]:
+    """The models the owner's ChatGPT plan offers through Codex, best first, as [{"id", "name"}]: Codex's own list of the
+    ones it shows (kept for six hours). [] when it cannot be read: then only the plan's default is offered."""
+    global _listed
+    if _listed and not refresh and time.time() - _listed[0] < 21600:
+        return list(_listed[1])
+    from jcc.agents import resolve_command
+    from jcc.jobs import scrub_env
+    exe, out = resolve_command("codex"), []
+    if exe:
+        try:
+            done = subprocess.run([exe, "debug", "models"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20,
+                                  env=scrub_env(os.environ), creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            rows = json.loads(done.stdout or "{}").get("models") or []
+            rows = sorted((r for r in rows if isinstance(r, dict)), key=lambda r: r.get("priority") if isinstance(r.get("priority"), int) else 999)
+            out = [{"id": str(r["slug"]), "name": " ".join(str(r.get("display_name") or r["slug"]).split())[:60]}
+                   for r in rows if r.get("visibility") == "list" and re.fullmatch(r"[\w.\-]{1,80}", str(r.get("slug") or ""))]
+        except (OSError, subprocess.SubprocessError, ValueError, AttributeError, TypeError):
+            out = []
+    if out:
+        _listed = (time.time(), out)
+    return out
+
+
+def models_known() -> list[str]:
+    """The models already read (none is read now): for ordering the brains, which must not wait."""
+    return [row["id"] for row in (_listed[1] if _listed else [])]
 
 
 def _plain(problem: str) -> str:
