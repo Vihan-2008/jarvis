@@ -13,6 +13,7 @@ _PATTERNS = [
     re.compile(r"csk-[0-9A-Za-z]{16,}"),               # Cerebras
     re.compile(r"sk-(?:ant-|proj-)?[0-9A-Za-z_\-]{16,}"),  # Anthropic / OpenAI style
     re.compile(r"gh[pousr]_[0-9A-Za-z]{20,}"),         # GitHub
+    re.compile(r"\b(?:ak|ck|uak)_[0-9A-Za-z_\-]{20,}"),  # Composio (project, consumer and user keys)
     re.compile(r"\bsk_[0-9a-fA-F]{30,}"),               # ElevenLabs
     re.compile(r"\bsutkn_[0-9A-Za-z_\-]{8,}"),          # ElevenLabs one-time tokens
     re.compile(r"(?i)(bearer\s+)[0-9A-Za-z._\-]{16,}"),

@@ -73,7 +73,7 @@ class TestTheKey(OnlineCase):
     def test_the_wrong_kind_of_key_is_named(self):
         with self.assertRaises(online.OnlineError) as wrong:
             online.connect(self.cfg, "uak_0123456789abcdefghij", opener=self.composio)
-        self.assertIn("project key, which starts with ak_", str(wrong.exception))
+        self.assertIn("Copy the API key that starts with ck_ (or ak_)", str(wrong.exception))
         for junk in ("", "short", "has spaces in it 0123456789", "x" * 300):
             with self.assertRaises(online.OnlineError, msg=junk):
                 online.connect(self.cfg, junk, opener=self.composio)
@@ -87,6 +87,63 @@ class TestTheKey(OnlineCase):
                 online.configure(self.cfg, bad)
         (self.cfg.state_dir / "online.json").write_text('{"user": "../../etc"}', "utf-8")
         self.assertEqual(online.settings(self.cfg)["user"], "default", "a spoilt file is not trusted")
+
+
+class TestAKeyForComposiosOwnServer(OnlineCase):
+    """A key that starts with ck_: it reaches only Composio's ready-made server, so the helper goes through JARVIS's gate."""
+
+    def setUp(self):
+        super().setUp()
+        from tests.test_composio_gate import KEY as CK, FakeConnect
+        self.ck, self.server, self.Fake = CK, FakeConnect(), FakeConnect
+
+    def started(self, request, change=False, server=None):
+        seen = []
+
+        def runner(argv, **kw):
+            seen.append((argv, kw))
+            return Done({"result": "Done.", "is_error": False})
+        online.run(self.cfg, request, change=change, exe="claude", opener=server or self.server, runner=runner)
+        argv, kw = seen[-1]
+        servers = json.loads(argv[argv.index("--mcp-config") + 1])["mcpServers"]
+        return argv, kw, servers["accounts"], argv[argv.index("--allowedTools") + 1]
+
+    def test_the_key_is_checked_with_composios_server_and_kept_only_if_it_is_accepted(self):
+        with self.assertRaises(online.OnlineError) as refused:
+            online.connect(self.cfg, "ck_wrong_key_0123456789abcdef", opener=self.server)
+        self.assertEqual(str(refused.exception), online.BAD_CONSUMER_KEY)
+        self.assertFalse(online.connected(self.cfg))
+        self.assertEqual(online.connect(self.cfg, " " + self.ck + " ", opener=self.server), {"connected": True, "user": ""})
+        self.assertEqual(secrets.get("composio"), self.ck)
+        self.assertEqual(online.verify(self.cfg, opener=self.server), "Composio accepted the key. Connected: github, gmail, google_classroom.")
+        self.assertIn("could not say which accounts", online.verify(self.cfg, opener=self.Fake(connected="")))
+        item = next(i for i in connections.overview(self.cfg) if i["id"] == "accounts")
+        self.assertEqual(item.get("user"), "", "no “whose accounts” with this kind of key")
+        self.assertIn("keeps lookups to reading", item.get("detail", ""))
+
+    def test_a_lookup_gets_the_gate_with_only_its_tools_and_the_key_stays_out_of_the_helper(self):
+        secrets.store("composio", self.ck)
+        argv, kw, gate, allowed = self.started("what is in my inbox")
+        self.assertEqual(gate["args"], ["-m", "jcc.composio_gate", "read", "github,gmail,google_classroom"])
+        self.assertEqual(gate["type"], "stdio")
+        self.assertEqual(allowed, "mcp__accounts__COMPOSIO_SEARCH_TOOLS,mcp__accounts__COMPOSIO_GET_TOOL_SCHEMAS,mcp__accounts__COMPOSIO_MULTI_EXECUTE_TOOL")
+        self.assertNotIn(self.ck, json.dumps(argv))
+        self.assertNotIn("JCC_COMPOSIO_KEY", kw["env"], "the gate reads the key from the key store itself")
+        self.assertIn("Here you can only look things up", argv[argv.index("--system-prompt") + 1])
+
+    def test_a_change_and_a_connection_get_their_own_kinds_of_gate(self):
+        secrets.store("composio", self.ck)
+        _, _, gate, allowed = self.started("Reply to Anna: yes", change=True)
+        self.assertEqual(gate["args"][2:], ["act", "github,gmail,google_classroom"])
+        _, _, gate, allowed = self.started("Connect my Outlook", change=True)
+        self.assertEqual(gate["args"][2:], ["connect", ""])
+        self.assertEqual(allowed, "mcp__accounts__COMPOSIO_SEARCH_TOOLS,mcp__accounts__COMPOSIO_MANAGE_CONNECTIONS")
+
+    def test_when_composio_does_not_say_what_is_connected_nothing_is_looked_up(self):
+        secrets.store("composio", self.ck)
+        with self.assertRaises(online.OnlineError) as unknown:
+            online.run(self.cfg, "what is in my inbox", exe="claude", opener=self.Fake(connected=""), runner=lambda *a, **k: self.fail("nothing should be started"))
+        self.assertEqual(str(unknown.exception), online.UNKNOWN_APPS)
 
 
 class TestTheTwoKindsOfHelper(OnlineCase):
@@ -353,7 +410,7 @@ class TestInTheApp(GuiTestCase):
     def test_a_key_that_is_not_one_is_refused_over_the_wire(self):
         status, got = self.req("POST", "/api/speech", {"action": "key", "which": "composio", "value": "uak_0123456789abcdefghij"})
         self.assertEqual(status, 400)
-        self.assertIn("project key", got["error"])
+        self.assertIn("starts with uak_, which JARVIS cannot use", got["error"])
         secrets.store("composio", KEY)
         self.assertEqual(self.req("POST", "/api/speech", {"action": "forget", "which": "composio"})[0], 200)
         self.assertIsNone(secrets.get("composio"))

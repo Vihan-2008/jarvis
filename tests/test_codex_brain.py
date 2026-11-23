@@ -119,6 +119,45 @@ class TestTheSession(AssistantCase):
         result = list(self.session(Codexes((failed,))).events("hello"))[-1]
         self.assertTrue(result["is_error"] and assistant.is_limit(result["result"]))
 
+    def _slow(self, events, pauses):
+        """A Codex that prints its events slowly (pauses[i] seconds before event i) and stops when it is stopped."""
+        proc = FakeCodex([])
+        proc.code, proc.killed = None, False
+
+        def lines():
+            for event, pause in zip(events, pauses):
+                end = time.monotonic() + pause
+                while time.monotonic() < end:
+                    if proc.killed:
+                        return
+                    time.sleep(0.01)
+                yield json.dumps(event) + "\n"
+            proc.code = 0
+        proc.stdout = lines()
+        return proc
+
+    def _run(self, proc, quiet):
+        session = self.session(lambda argv, **kw: proc)
+        def kill(_self=None):
+            proc.killed, proc.code = True, 1
+        with mock.patch.object(codex_brain, "QUIET", quiet), mock.patch.object(codex_brain, "TOOL_QUIET", quiet), \
+             mock.patch.object(codex_brain.CodexSession, "_kill", kill), \
+             mock.patch.object(codex_brain, "LOOK", 0.02):
+            return list(session.events("open notepad, then calculator, then paint"))[-1]
+
+    def test_a_request_of_many_steps_is_not_cut_off_between_them(self):
+        # Each step comes well inside the quiet limit, but the whole request takes several times longer than it.
+        steps = answer("Opened all three.", ("open_app", {"name": "Notepad"}))
+        result = self._run(self._slow(steps, [0.15] * len(steps)), quiet=0.4)
+        self.assertFalse(result["is_error"], result)
+        self.assertEqual(result["result"], "Opened all three.")
+
+    def test_a_codex_that_goes_quiet_is_stopped_and_says_so(self):
+        steps = answer("never said")
+        result = self._run(self._slow(steps, [0.0, 0.0, 5.0] + [0.0] * (len(steps) - 3)), quiet=0.3)
+        self.assertTrue(result["is_error"])
+        self.assertIn("stopped responding", result["result"])
+
     def test_without_codex_it_cannot_start(self):
         with mock.patch.object(agents, "resolve_command", lambda name: None):
             with self.assertRaisesRegex(ValueError, "Codex is not installed"):

@@ -22,6 +22,12 @@ raw requests.
 
 The key lives in Windows Credential Manager. It is handed to the helper through its environment, never on a command
 line and never in a file, and it is only ever sent to composio.dev.
+
+Two kinds of Composio key work. A project key (ak_) lets Composio itself hold the helper to the rules above: each request
+gets a session at Composio with only what it allows. A key that starts with ck_ (what Composio's dashboard gives most
+people now) reaches only Composio's ready-made server, which cannot be told to hold anything back; with it the helper
+is given JARVIS's own gate instead (jcc/composio_gate.py), which keeps it to the same rules on this PC, by the tools'
+names, and holds the key itself.
 """
 from __future__ import annotations
 
@@ -29,18 +35,24 @@ import json
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 from urllib.parse import urlencode, urlparse
 
-from jcc import secrets
+from jcc import composio_gate, secrets
 from jcc.redact import redact, register_secret
 from jcc.vault import atomic_write, read_json
 
 API = "https://backend.composio.dev"
 GET_KEY = "https://dashboard.composio.dev"
+CONSUMER = "ck_"                               # the start of a key for Composio's ready-made server (jcc/composio_gate.py)
+BAD_CONSUMER_KEY = "Composio did not accept the key. Copy the whole key again from your Composio dashboard and paste it here."
+UNKNOWN_APPS = ("Composio did not say which accounts are connected, so nothing was looked up. If none is connected yet, ask JARVIS to "
+                "connect one (for example “connect my Gmail”).")
 AGENT = "jarvis-command"
 KEEP = 1500.0                                  # how long a session with Composio is used before a new one is asked for (seconds)
 READS_ONLY = ["createHint", "updateHint", "destructiveHint"]      # kinds of tool a helper that only looks things up is not given
@@ -89,6 +101,11 @@ def connected(cfg=None) -> bool:
     return bool(key())
 
 
+def consumer(secret: str | None = None) -> bool:
+    """Is the key (the saved one unless given) one for Composio's ready-made server (ck_)?"""
+    return str(secret if secret is not None else key() or "").startswith(CONSUMER)
+
+
 def settings(cfg) -> dict:
     saved = read_json(cfg.state_dir / "online.json", {})
     user = str((saved if isinstance(saved, dict) else {}).get("user") or "")
@@ -113,7 +130,7 @@ def _call(method: str, path: str, secret: str, body: dict | None = None, timeout
         headers["Content-Type"] = "application/json"
     request = urllib.request.Request(API + path, data=json.dumps(body).encode("utf-8") if body is not None else None, headers=headers, method=method)
     try:
-        with (opener or urllib.request.build_opener()).open(request, timeout=timeout) as response:
+        with (opener or composio_gate.opener()).open(request, timeout=timeout) as response:     # (no redirect is followed with the key)
             return json.loads(response.read(2_000_000).decode("utf-8", "replace") or "{}")
     except urllib.error.HTTPError as error:
         try:
@@ -132,15 +149,26 @@ def _call(method: str, path: str, secret: str, body: dict | None = None, timeout
         raise OnlineError("Composio could not be reached. Check the internet connection.") from None
 
 
+def _consumer_tools(secret: str, opener=None) -> list[dict]:
+    """What Composio's ready-made server offers to a ck_ key (which also shows that the key works)."""
+    try:
+        return composio_gate.check(secret, opener)
+    except composio_gate.GateError as error:
+        raise OnlineError(BAD_CONSUMER_KEY if error.code in (401, 403) else str(error)) from None
+
+
 def connect(cfg, value, opener=None) -> dict:
-    """Check a Composio project key with Composio itself, then keep it in Windows Credential Manager only."""
+    """Check a Composio key with Composio itself, then keep it in Windows Credential Manager only."""
     value = str(value or "").strip()
     if value.startswith("uak_"):
-        raise OnlineError("That is a user key (uak_). JARVIS needs the project key, which starts with ak_: at Composio open Settings, Project Settings, API Keys.")
+        raise OnlineError("That key starts with uak_, which JARVIS cannot use. Copy the API key that starts with ck_ (or ak_) from your Composio dashboard.")
     if not re.fullmatch(r"[A-Za-z0-9_\-]{16,220}", value):
-        raise OnlineError("That does not look like a key. Copy the project key again from Composio (Settings, Project Settings, API Keys).")
+        raise OnlineError("That does not look like a Composio key. Copy it again from your Composio dashboard: it starts with ck_ (or ak_).")
     register_secret(value)
-    _call("GET", "/api/v3.1/auth/session/info", value, opener=opener)
+    if consumer(value):
+        _consumer_tools(value, opener)
+    else:
+        _call("GET", "/api/v3.1/auth/session/info", value, opener=opener)
     secrets.store("composio", value)
     with _lock:
         _sessions.clear()
@@ -158,6 +186,13 @@ def verify(cfg, opener=None) -> str:
     secret = key()
     if not secret:
         raise OnlineError("No Composio key is saved.")
+    if consumer(secret):
+        apps = composio_gate.connected_in(_consumer_tools(secret, opener))
+        if apps is None:
+            return "Composio accepted the key, but could not say which accounts are connected."
+        if not apps:
+            return "Composio accepted the key. No account is connected yet: ask JARVIS to connect one."
+        return "Composio accepted the key. Connected: " + ", ".join(apps) + "."
     _call("GET", "/api/v3.1/auth/session/info", secret, opener=opener)
     try:
         apps = connected_apps(cfg, opener)
@@ -170,7 +205,7 @@ def verify(cfg, opener=None) -> str:
 
 
 def status(cfg) -> dict:
-    return {"connected": connected(cfg), "user": settings(cfg)["user"]}
+    return {"connected": connected(cfg), "user": "" if consumer() else settings(cfg)["user"]}     # (a ck_ key has no "whose accounts")
 
 
 def connected_apps(cfg, opener=None) -> list[str]:
@@ -178,6 +213,13 @@ def connected_apps(cfg, opener=None) -> list[str]:
     secret, user = key(), settings(cfg)["user"]
     if not secret:
         raise OnlineError("No online accounts are connected yet. Open Connections and add a Composio key.")
+    if consumer(secret):
+        # (A ck_ key has no list of accounts to ask for: Composio's server says which apps are connected when asked what
+        # it offers. When it does not say, nothing is looked up: an unknown list is never taken as "everything".)
+        apps = composio_gate.connected_in(_consumer_tools(secret, opener))
+        if apps is None:
+            raise OnlineError(UNKNOWN_APPS)
+        return apps
     found, cursor = set(), ""
     for _ in range(6):                             # (six pages is far more than anyone connects)
         asked = {"user_ids": user, "statuses": "ACTIVE", **({"cursor": cursor} if cursor else {})}
@@ -242,13 +284,32 @@ def forget_sessions() -> None:
 
 
 # ---------------------------------------------------------------------- the helper
+def _rules(name: str, change: bool, full: bool, connect: bool) -> str:
+    return RULES.format(name=name) + ((CONNECT_RULE if connect else ACT_RULE) if change else READ_RULE + (FULL_RULE if full else BRIEF_RULE))
+
+
+def gate_argv(exe: str, tier: str, apps: list[str], model: str, name: str = "JARVIS", full: bool = False) -> list[str]:
+    """The helper's command line with a ck_ key: its only tools are JARVIS's gate (jcc/composio_gate.py), started with the
+    request's kind and the connected apps, and of the gate's tools only those the kind allows, each by its own name. The
+    gate reads the key from the key store itself: it is not in the helper's environment."""
+    from jcc.config import ROOT
+    python = Path(sys.executable)
+    python = python.with_name("python.exe") if python.name.lower() == "pythonw.exe" else python
+    servers = {"mcpServers": {"accounts": {"type": "stdio", "command": str(python), "args": ["-m", "jcc.composio_gate", tier, ",".join(apps)],
+                                           "env": {"PYTHONPATH": str(ROOT), "PYTHONIOENCODING": "utf-8"}}}}
+    allowed = ",".join("mcp__accounts__" + tool for tool in composio_gate.TIERS[tier])
+    return [exe, "-p", "--model", model, "--output-format", "json", "--tools", "", "--disable-slash-commands", "--setting-sources", "",
+            "--strict-mcp-config", "--mcp-config", json.dumps(servers), "--allowedTools", allowed,
+            "--system-prompt", _rules(name, tier != "read", full, tier == "connect")]
+
+
 def argv_for(exe: str, url: str, change: bool, model: str, name: str = "JARVIS", full: bool = False, connect: bool = False) -> list[str]:
     """The helper's command line. The request itself is not on it: it is handed over through the helper's input, so no
     wording (the assistant writes it, sometimes from what it has just read) can ever be taken for an option or a command."""
     servers = {"mcpServers": {"accounts": {"type": "http", "url": url, "headers": {"x-api-key": "${JCC_COMPOSIO_KEY}"}}}}      # filled in from the helper's environment
     return [exe, "-p", "--model", model, "--output-format", "json", "--tools", "", "--disable-slash-commands", "--setting-sources", "",
             "--strict-mcp-config", "--mcp-config", json.dumps(servers), "--allowedTools", "mcp__accounts",
-            "--system-prompt", RULES.format(name=name) + ((CONNECT_RULE if connect else ACT_RULE) if change else READ_RULE + (FULL_RULE if full else BRIEF_RULE))]
+            "--system-prompt", _rules(name, change, full, connect)]
 
 
 def run(cfg, request: str, change: bool = False, name: str = "JARVIS", exe: str | None = None, runner=None, opener=None, timeout: float = 170.0,
@@ -260,7 +321,18 @@ def run(cfg, request: str, change: bool = False, name: str = "JARVIS", exe: str 
     if not request:
         raise OnlineError("Say what to look up or do.")
     connect = bool(change) and wants_connection(request)
-    url = session(cfg, change, opener=opener, connect=connect)
+    if consumer():
+        # A ck_ key: the helper's only way to Composio is JARVIS's gate, which holds the key itself.
+        tier = "connect" if connect else "act" if change else "read"
+        apps = [] if connect else connected_apps(cfg, opener)
+        if not connect and not apps:
+            raise OnlineError("No account is connected yet. Ask JARVIS to connect one (for example “connect my Gmail”): it gives you the link to sign in.")
+        command = lambda model: gate_argv(exe, tier, apps, model, name, full)        # noqa: E731
+        given = {}
+    else:
+        url = session(cfg, change, opener=opener, connect=connect)
+        command = lambda model: argv_for(exe, url, change, model, name, full, connect)        # noqa: E731
+        given = {"JCC_COMPOSIO_KEY": key() or ""}
     if exe is None:
         from jcc.agents import resolve_command
         exe = resolve_command("claude")
@@ -268,13 +340,13 @@ def run(cfg, request: str, change: bool = False, name: str = "JARVIS", exe: str 
         raise OnlineError("Claude Code is not installed, so the helper for online accounts cannot start.")
     from jcc.agents import is_limit_message
     from jcc.jobs import scrub_env
-    env = {**scrub_env(os.environ), "JCC_COMPOSIO_KEY": key() or ""}
+    env = {**scrub_env(os.environ), **given}
     work = cfg.state_dir / "assistant"
     work.mkdir(parents=True, exist_ok=True)
     last = ""
     for model in ("sonnet", "haiku"):                      # the smaller model only when the first one's allowance is used up
         try:
-            done = (runner or subprocess.run)(argv_for(exe, url, change, model, name, full, connect), input=request, capture_output=True, text=True, timeout=timeout, env=env,
+            done = (runner or subprocess.run)(command(model), input=request, capture_output=True, text=True, timeout=timeout, env=env,
                                               cwd=str(work), encoding="utf-8", errors="replace",
                                               creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
         except subprocess.TimeoutExpired:

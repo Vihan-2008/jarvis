@@ -147,9 +147,13 @@ def overview(cfg) -> list[dict]:
     items.append(_item("accounts", "hands", "Email, calendar and other online accounts", "Lets JARVIS look things up in Gmail, Outlook, Google Calendar and hundreds of "
                        "other services, through Composio. Looking things up is done by a helper that can only read; JARVIS asks you before anything is created, "
                        "changed or deleted.", "ok" if linked else "off", "Connected" if linked else "Not connected", key="composio", check=linked, remove=linked,
-                       detail=("Say “connect my Gmail” (or your calendar) and JARVIS gives you the link to sign in. Accounts connected at Composio under the name “"
-                               + online.settings(cfg)["user"] + "” are used.") if linked else "", user=online.settings(cfg)["user"] if linked else "",
-                       how="Make a free account at composio.dev, open Settings, Project Settings, API Keys, copy the project key (it starts with ak_) and paste it here."))
+                       detail=(("Say “connect my Gmail” (or your calendar) and JARVIS gives you the link to sign in. With this kind of key, JARVIS itself keeps "
+                                "lookups to reading. If it is not sure something only reads, it asks you first.") if online.consumer() else
+                               ("Say “connect my Gmail” (or your calendar) and JARVIS gives you the link to sign in. Accounts connected at Composio under the name “"
+                                + online.settings(cfg)["user"] + "” are used.")) if linked else "",
+                       user=online.settings(cfg)["user"] if linked and not online.consumer() else "",
+                       how="Make a free account at composio.dev, copy your API key from the Composio dashboard (it starts with ck_ or ak_), "
+                           "and paste it here."))
     added = read_json(cfg.state_dir / "connectors.json", {}).get("mcpServers", {})
     names = sorted(str(name) for name in added) if isinstance(added, dict) else []
     items.append(_item("connectors", "hands", "Connectors", "Extra tools you have added yourself (a calendar, Gmail, a database).",

@@ -3,6 +3,7 @@ import json
 import os
 import time
 import unittest
+import unittest.mock
 import zipfile
 from pathlib import Path
 
@@ -202,6 +203,122 @@ class ContinuationTests(EngineTestCase):
         result = run_job(cfg, spec, work, runner)
         self.assertEqual([a["agent"] for a in result.attempts], ["codex", "claude"])
         self.assertEqual(result.status, "done")
+
+    def _only_codex(self):
+        raw = overrides(self.repo, levels=("codex",))
+        raw["agents"]["claude"]["enabled"] = False
+        return config.load(raw)
+
+    def _job(self, cfg):
+        rid = receipts.new_id()
+        work = cfg.jobs_root / rid
+        work.mkdir(parents=True)
+        return work, {"id": rid, "task": "fix", "kind": "job", "project": "trading", "level": "small", "vault": str(self.vault)}
+
+    def test_one_error_from_the_only_agent_is_tried_again_not_given_up(self):
+        # A beta tester's Codex job ended "Could not finish" on a single error: Codex was the only AI, and one error shut it
+        # out for five minutes, so the job had nothing left to try (and the next task waited those five minutes too).
+        cfg = self._only_codex()
+        work, spec = self._job(cfg)
+        calls = []
+        def runner(argv, cwd, env, seconds):
+            calls.append(argv)
+            if len(calls) == 1:
+                (cwd / "src/pkg/__init__.py").write_text("VALUE = 1\n# before the hiccup\n", "utf-8")
+                return 1, "stream disconnected before completion: error sending request"
+            self.assertIn("before the hiccup", (cwd / "src/pkg/__init__.py").read_text("utf-8"))
+            return 0, "finished"
+        result = run_job(cfg, spec, work, runner)
+        self.assertEqual(result.status, "done", result.log)
+        self.assertEqual([a["agent"] for a in result.attempts], ["codex", "codex"])
+        usage = Usage(cfg.state_dir, cfg.caps)
+        try:
+            self.assertLessEqual(usage.cooldowns().get("codex", 0), time.time(), "a recovered error must not hold up the next task")
+        finally:
+            usage.close()
+
+    def test_an_agent_that_keeps_failing_is_rested_and_the_job_says_so_truthfully(self):
+        cfg = self._only_codex()
+        work, spec = self._job(cfg)
+        calls = []
+        def runner(argv, cwd, env, seconds):
+            calls.append(argv)
+            return 1, "something broke inside the agent"
+        result = run_job(cfg, spec, work, runner)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(len(calls), 2, "tried once more, then stopped")
+        said = [json.loads(line)["message"] for line in (work / "activity.jsonl").read_text("utf-8").splitlines()]
+        self.assertFalse(any("another available agent will be tried" in m for m in said), said)
+        usage = Usage(cfg.state_dir, cfg.caps)
+        try:
+            self.assertGreater(usage.cooldowns().get("codex", 0), time.time())
+        finally:
+            usage.close()
+
+    def _said(self, work):
+        return [json.loads(line)["message"] for line in (work / "activity.jsonl").read_text("utf-8").splitlines()]
+
+    def test_codex_without_its_safe_workspace_is_not_retried_and_the_owner_is_told_what_to_do(self):
+        cfg = self._only_codex()
+        work, spec = self._job(cfg)
+        calls = []
+        def runner(argv, cwd, env, seconds):
+            calls.append(argv)
+            # (the reason sits far before the end of what Codex printed)
+            return 1, "windows sandbox failed: helper_unknown_error: setup refresh had errors\n" + "x" * 5000
+        codex_home = self.tmp / "codex-home"
+        (codex_home / ".sandbox").mkdir(parents=True)
+        (codex_home / ".sandbox" / "sandbox.2026-11-23.log").write_text("started\nsetup refresh: errors=[acl denied]\n", "utf-8")
+        (codex_home / ".sandbox-secrets").mkdir()
+        (codex_home / ".sandbox-secrets" / "sandbox.log").write_text("SECRET-PASSWORD\n", "utf-8")
+        with unittest.mock.patch.dict(os.environ, {"CODEX_HOME": str(codex_home)}):
+            result = run_job(cfg, spec, work, runner)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(len(calls), 1, "a sandbox that cannot start fails the same way every time: no retry")
+        said = self._said(work)
+        self.assertTrue(any("could not start its safe workspace" in m for m in said), said)
+        self.assertTrue(any("errors=[acl denied]" in m for m in said), "the sandbox's own log is kept with the job")
+        self.assertFalse(any("SECRET-PASSWORD" in m for m in said))
+        self.assertEqual(result.attempts[0]["failure_class"], "sandbox")
+
+    def test_a_sandbox_failure_hands_over_to_another_agent_when_there_is_one(self):
+        cfg = config.load(overrides(self.repo))
+        work, spec = self._job(cfg)
+        def runner(argv, cwd, env, seconds):
+            if "codex" in " ".join(argv):
+                return 1, "Error: Windows sandbox: CreateProcessWithLogonW failed: 1385"
+            return 0, "done by the other agent"
+        result = run_job(cfg, spec, work, runner)
+        self.assertEqual(result.status, "done", result.log)
+        self.assertEqual([a["agent"] for a in result.attempts], ["codex", "claude"])
+        said = self._said(work)
+        self.assertTrue(any("error 1385" in m and "Another agent is taking over." in m for m in said), said)
+
+    def test_a_declined_windows_prompt_is_told_apart_and_a_stray_number_is_not_a_sandbox_failure(self):
+        from jcc import agents
+        self.assertEqual(agents.sandbox_trouble("sandbox setup failed: ShellExecuteExW returned 1223"), "declined")
+        self.assertEqual(agents.sandbox_trouble("Windows sandbox: logon failed with 1385"), "blocked")
+        self.assertEqual(agents.sandbox_trouble("Processed 1385 lines; 1223 tests passed"), "")
+        self.assertEqual(agents.sandbox_trouble("stream disconnected before completion"), "")
+
+    def test_every_failed_attempt_leaves_its_reason_in_the_activity(self):
+        cfg = self._only_codex()
+        work, spec = self._job(cfg)
+        def runner(argv, cwd, env, seconds):
+            return 1, '{"type":"turn.started"}\n{"type":"turn.failed","error":{"message":"The model gpt-x is overloaded right now"}}\n'
+        run_job(cfg, spec, work, runner)
+        self.assertTrue(any("The model gpt-x is overloaded right now" in m for m in self._said(work)), self._said(work))
+
+    def test_a_signed_out_agent_is_not_tried_again(self):
+        cfg = self._only_codex()
+        work, spec = self._job(cfg)
+        calls = []
+        def runner(argv, cwd, env, seconds):
+            calls.append(argv)
+            return 1, "Error: Not logged in. Please run codex login."
+        result = run_job(cfg, spec, work, runner)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(len(calls), 1)
 
     def test_running_project_serializes_the_next_job(self):
         e = self.make_engine(overrides(self.repo))

@@ -31,7 +31,10 @@ from jcc.vault import atomic_write
 KEY = "chatgpt"                   # its name among the brains: ("api", "chatgpt", <model>)
 NAME = "ChatGPT"
 DEFAULT = "default"               # the model the owner's ChatGPT plan gives Codex (no -m)
-SECONDS = 300                     # one request, at most
+QUIET = 300                       # Codex silent this long (no tool of JARVIS's at work) is stuck: it is stopped
+TOOL_QUIET = 900                  # ...and this long while one of JARVIS's tools is at work (it may be asking the owner)
+LONGEST = 3600                    # one request, at most: a request of many steps is not cut off half-way
+LOOK = 2.0                        # how often the watch looks
 REMEMBERED = 6                    # exchanges of this talk handed back with each request
 # Codex's own abilities that a talker does not need. (A name an older or newer Codex does not know is only ignored.)
 OFF = ("shell_tool", "unified_exec", "apps", "browser_use", "browser_use_external", "computer_use", "in_app_browser", "plugins", "memories",
@@ -132,13 +135,26 @@ class CodexSession:
         except OSError as problem:
             yield {"type": "result", "is_error": True, "result": "Codex could not be started: " + redact(str(problem))[:200], "usage": {}}
             return
-        timer = threading.Timer(SECONDS, self._kill)
-        timer.start()
+        # Codex is stopped only when it has gone quiet, never because a request of several steps takes a while. (A fixed five
+        # minutes for the whole request cut long ones off between their steps.)
+        heard, tools, finished, stalled = [time.monotonic()], [0], threading.Event(), []
+        began = heard[0]
+
+        def watch():
+            while not finished.wait(LOOK):
+                now = time.monotonic()
+                if now - began > LONGEST or now - heard[0] > (TOOL_QUIET if tools[0] > 0 else QUIET):
+                    stalled.append(now - began > LONGEST)
+                    self._kill()
+                    return
+
+        threading.Thread(target=watch, daemon=True, name="codex-watch").start()
         said, problem, usage, done, index = "", "", {}, False, 0
         try:
             proc.stdin.write(self._asked(prompt))
             proc.stdin.close()
             for raw in proc.stdout:
+                heard[0] = time.monotonic()
                 try:
                     data = json.loads(raw)
                 except ValueError:
@@ -147,6 +163,8 @@ class CodexSession:
                     continue
                 kind, item = data.get("type"), data.get("item") if isinstance(data.get("item"), dict) else {}
                 what = item.get("type")
+                if what == "mcp_tool_call":
+                    tools[0] = max(0, tools[0] + (1 if kind == "item.started" else -1 if kind == "item.completed" else 0))
                 if kind == "item.started" and what == "mcp_tool_call":
                     index += 1
                     args = item.get("arguments") if isinstance(item.get("arguments"), dict) else {}
@@ -181,9 +199,12 @@ class CodexSession:
         except (OSError, ValueError, subprocess.TimeoutExpired) as trouble:
             problem = problem or "Codex stopped: " + str(trouble)
         finally:
-            timer.cancel()
+            finished.set()
         if self.closed:
             return
+        if stalled and not done:
+            problem = ("ChatGPT (through Codex) worked on this for an hour without finishing, so it was stopped." if stalled[0] else
+                       "ChatGPT (through Codex) stopped responding, so it was stopped.") + " Ask again to carry on."
         if done and (said or not problem):                 # (a passing complaint along the way does not undo an answer)
             self.talk.append((prompt[-1200:], said))
             del self.talk[:-REMEMBERED]

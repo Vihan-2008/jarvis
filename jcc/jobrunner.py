@@ -22,6 +22,7 @@ from jcc import agents, projects, receipts, efficiency, sessions, job_control, l
 from jcc import live, system, permissions
 
 NO_LIMIT = 7 * 24 * 3600
+RETRY_PAUSE_S = 5                 # before an agent that stopped with an error tries once more
 from jcc.config import Config, ProjectCfg, load
 from jcc.jobs import scrub_env
 from jcc.redact import redact
@@ -306,6 +307,7 @@ def run_job(cfg: Config, spec: dict[str, Any], workdir: Path,
             requested = ("claude", models.strongest(cfg))        # Ultracode with no model named: the strongest there is, the rest as fallbacks
             candidates = [requested] + [c for c in candidates if c != requested]
         candidates, routing_reason = learning.rank(cfg, {**spec, 'level':res.level}, candidates)
+        retried: set[str] = set()                            # agents that have had their one more try in this run
         activity.emit(cfg,rid,'planned',routing_reason)
         for skipped, reason in plan.skipped.items():
             activity.emit(cfg,rid,'waiting',f'{skipped}: {reason}')
@@ -429,12 +431,46 @@ def run_job(cfg: Config, spec: dict[str, Any], workdir: Path,
                 _checkpoint(workdir, cwd, proj, res, out)
                 continue
             if code != 0:
-                activity.emit(cfg,rid,'switching','Agent could not finish; progress is preserved and another available agent will be tried.',agent=name,model=model)
-                # Preserve partial edits, but do not repeatedly try models on a broken login.
                 usage.record_agent_run(name, res.level, "error", secs)
                 res.log = out
-                usage.set_cooldown(name, time.time() + 300)
                 _checkpoint(workdir, cwd, proj, res, out)
+                # What the agent said when it stopped, kept with the job, so that a report of a failed job can be understood.
+                reason = agents.last_words(out)
+                if reason:
+                    activity.emit(cfg,rid,'note','What it said when it stopped: ' + reason,agent=name,model=model)
+                res.attempts[-1]["reason"] = redact(reason)[:240]
+                trouble = agents.sandbox_trouble(out) if name == "codex" else ""
+                if trouble:
+                    # Codex's safe workspace on Windows could not start. That fails the same way every time, so it is not
+                    # tried again, and the owner is told what would let it start. (Its sandbox is never set up from a job.)
+                    res.attempts[-1]["failure_class"] = "sandbox"
+                    atomic_write(attempt_path, json.dumps(res.attempts))
+                    trail = _sandbox_log_tail()
+                    if trail:
+                        activity.emit(cfg,rid,'note','Codex sandbox log: ' + trail,agent=name,model=model)
+                    usage.set_cooldown(name, time.time() + 300)
+                    others = any(other != name for other, _ in candidates[candidate_index + 1:])
+                    activity.emit(cfg,rid,'switching',SANDBOX_SAID[trouble] + (' Another agent is taking over.' if others else ''),agent=name,model=model)
+                    continue
+                atomic_write(attempt_path, json.dumps(res.attempts))
+                if name not in retried and not agents.is_signed_out(tail):
+                    # One error is often only a moment's trouble (the connection dropped, the service hiccuped): the same
+                    # agent carries on from the preserved work once more before the job gives up on it. Without this, a
+                    # job whose only agent is Codex ended "Could not finish" on a single hiccup.
+                    retried.add(name)
+                    activity.emit(cfg,rid,'switching','The agent stopped with an error; progress is preserved and it is trying once more.',agent=name,model=model)
+                    candidates.insert(candidate_index + 1, (name, model))
+                    time.sleep(RETRY_PAUSE_S)
+                    continue
+                # A second error, or a sign-in that has run out: rest this agent for a while (do not keep trying models on
+                # a broken login), and say truthfully whether anything else is left to try.
+                usage.set_cooldown(name, time.time() + 300)
+                others = any(other != name for other, _ in candidates[candidate_index + 1:])
+                activity.emit(cfg,rid,'switching',
+                              'Agent could not finish; progress is preserved and another available agent will be tried.' if others else
+                              'Agent could not finish; progress is preserved. ' + ('Sign in to it again, then Continue the job.'
+                              if agents.is_signed_out(tail) else 'No other agent is available; Continue the job to try again.'),
+                              agent=name,model=model)
                 continue
             if proj and not (cwd / "NEEDS_APPROVAL.md").exists():
                 activity.emit(cfg,rid,'checking','Running independent project checks.')
@@ -590,6 +626,32 @@ def run_job(cfg: Config, spec: dict[str, Any], workdir: Path,
     finally:
         atomic_write(runtime_path, json.dumps({"active_seconds": spent + time.monotonic() - active_start}))
         usage.close()
+
+
+# When Codex's safe workspace on Windows (its sandbox) could not start: what the owner is told (agents.sandbox_trouble).
+SANDBOX_SAID = {
+    "setup": "Codex could not start its safe workspace on this PC, so it did not run. Start Codex once by itself (the Codex app, "
+             "or codex in a terminal) and let it finish setting up, choosing Yes when Windows asks. Then Continue the job.",
+    "declined": "The Windows permission prompt was declined, so Codex could not set up its safe workspace. Continue the job and "
+                "choose Yes when Windows asks.",
+    "blocked": "Windows did not let Codex's safe workspace start (error 1385). A setting on this PC blocks it.",
+}
+
+
+def _sandbox_log_tail(lines: int = 4) -> str:
+    """The last lines of Codex's own sandbox log, for a job's record when its sandbox could not start. Only the log:
+    never anything from the folder where Codex keeps its sandbox's secrets."""
+    folder = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / ".sandbox"
+    try:
+        logs = sorted(folder.glob("sandbox*.log"), key=lambda p: p.stat().st_mtime)
+        if not logs:
+            return ""
+        with logs[-1].open("rb") as f:
+            f.seek(max(0, logs[-1].stat().st_size - 8000))
+            kept = f.read().decode("utf-8", "replace").splitlines()[-lines:]
+    except OSError:
+        return ""
+    return redact(" | ".join(line.strip()[:200] for line in kept if line.strip()))[:450]
 
 
 def _checkpoint(workdir: Path, cwd: Path, proj: ProjectCfg | None, res: JobResult, output: str) -> None:

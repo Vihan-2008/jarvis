@@ -60,6 +60,49 @@ def is_limit_message(text: str) -> bool:
     return bool(LIMIT_PATTERNS.search(text or ""))
 
 
+def is_signed_out(text: str) -> bool:
+    """Did the agent stop because its sign-in or key is no longer good? (Trying it again at once cannot help then.)"""
+    return bool(re.search(r"not (logged|signed) in|please (run [`'\"]?\w+ )?(log ?in|sign ?in)|\b(re-?)?(log ?in|sign ?in) (again|required|expired)|"
+                          r"invalid (api )?key|authentication (failed|required|error)|unauthori[sz]ed|token (has )?expired|"
+                          r"refresh token|credentials? (are |is )?(missing|invalid|expired)", text or "", re.I))
+
+
+_SANDBOX_NEAR = r"(?:sandbox|logon|setup|elevat)"
+
+
+def sandbox_trouble(text: str) -> str:
+    """Why Codex's safe workspace on Windows could not start, if that is why it stopped: "declined" (the Windows
+    permission prompt was answered No, error 1223), "blocked" (a Windows setting forbids it, error 1385), "setup" (it is
+    not set up, or setting it up went wrong), or "". These fail the same way every time, so trying again does not help.
+    The whole output is read: the reason can sit far from its end."""
+    text = text or ""
+    for kind, number in (("declined", "1223"), ("blocked", "1385")):
+        near = r"[^\n]{0,80}"                               # (on the same line)
+        if re.search(_SANDBOX_NEAR + near + r"\b" + number + r"\b|\b" + number + r"\b" + near + _SANDBOX_NEAR, text, re.I):
+            return kind
+    if re.search(r"windows sandbox failed|setup refresh had errors|helper_unknown_error|windows setup did not complete|"
+                 r"sandbox setup (?:failed|is required|required)", text, re.I):
+        return "setup"
+    return ""
+
+
+def last_words(out: str) -> str:
+    """The reason an agent gave when it stopped: its last error message (Codex prints JSON events), or its last line."""
+    for line in reversed([line.strip() for line in (out or "").splitlines() if line.strip()]):
+        if line.startswith("{"):
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            failed = event.get("error") if isinstance(event, dict) else None
+            said = (failed.get("message") if isinstance(failed, dict) else failed) or (event.get("message") if event.get("type") == "error" else "")
+            if said and isinstance(said, str):
+                return said[:240]
+            continue
+        return line[:240]
+    return ""
+
+
 def is_model_limit(text: str) -> bool:
     return bool(re.search(r"context (window|length)|maximum context|model.{0,60}(limit|quota)|"
                           r"(limit|quota).{0,60}model|model.{0,40}(unavailable|not found|not supported)|"
@@ -167,7 +210,7 @@ def plan(cfg: Config, task: str, cooldowns: dict[str, float], prefer: str | None
             skipped[name] = "not installed"
         elif cooldowns.get(name, 0) > now:
             mins = int((cooldowns[name] - now) / 60)
-            skipped[name] = f"usage limit, retry in ~{mins} min"
+            skipped[name] = f"resting after a usage limit or an error, back in ~{max(1, mins)} min"
         else:
             from jcc.quota import blocked
             reason = blocked(cfg, name)
