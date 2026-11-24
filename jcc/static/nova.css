@@ -569,18 +569,18 @@ body.nv-lite #nv-stage{transition-duration:.45s}
 
 /* ---------- voice chat screen ---------- */
 #nv-captions .state{display:inline-flex;align-items:center;gap:9px;margin:0 auto 10px;padding:5px 14px 5px 11px;min-height:30px;border-radius:99px;background:var(--surface-2);border:1px solid var(--line);font-size:13px;color:var(--ink-2)}
-#nv-captions .state i{width:8px;height:8px;border-radius:50%;background:var(--ink-3);transition:background var(--mid)}
+#nv-captions .state>i:first-child{width:8px;height:8px;border-radius:50%;background:var(--ink-3);transition:background var(--mid)}
 #nv-captions[data-phase=listening] .state{color:var(--ink)}
-#nv-captions[data-phase=listening] .state i{background:var(--ok);animation:nv-beat 1.2s ease-in-out infinite}
-#nv-captions[data-phase=thinking] .state i{background:var(--accent);animation:nv-beat .7s ease-in-out infinite}
-#nv-captions[data-phase=speaking] .state i{background:var(--accent-2)}
+#nv-captions[data-phase=listening] .state>i:first-child{background:var(--ok);animation:nv-beat 1.2s ease-in-out infinite}
+#nv-captions[data-phase=thinking] .state>i:first-child{background:var(--accent);animation:nv-beat .7s ease-in-out infinite}
+#nv-captions[data-phase=speaking] .state>i:first-child{background:var(--accent-2)}
 @keyframes nv-beat{50%{transform:scale(1.7);opacity:.45}}
 .nv-voice-keys{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;flex:none;margin-top:auto;padding-top:8px;pointer-events:auto}
 .nv-voice-keys .plain{min-height:34px;padding:5px 13px;font-size:13px;background:var(--surface);border-color:var(--line)}
 .nv-voice-keys .plain svg.i{width:15px;height:15px;color:var(--ink-2)}
 .nv-voice-keys .plain.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
 #nv-dictate.on{color:var(--bad);background:rgba(255,125,125,.12);animation:nv-listen 1.4s ease-in-out infinite}
-body.nv-lite #nv-captions .state i,body.nv-lite #nv-dictate.on{animation:none}
+body.nv-lite #nv-captions .state>i:first-child,body.nv-lite #nv-dictate.on{animation:none}
 
 /* ---------- voice and assistant settings ---------- */
 dialog.nv-settings{width:min(94vw,760px);padding:0;overflow:hidden}
@@ -1305,3 +1305,44 @@ button.nv-danger{color:var(--bad)}button.primary.nv-danger{background:var(--bad)
 
 /* A stopped job: Continue, or the next message carries it on. */
 .nv-carryon{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface-2);font-size:13.5px;color:var(--ink-2)}.nv-carryon span{flex:1 1 260px}
+/* ---------- thinking orbs: three small orbs circling one centre, shown while the model is thinking or working ---------- */
+.nv-orbs{--orb:8px;--orb-r:10px;--orb-t:3px;--orb-1:var(--accent);--orb-2:var(--accent-2);--orb-3:#c9bcff;position:relative;display:inline-block;flex:none;width:28px;height:20px;vertical-align:-5px}
+:root[data-theme="light"] .nv-orbs{--orb-3:#9d8cf5}
+.nv-orbs>i{position:absolute;left:50%;top:50%;width:var(--orb);height:var(--orb);margin:calc(var(--orb)/-2) 0 0 calc(var(--orb)/-2)}
+.nv-orbs>i:nth-child(1){transform:translateX(calc(var(--orb-r)*-1))}
+.nv-orbs>i:nth-child(3){transform:translateX(var(--orb-r))}
+.nv-orbs>i::before{content:"";position:absolute;inset:0;border-radius:50%;background:var(--orb-1);box-shadow:0 0 7px -1px var(--orb-1);transform:scale(.8)}
+.nv-orbs>i:nth-child(2)::before{background:var(--orb-2);box-shadow:0 0 7px -1px var(--orb-2)}
+.nv-orbs>i:nth-child(3)::before{background:var(--orb-3);box-shadow:0 0 7px -1px var(--orb-3)}
+:root[data-theme="light"] .nv-orbs>i::before,body.nv-lite .nv-orbs>i::before{box-shadow:none}
+@keyframes nv-orb-x{from{transform:translateX(calc(var(--orb-r)*-1))}to{transform:translateX(var(--orb-r))}}
+@keyframes nv-orb-z{from{transform:translateY(calc(var(--orb-t)*-1)) scale(.5);opacity:.45}to{transform:translateY(var(--orb-t)) scale(1.1);opacity:1}}
+@keyframes nv-orb-d{from{z-index:0}to{z-index:2}}
+@media (prefers-reduced-motion:no-preference){
+  body:not(.nv-lite) .nv-orbs>i{animation:nv-orb-x 1.2s cubic-bezier(.37,0,.63,1) infinite alternate,nv-orb-d 1.2s linear infinite alternate}
+  body:not(.nv-lite) .nv-orbs>i::before{animation:nv-orb-z 1.2s cubic-bezier(.37,0,.63,1) infinite alternate}
+  body:not(.nv-lite) .nv-orbs>i:nth-child(1){animation-delay:var(--nv-sync,0ms),calc(var(--nv-sync,0ms) - 600ms)}
+  body:not(.nv-lite) .nv-orbs>i:nth-child(1)::before{animation-delay:calc(var(--nv-sync,0ms) - 600ms)}
+  body:not(.nv-lite) .nv-orbs>i:nth-child(2){animation-delay:calc(var(--nv-sync,0ms) - 800ms),calc(var(--nv-sync,0ms) - 1400ms)}
+  body:not(.nv-lite) .nv-orbs>i:nth-child(2)::before{animation-delay:calc(var(--nv-sync,0ms) - 1400ms)}
+  body:not(.nv-lite) .nv-orbs>i:nth-child(3){animation-delay:calc(var(--nv-sync,0ms) - 1600ms),calc(var(--nv-sync,0ms) - 2200ms)}
+  body:not(.nv-lite) .nv-orbs>i:nth-child(3)::before{animation-delay:calc(var(--nv-sync,0ms) - 2200ms)}
+}
+/* the reply line the orbs sit on */
+.nv-work.live>summary b{animation-duration:2.4s}
+.nv-work>summary [data-since]{color:var(--ink-3);font-variant-numeric:tabular-nums}
+.nv-work.nv-pending>summary{cursor:default}
+.nv-work.nv-pending>summary::after{display:none}
+.nv-msg.nv-just-done .nv-work>summary>.nv-done-dot{animation:nv-done-in .36s var(--ease) both}
+@keyframes nv-done-in{from{transform:scale(.3);opacity:0}}
+/* the core flies to its corner behind the conversation, never over it */
+body.nv-chat:not(.nv-mini) .messages{position:relative;z-index:2}
+body.nv-chat:not(.nv-mini) #nv-stage{transition:transform .9s var(--ease),z-index 0s .9s}
+body.nv-lite.nv-chat:not(.nv-mini) #nv-stage{transition:transform .45s var(--ease),z-index 0s .45s}
+@media (prefers-reduced-motion:reduce){body.nv-chat:not(.nv-mini) #nv-stage,body.nv-lite.nv-chat:not(.nv-mini) #nv-stage{transition-delay:0s}}
+/* nothing can scroll the window sideways */
+.layout{overflow:clip}
+/* voice captions: the same orbs while it thinks */
+#nv-captions .state .nv-orbs{display:none;--orb:5px;--orb-r:6px;--orb-t:2px;width:18px;height:14px}
+#nv-captions[data-phase=thinking] .state .nv-orbs{display:inline-block}
+#nv-captions[data-phase=thinking] .state>i:first-child{display:none}

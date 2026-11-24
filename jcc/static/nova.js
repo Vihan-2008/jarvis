@@ -659,6 +659,8 @@ function stepsHtml(rid, message) {
   if (!events.length) return stopped ? end : '<li>' + (message.status === 'queued' ? 'Waiting its turn' : LIVE.has(message.status) ? 'Getting started' : 'No step-by-step record for this reply') + (LIVE.has(message.status) && message.content ? '<small>' + esc(plainWait(message.content)) + '</small>' : '') + '</li>';
   return (stopped ? events.filter(ev => !['paused', 'cancelled'].includes(ev.stage)) : events).map(ev => ev.stage === 'tool' ? (t => { const ic = stepIcon(t); return '<li class="tool' + (ic ? ' has-ic' : '') + '">' + ic + esc(t) + '</li>'; })(plainStep(ev.message)) : '<li class="stage">' + esc(STAGES[ev.stage] || ev.stage) + (ev.agent ? ' · ' + esc(ev.agent === 'codex' ? 'GPT' : ev.agent[0].toUpperCase() + ev.agent.slice(1)) + (ev.model ? ' ' + esc(ev.model) : '') : '') + '</li>').join('') + end;
 }
+// The thinking orbs. Every set joins one shared 2.4s orbit, so a row that is redrawn carries on where it was.
+const orbs = () => '<i class="nv-orbs" aria-hidden="true" style="--nv-sync:-' + Math.round(performance.now() % 2400) + 'ms"><i></i><i></i><i></i></i>';
 function workBlock(message) {
   const rid = message.receipt, live = LIVE.has(message.status), events = eventsCache.get(rid) || [];
   // A running coding job shows its steps as they happen, as Claude desktop does; a quick reply and finished work are one
@@ -668,8 +670,8 @@ function workBlock(message) {
   const latest = events[events.length - 1];
   const did = tally(events);
   const label = live ? (latest ? (latest.stage === 'tool' ? plainStep(latest.message) : STAGES[latest.stage] || 'Working') : (message.fast ? 'Thinking' : WORDS[message.status])) : message.status === 'done' ? (did || (span ? 'Worked for ' + fmtTime(span) : message.fast ? 'Did ' + events.length + (events.length === 1 ? ' thing' : ' things') : 'Finished')) : wordFor(message) || 'Details';
-  const mark = live ? '<i class="nv-spin"></i>' : '<i class="nv-done-dot ' + (message.status === 'done' ? '' : byYou(message) ? 'off' : message.status === 'failed' ? 'bad' : 'wait') + '"></i>';
-  return '<details class="nv-work ' + (live ? 'live' : '') + '" data-rid="' + esc(rid) + '" ' + (open ? 'open' : '') + '><summary>' + mark + '<b>' + esc(label) + '</b>' + (live ? '<span data-since="' + (message.at || Date.now() / 1000) + '"></span>' : '') + '</summary>' +
+  const mark = live ? orbs() : '<i class="nv-done-dot ' + (message.status === 'done' ? '' : byYou(message) ? 'off' : message.status === 'failed' ? 'bad' : 'wait') + '"></i>';
+  return '<details class="nv-work ' + (live ? 'live' : '') + '" data-rid="' + esc(rid) + '" ' + (open ? 'open' : '') + '><summary>' + mark + '<b>' + esc(label) + '</b>' + (live ? '<span data-since="' + (message.at || Date.now() / 1000) + '" aria-hidden="true"></span>' : '') + '</summary>' +
     (!live && !message.fast ? todoHtml(rid, false) : '') + '<ol class="nv-steps">' + stepsHtml(rid, message) + '</ol>' +
     (live ? '<div class="nv-work-foot"><button class="plain" type="button" data-nv-stop="' + esc(rid) + '" data-tip="Stop this reply. Anything already finished is kept.">' + icon('stop') + 'Stop</button></div>' : message.fast ? '' : ['paused', 'failed'].includes(message.status) ? '<div class="nv-work-foot"><button class="plain" data-job-action="resume" data-job-id="' + esc(rid) + '" data-tip="Carry on from where it stopped">Continue</button></div>' : '') + '</details>';
 }
@@ -680,7 +682,8 @@ function messageHtml(m, i, c) {
     return '<div class="nv-bubble">' + esc(text) + '</div>' + (note ? '<div class="nv-attach-note">' + icon('clip') + ' ' + esc(note) + '</div>' : '') +
       '<div class="nv-actions">' + act('copy', 'Copy your message', 'copy', 'data-nv-act="copy" data-i="' + i + '"') + act('edit', 'Edit and send again', 'edit', 'data-nv-act="edit" data-i="' + i + '"') + '</div>';
   }
-  if (m.fast && m.steps?.length && !eventsCache.has(m.receipt)) eventsCache.set(m.receipt, m.steps.map((t, n) => ({ stage: 'tool', message: t, at: n })));
+  // (Its own list wins over a shorter one read while it ran, e.g. an empty one read after a reload: not "Did 0 things".)
+  if (m.fast && m.steps?.length && (eventsCache.get(m.receipt)?.length || 0) < m.steps.length) eventsCache.set(m.receipt, m.steps.map((t, n) => ({ stage: 'tool', message: t, at: n })));
   const live = LIVE.has(m.status), job = m.fast ? (LIVE.has(m.status) || !!m.steps?.length) : (!!m.agent || (m.status && m.status !== 'done')), streamed = liveText.get(m.receipt);
   let html = (m.receipt && (job || live)) ? workBlock(m) : '';
   if (m.receipt && !m.fast && live) html += todoHtml(m.receipt, true);
@@ -735,8 +738,9 @@ function draw(c) {
     const node = rendered[i]?.node || el('article'); node.className = 'nv-msg ' + (m.role === 'user' ? 'user' : 'assistant') + (fresh ? ' nv-old' : '');
     node.dataset.i = i;
     const finishedNow = m.role === 'assistant' && !live && wasLive.get(key) && !fresh;
-    if (m.pending) node.innerHTML = '<details class="nv-work live" open><summary><i class="nv-spin"></i><b>Thinking</b></summary></details>';
+    if (m.pending) node.innerHTML = '<details class="nv-work live nv-pending" open><summary>' + orbs() + '<b>Thinking</b><span data-since="' + m.at + '" aria-hidden="true"></span></summary></details>';
     else node.innerHTML = messageHtml(m, i, c);
+    if (finishedNow) node.classList.add('nv-just-done');      // (its done dot arrives once; the next redraw clears this)
     if (!rendered[i]) thread.append(node);
     rendered[i] = { sig, node };
     if (m.role === 'assistant' && !m.pending) {

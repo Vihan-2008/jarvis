@@ -158,3 +158,59 @@ test('a name can never carry markup into the page', () => {
   assert.ok(!/<script/i.test(second) && !/data-name="[^"]*"[^>]*>[^<]*<script/i.test(second), second);
   assert.match(second, /data-name="&quot;&gt;&lt;script&gt;alert\(1\)&lt;\/script&gt;"/);
 });
+
+const nova = fs.readFileSync(path.join(__dirname, '../jcc/static/nova.js'), 'utf8');
+const css = fs.readFileSync(path.join(__dirname, '../jcc/static/nova.css'), 'utf8');
+function orbsAt(now) {
+  const line = nova.split('\n').find(l => l.startsWith('const orbs = '));
+  const context = { performance: { now: () => now } };
+  vm.createContext(context); vm.runInContext(line + '\nthis.orbs = orbs;', context);
+  return context.orbs();
+}
+
+test('thinking orbs: three hidden orbs that join one shared orbit', () => {
+  const html = orbsAt(5000.4);
+  assert.equal((html.match(/<i><\/i>/g) || []).length, 3);
+  assert.match(html, /^<i class="nv-orbs" aria-hidden="true"/);
+  assert.match(html, /--nv-sync:-200ms/, 'a row drawn 5000ms in joins the 2.4s orbit 200ms along');
+  assert.match(orbsAt(0), /--nv-sync:-0ms/);
+  assert.match(orbsAt(2399.9), /--nv-sync:-2400ms/);
+});
+
+test('a reply that is thinking shows the orbs, not the ring', () => {
+  const reply = nova.slice(nova.indexOf('function workBlock('), nova.indexOf('const act = '));
+  const pending = nova.split('\n').find(l => l.includes('if (m.pending) node.innerHTML'));
+  assert.ok(!reply.includes('nv-spin') && !pending.includes('nv-spin'), 'the reply line and the pending reply use the orbs (the ring stays for utility waits)');
+  assert.match(nova, /const mark = live \? orbs\(\)/);
+  assert.match(nova, /nv-work live nv-pending" open><summary>' \+ orbs\(\)/);
+  assert.match(voice, /class="state"><i><\/i><i class="nv-orbs" aria-hidden="true">/);
+});
+
+test('the orbs only move when motion is welcome and the window is not in lite mode', () => {
+  const start = css.indexOf('@media (prefers-reduced-motion:no-preference)');
+  assert.ok(start > 0);
+  const block = css.slice(start, css.indexOf('\n}', start));
+  for (const name of ['nv-orb-x', 'nv-orb-z', 'nv-orb-d']) {
+    const uses = [...css.matchAll(/animation:([^;}]*)/g)].filter(m => new RegExp('\\b' + name + '\\b').test(m[1])).map(m => m.index);
+    assert.ok(uses.length, name + ' is used');
+    for (const at of uses) assert.ok(at > start && at < start + block.length, name + ' runs only inside the no-preference block');
+  }
+  assert.ok(block.split('{').filter(r => r.includes('.nv-orbs')).every(r => r.includes('body:not(.nv-lite)')), 'lite mode keeps them still');
+});
+
+test('the model chip says "Auto model" beside the mode chip, and is read out as "Model: Auto"', () => {
+  assert.deepEqual({ ...modelBar('auto', async () => ({})).N.brainLabel() }, { label: 'Auto model', aria: 'Model: Auto. Change model' });
+  const picked = modelBar('opus', async () => ({})).N.brainLabel();
+  assert.notEqual(picked.label, 'Auto model');
+  assert.equal(picked.aria, 'Model: ' + picked.label + '. Change model');
+});
+
+test('a finished quick reply counts its own steps, even after an empty list was read while it ran', () => {
+  const line = nova.split('\n').find(l => l.startsWith('  if (m.fast && m.steps?.length'));
+  const run = (cached, m) => { const eventsCache = new Map(cached ? [['r', cached]] : []); vm.runInNewContext(line, { m, eventsCache }); return eventsCache.get('r'); };
+  const m = { fast: true, receipt: 'r', steps: ['Searched Gmail', 'Wrote a draft'] };
+  assert.deepEqual(run([], m).map(e => e.message), ['Searched Gmail', 'Wrote a draft']);
+  assert.equal(run(null, m).length, 2);
+  const richer = [{ stage: 'plan' }, { stage: 'tool', message: 'Searched Gmail' }, { stage: 'tool', message: 'Wrote a draft' }];
+  assert.equal(run(richer, m), richer, 'a fuller list read while it ran is kept');
+});

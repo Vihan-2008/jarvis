@@ -58,7 +58,7 @@ function engine() {   // how JARVIS listens right now, after stepping down from 
 
 /* ---------- the voice screen ---------- */
 const captions = el('div', { id: 'nv-captions', 'aria-live': 'polite' },
-  '<p class="state"><i></i><span></span></p><p class="you"></p><p class="me"></p><p class="nv-hint"></p><div class="nv-voice-keys"></div>');
+  '<p class="state"><i></i><i class="nv-orbs" aria-hidden="true"><i></i><i></i><i></i></i><span></span></p><p class="you"></p><p class="me"></p><p class="nv-hint"></p><div class="nv-voice-keys"></div>');
 document.querySelector('.composer-wrap').before(captions);
 const capState = captions.querySelector('.state span'), capYou = captions.querySelector('.you'), capMe = captions.querySelector('.me'), capHint = captions.querySelector('.nv-hint');
 const keys = captions.querySelector('.nv-voice-keys');
@@ -863,7 +863,8 @@ function modelTitle(id) { return String(id || '').split('/').pop().replace(/[-_]
 const usualBrain = () => String(options.assistant?.model || options.model || 'auto');
 N.brainLabel = () => {
   const label = brainPick !== 'auto' ? brainName(brainPick) : usualBrain() !== 'auto' ? 'Auto · ' + brainName(usualBrain()) : 'Auto';
-  return { label, aria: 'Model: ' + label + '. Change model' };
+  // ("Auto model": the mode chip beside it also says "Auto". Read out, it stays "Model: Auto".)
+  return { label: label === 'Auto' ? 'Auto model' : label, aria: 'Model: ' + label + '. Change model' };
 };
 function restingUntil(value) {
   const at = value.indexOf(':'), keys = CLAUDE_PICKS.includes(value) ? ['claude', 'claude:' + value] : ['api:' + value.slice(0, at), 'api:' + value];
