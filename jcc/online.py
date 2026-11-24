@@ -330,6 +330,7 @@ STEPS = frozenset({"agent_message", "reasoning", "mcp_tool_call", "error", "todo
 ALL_OUT = "Claude and ChatGPT have both reached their usage limits, so nothing was {did} in your accounts. "
 SIGNED_OUT_CHATGPT_OUT = "Claude is not signed in, and ChatGPT has reached its usage limit, so nothing was {did} in your accounts. "
 CLAUDE_OUT ="Claude has reached its usage limit, so nothing was {did} in your accounts. "
+CHATGPT_OUT = "ChatGPT has reached its usage limit, so nothing was {did} in your accounts. "
 SIGN_IN_CHATGPT = " Sign in to ChatGPT in Settings, AI models & accounts, and JARVIS will switch to it when this happens."
 PARTLY = "The usage limit was reached partway through, so this may be only partly done. Check before asking again."
 NOT_USED = "ChatGPT tried to do something it may not do here, so its answer was not used. Nothing else was done."
@@ -364,6 +365,8 @@ def _clock(at: float) -> str:
 def _all_out(helpers: list[str], did: str, could_sign_in: bool) -> str:
     """What the owner is told when every helper is at its usage limit."""
     known = sorted((_resting[helper][0], helper) for helper in helpers if resting(helper) and _resting[helper][1])
+    if CHATGPT in helpers and not any(helper in CLAUDE_HELPERS for helper in helpers):      # (Claude Code is not installed)
+        return CHATGPT_OUT.format(did=did) + (f"It is back at {_clock(known[0][0])}." if known else "Try again in a little while.")
     if CHATGPT in helpers:
         first = ("ChatGPT" if known[0][1] == CHATGPT else "Claude") if known else ""
         return ALL_OUT.format(did=did) + (f"{first} is back first, at {_clock(known[0][0])}." if known else "Try again in a little while.")
@@ -570,7 +573,7 @@ def run(cfg, request: str, change: bool = False, name: str = "JARVIS", exe: str 
             raise OnlineError("Claude Code is not installed, so the helper for online accounts cannot start.")
         if not tried and not any(resting(helper) for helper in helpers):
             raise OnlineError("Claude Code is not installed, and ChatGPT is not signed in, so the helper for online accounts cannot start.")
-        raise OnlineError(_all_out([helper for helper in helpers if helper != CHATGPT or codex], did, could_sign_in))
+        raise OnlineError(_all_out([helper for helper in helpers if helper != CHATGPT or codex or resting(CHATGPT)], did, could_sign_in))
     finally:
         for left_over in (marker, instructions):
             if left_over is not None:

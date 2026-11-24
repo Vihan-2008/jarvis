@@ -1860,6 +1860,8 @@ class Assistant:
                         elif TROUBLE.search(error):
                             limit = "trouble"
                         problem_model = bool(data.get("model_problem"))
+                        if problem_model and not limit:
+                            limit = "trouble"           # (a model the plan does not offer: only it rests, and the next one answers)
                     elif not state["text"][base:].strip():
                         state["text"] += redact(str(data.get("result") or ""))
                     break

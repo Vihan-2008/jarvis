@@ -217,6 +217,20 @@ class TestWhoAnswers(BrainCase):
         self.assertEqual(self.finish(agent)[-1]["text"], "From ChatGPT.")
         self.assertEqual(self.procs, [])
 
+    def test_a_model_the_plan_refuses_rests_and_the_next_one_answers(self):
+        refused = "The 'gpt-9' model is not supported when using Codex with a ChatGPT account."
+        failed = [{"type": "thread.started", "thread_id": "t1"}, {"type": "turn.started"},
+                  {"type": "error", "message": refused}, {"type": "turn.failed", "error": {"message": refused}}]
+        agent = self.with_accounts(self.agent([[("text", "From Claude.")]]), "ok", True, (failed,), (answer("From ChatGPT."),))
+        with mock.patch.object(codex_brain, "_listed", (time.time(), [])):
+            agent.say("hello there", model="chatgpt:gpt-9")
+            events = self.finish(agent)
+        self.assertEqual((events[-1]["status"], events[-1]["text"]), ("done", "From ChatGPT."))
+        self.assertEqual(self.codexes.made[0].argv[-3:-1], ["-m", "gpt-9"])
+        self.assertNotIn("-m", self.codexes.made[1].argv, "then the plan's own model")
+        self.assertIn("api:chatgpt:gpt-9", agent.cool)
+        self.assertNotIn("api:chatgpt", agent.cool, "only the refused model rests")
+
 
 class ThePickedModelAndWhatFollowsIt(BrainCase):
     """The model bar's pick answers first; then its maker's other models, nearest first; then the accounts signed in with;

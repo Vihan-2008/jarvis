@@ -318,6 +318,15 @@ class TestWhenClaudeIsAtItsLimit(OnlineCase):
         self.assertEqual(self.started(), [], "with every helper resting nothing is started")
         self.assertEqual(str(again.exception), said)
 
+    def test_without_claude_code_only_chatgpt_is_named(self):
+        with self.assertRaises(online.OnlineError) as out:
+            online.run(self.cfg, "what are my latest emails", exe="", codex="codex", chatgpt=True, opener=self.server,
+                       runner=self.runner(codex=codex_events(failed="You've hit your usage limit. Try again in 3 hours.")))
+        said = str(out.exception)
+        self.assertTrue(said.startswith("ChatGPT has reached its usage limit, so nothing was looked up in your accounts. It is back at "), said)
+        self.assertNotIn("Claude", said)
+        self.assertEqual(self.started(), ["codex"])
+
     def test_without_chatgpt_signed_in_the_owner_is_told_how_to_have_it_switch(self):
         with self.assertRaises(online.OnlineError) as out:
             self.ask("Reply to Anna: yes", change=True, chatgpt=False)
