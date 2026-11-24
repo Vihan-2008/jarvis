@@ -102,6 +102,27 @@ class AssistantCase(EngineTestCase):
         self.fail("no question was asked")
 
 
+class TestFollowingTheConversation(AssistantCase):
+    """It asked "which account?", was told "the connected account", and sent from Outlook: the quick model had answered."""
+
+    def test_sending_goes_to_a_stronger_model_that_is_told_every_account(self):
+        agent = self.make([[("text", "Which account should it go from?")], [("text", "Sent.")]])
+        first = agent.say("send an email to Mira saying hi")
+        self.finish(agent, ident=first["id"])
+        reply = assistant.Chats(self.cfg).get(first["chat"])["messages"][-1]
+        self.assertEqual((reply["model"], reply.get("routed")), ("sonnet", "up"), "acting in the owner's name: never the quick model")
+        asked = self.procs[0].sent[0]["message"]["content"][0]["text"]
+        self.assertIn("(Email can be sent from: ", asked)
+        self.assertIn("send_email sends from any of these, the connected account included", asked)
+        upto = agent.poll(0)["next"]
+        second = agent.say("the connected account", first["chat"])
+        self.finish(agent, since=upto, ident=second["id"])
+        reply = assistant.Chats(self.cfg).get(first["chat"])["messages"][-1]
+        self.assertEqual(reply["model"], "sonnet", "the answer to its question goes to the model that asked it")
+        self.assertEqual(len(self.procs), 1, "in the same conversation, not a new one that has not seen the question")
+        self.assertIn("(Email can be sent from: ", self.procs[0].sent[1]["message"]["content"][0]["text"])
+
+
 class TestNotMeantForJarvis(AssistantCase):
     """During an open session the microphone also hears its owner talking to someone else."""
 
@@ -443,8 +464,12 @@ class TestTools(unittest.TestCase):
         self.questions, self.done, self.commands, self.answer, self.exposed = [], [], [], True, False
         self.desktop, self.controls = FakeDesktop(), FakeControls()
         self.replies = {"open_app": {"opened": "Notepad"}, "send_email": {"sent": True, "message": "Sent to a@b.com from me@x.com."}}
+        # Every way the owner's email can go out (the app's answer to the tools' question): here an account set up in JARVIS.
+        self.mail = {"connected": True, "smtp_address": "me@x.com", "through": "auto", "online": False, "address": "", "app": "Outlook on this PC"}
 
         def service(op, payload):
+            if op == "mail":
+                return dict(self.mail)
             if op == "gate":
                 ctx = policy.Context(exposed=self.exposed, window=payload["window"], control=payload["control"], state_dir=str(self.tmp / "state"))
                 decision = policy.decide(payload["tool"], payload["args"], ctx)
@@ -550,7 +575,7 @@ class TestTools(unittest.TestCase):
         self.answer = False
         for name, args in (("run_command", {"command": "Remove-Item C:\\temp\\x.txt"}), ("run_command", {"command": "shutdown /s /t 0"}),
                            ("run_command", {"command": "winget install something"}), ("open_file", {"path": "C:\\Users\\me\\Downloads\\setup.exe"}),
-                           ("send_email", {"to": "a@b.com", "subject": "Hi", "body": "Hello"})):
+                           ("send_email", {"to": "a@b.com", "subject": "Hi", "body": "Hello", "using": "my account"})):
             self.assertTrue(self.call(name, **args)["isError"], name)
         self.assertEqual(len(self.questions), 5)
         self.assertEqual((self.commands, self.desktop.done, self.done), ([], [], []), "nothing ran after a no")
@@ -617,8 +642,9 @@ class TestTools(unittest.TestCase):
         granted, sent = self.done[0]
         self.assertEqual((granted, sent), (("set_timer", {"duration": "5 minutes", "label": ""}), {"permit": "one-time"}),
                          "the helper sends only the permit; the details are the ones the owner's rules saw")
-        self.assertIn("Sent to a@b.com", self.text("send_email", to="a@b.com", subject="Hi", body="Hello"))
-        self.assertEqual(self.questions, ["Shall I send this email to a@b.com?"])
+        self.assertIn("Sent to a@b.com", self.text("send_email", to="a@b.com", subject="Hi", body="Hello", using="me@x.com"))
+        self.assertEqual(self.questions, ["Send this email to a@b.com from your email account in JARVIS (me@x.com)?"],
+                         "one question, and it names the account it goes from")
 
     def test_connector_tools_are_approved_through_the_same_rules(self):
         allowed = json.loads(self.text("approve", tool_name="mcp__gmail__search_threads", input={"query": "from:asha"}, tool_use_id="x"))
@@ -637,13 +663,86 @@ class TestTools(unittest.TestCase):
 
     def test_email_goes_through_the_mail_app_when_no_account_is_connected(self):
         from jcc import mailer
-        self.replies["send_email"], used = {"sent": False}, []
-        original, mailer.send_with_app = mailer.send_with_app, lambda *args, **kw: used.append(args[3:]) or "The email was sent from the mail app."
+        self.mail.update(connected=False, smtp_address="")
+        used, original = [], (mailer.open_draft, mailer.press_send)
+        mailer.open_draft = lambda kind, desktop, to, subject, body, *a, label="", **k: used.append((kind, to, subject, body, label)) or \
+            mailer.Draft(kind, "Hi there - Message (HTML)", label=label)
+        mailer.press_send = lambda draft, *a, **k: f"Sent to {a[3]} from {draft.where}."
         try:
-            self.assertIn("mail app", self.text("send_email", to="a@b.com; c@d.org", subject="Hi   there", body="Hello"))
+            said = self.text("send_email", to="a@b.com; c@d.org", subject="Hi   there", body="Hello")
         finally:
-            mailer.send_with_app = original
-        self.assertEqual(used, [("a@b.com, c@d.org", "Hi there", "Hello")])
+            mailer.open_draft, mailer.press_send = original
+        self.assertEqual(used, [("app", "a@b.com, c@d.org", "Hi there", "Hello", "Outlook on this PC")], "the only way there is")
+        self.assertEqual(said, "Sent to a@b.com, c@d.org from Outlook on this PC.")
+        self.assertEqual(self.questions, ["Send this email to a@b.com, c@d.org from Outlook on this PC?"])
+
+    def test_an_email_goes_from_the_account_the_user_named_and_no_other(self):
+        # It asked "shall I use the connected account?", the user said yes, and it sent from Outlook instead.
+        from jcc import mailer
+        self.mail.update(connected=False, smtp_address="", online=True, address="asha.k@example.edu")
+        drafts, original = [], mailer.open_draft
+        mailer.open_draft = lambda *a, **k: drafts.append(a) or mailer.Draft("app", problem="A draft was opened.")
+        try:
+            said = self.text("send_email", to="a@b.com", subject="Hi", body="Hello")
+            self.assertIn("NOT sent yet. Ask the user which account to send it from: your connected account (asha.k@example.edu), or Outlook on this PC.", said)
+            self.assertEqual((self.done, self.questions, drafts), ([], [], []), "nothing named: nothing sent, opened or asked yet")
+            self.replies["send_email"] = {"sent": True, "address": "asha.k@example.edu", "report": "Sent from: asha.k@example.edu"}
+            for using in ("connected account", "the connected one", "asha.k", "asha.k@example.edu"):
+                self.assertEqual(self.text("send_email", to="a@b.com", subject="Hi", body="Hello", using=using),
+                                 "Sent to a@b.com from your connected account (asha.k@example.edu). Tell the user it was sent and which account it went from.")
+            self.assertEqual([(granted[1]["via"], granted[1]["account"]) for granted, _ in self.done],
+                             [("online", "connected account"), ("online", "the connected one"), ("online", "asha.k"), ("online", "asha.k@example.edu")])
+            self.assertEqual(self.questions, ["Send this email to a@b.com from your connected account (asha.k@example.edu)?"] * 4)
+            self.assertEqual(drafts, [], "the mail app was never touched")
+            said = self.text("send_email", to="a@b.com", subject="Hi", body="Hello", using="with Outlook")
+            self.assertEqual(len(drafts), 1, "Outlook only when the user names it")
+        finally:
+            mailer.open_draft = original
+
+    def test_a_send_that_fails_or_is_unsure_is_never_tried_another_way(self):
+        from jcc import mailer
+        self.mail.update(online=True, address="asha.k@example.edu")
+        drafts, original = [], mailer.open_draft
+        mailer.open_draft = lambda *a, **k: drafts.append(a) or mailer.Draft("app", problem="A draft was opened.")
+        try:
+            self.replies["send_email"] = {"sent": False, "problem": "Gmail is not connected at Composio"}
+            said = self.text("send_email", to="a@b.com", subject="Hi", body="Hello", using="connected account")
+            self.assertTrue(said.startswith("NOT sent. Your connected account (asha.k@example.edu) could not send it: Gmail is not connected at Composio."), said)
+            self.replies["send_email"] = {"sent": None, "report": "I tried to send it."}
+            said = self.text("send_email", to="a@b.com", subject="Hi", body="Hello", using="connected account")
+            self.assertTrue(said.startswith("NOT confirmed."), said)
+            self.assertIn("check its Sent folder", said)
+            self.assertIn("Do not send it again yourself", said)
+            self.replies["send_email"] = {"sent": False, "problem": "authentication failed"}
+            said = self.text("send_email", to="a@b.com", subject="Hi", body="Hello", using="me@x.com")
+            self.assertTrue(said.startswith("NOT sent. Your email account in JARVIS (me@x.com) could not send it: authentication failed."), said)
+            self.assertEqual(len(self.done), 3, "each was asked once")
+            said = self.text("send_email", to="a@b.com", subject="Hi", body="Hello", using="someone@else.com")
+            self.assertIn('"someone@else.com" is not an account JARVIS can send from', said)
+            self.assertIn("Nothing was sent and no draft was opened", said)
+            self.assertEqual((len(self.done), drafts), (3, []), "never moved to another account or the mail app")
+        finally:
+            mailer.open_draft = original
+
+    def test_the_chat_that_sent_from_outlook_replayed(self):
+        # The send_email calls the assistant made in that chat (nothing named, then "connected account", then "asha.k"),
+        # each made only when the one before had not sent it. Before: two from Outlook. Now: one, from the connected account.
+        from jcc import mailer
+        self.mail.update(connected=False, smtp_address="", online=True, address="")
+        self.replies["send_email"] = {"sent": True, "address": "asha.k@example.edu", "report": "Sent from: asha.k@example.edu"}
+        drafts, original, said = [], mailer.open_draft, []
+        mailer.open_draft = lambda *a, **k: drafts.append(a) or mailer.Draft("app", problem="A draft was opened.")
+        try:
+            for using in ("", "connected account", "asha.k"):
+                said.append(self.text("send_email", to="me@example.com", subject="Test", body="Hello", using=using))
+                if said[-1].startswith("Sent to"):
+                    break
+        finally:
+            mailer.open_draft = original
+        self.assertIn("Ask the user which account to send it from: your connected account, or Outlook on this PC.", said[0])
+        self.assertTrue(said[1].startswith("Sent to me@example.com from your connected account (asha.k@example.edu)."), said[1])
+        self.assertEqual((len(said), len(self.done), drafts), (2, 1, []), "one email, from the connected account; Outlook never opened")
+        self.assertEqual(self.questions, ["Send this email to me@example.com from your connected account?"])
 
 
 class TestVoiceApi(GuiTestCase):
@@ -683,6 +782,47 @@ class TestVoiceApi(GuiTestCase):
             self.assertEqual([r["text"] for r in agent.reminders.listing()], ["Eggs"])
             status, answer = self.tool({"op": "gate", "session": sid, "tool": "click", "args": {"x": 1, "y": 1}, "window": "Untitled - Notepad"})
             self.assertEqual((answer["ok"], "permit" in answer), (True, False), "things the helper does itself need no permit")
+        finally:
+            agent.stop()
+            assistant.Session.close = close
+
+    def test_an_email_from_the_connected_account_keeps_its_account_through_the_permit(self):
+        import threading
+        agent, procs, close = self.state.assistant, [], assistant.Session.close
+        assistant.Session.close = lambda session: session.proc.close()
+        agent.popen, agent.exe = (lambda argv, **kw: procs.append(FakeClaude([[("text", "Working"), ("hang", None)]])) or procs[-1]), "claude"
+        seen, asked = [], []
+
+        def runner(cfg, request, change=False, name="JARVIS", sending=False):
+            seen.append((request, change, sending))
+            return {"text": "Sent from: asha.k@example.edu", "model": "sonnet"}
+        self.state.accounts_runner = runner
+
+        def approve():
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                waiting = agent.poll(0)["confirm"]
+                if waiting:
+                    asked.append(waiting["question"])
+                    agent.decide(waiting["id"], True)
+                    return
+                time.sleep(0.05)
+        try:
+            info = agent.say("email Mira from my connected account")
+            time.sleep(0.2)
+            sid = agent.turns[info["chat"]].session.id
+            email = {"to": "mira@example.com", "subject": "Hello", "body": "Hi Mira", "from": "your connected account",
+                     "via": "online", "account": "connected account"}
+            helper = threading.Thread(target=approve)
+            helper.start()
+            status, answer = self.tool({"op": "gate", "session": sid, "tool": "send_email", "args": email})
+            helper.join()
+            self.assertEqual((status, answer["ok"], asked), (200, True, ["Send this email to mira@example.com from your connected account?"]))
+            status, done = self.tool({"op": "do", "session": sid, "permit": answer["permit"], "via": "", "account": "someone else"})
+            self.assertEqual((status, done["sent"], done["address"]), (200, True, "asha.k@example.edu"), "what was approved is what is done")
+            self.assertEqual(len(seen), 1, "the connected account's helper, once")
+            self.assertEqual(seen[0][1:], (True, True), "as a change, and as a send")
+            self.assertIn("To: mira@example.com", seen[0][0])
         finally:
             agent.stop()
             assistant.Session.close = close

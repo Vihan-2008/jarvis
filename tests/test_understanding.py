@@ -352,40 +352,74 @@ class TestTools(unittest.TestCase):
 
     def test_email_is_written_where_the_user_writes_mail_and_sent_only_after_a_yes(self):
         # Gmail was open in the browser, and the message appeared in Outlook. Then it was called sent while it was a draft.
+        # With Gmail open and the PC's mail app there too, the user is asked which; then it goes the way they named.
         windows = Windows({2: ("Inbox (3) - me@example.com - Gmail - Comet", "comet")})
+        self.mail["app"] = "Outlook on this PC"
         drafts, sends = [], []
         original = mailer.open_draft, mailer.press_send
-        mailer.open_draft = lambda kind, desktop, to, subject, body, *a, **k: drafts.append((kind, to, subject, body)) or mailer.Draft(kind, "Compose Mail - Gmail - Comet")
-        mailer.press_send = lambda draft, desktop, controls, handle_of, to, *a, **k: sends.append((draft.kind, to)) or f"The email to {to} was sent from Gmail."
+        mailer.open_draft = lambda kind, desktop, to, subject, body, *a, label="", **k: drafts.append((kind, to, subject, body, label)) or \
+            mailer.Draft(kind, "Compose Mail - Gmail - Comet", label=label)
+        mailer.press_send = lambda draft, desktop, controls, handle_of, to, *a, **k: sends.append((draft.kind, to)) or f"Sent to {to} from {draft.where}."
         try:
             box = self.box(windows)
             said = self.text(box, "send_email", to="rahul@example.com", subject="test", body="hello")
-            self.assertEqual((drafts, sends), ([("gmail", "rahul@example.com", "test", "hello")], [("gmail", "rahul@example.com")]))
-            self.assertEqual(said, "The email to rahul@example.com was sent from Gmail.")
-            self.assertEqual(self.questions, ["Shall I send this email to rahul@example.com?"], "asked once, when it is about to go")
-            self.assertEqual(self.mail["through"], "gmail", "remembered: next time Gmail is the first choice even when it is not open")
+            self.assertIn("Ask the user which account to send it from: Outlook on this PC, or Gmail in your browser.", said)
+            self.assertEqual((drafts, sends, self.questions), ([], [], []), "two ways and none named: nothing opened, nothing sent")
+            said = self.text(box, "send_email", to="rahul@example.com", subject="test", body="hello", using="gmail")
+            self.assertEqual((drafts, sends), ([("gmail", "rahul@example.com", "test", "hello", "Gmail in your browser")], [("gmail", "rahul@example.com")]))
+            self.assertEqual(said, "Sent to rahul@example.com from Gmail in your browser.")
+            self.assertEqual(self.questions, ["Send this email to rahul@example.com from Gmail in your browser?"], "asked once, when it is about to go")
+            self.assertEqual(self.mail["through"], "auto", "nothing is decided for next time behind the user's back")
             self.answer, self.questions[:] = False, []
-            said = self.text(box, "send_email", to="rahul@example.com", subject="test", body="hello")
-            self.assertIn("was NOT sent", said)
+            said = self.text(box, "send_email", to="rahul@example.com", subject="test", body="hello", using="gmail")
+            self.assertIn("NOT sent", said)
             self.assertIn("draft in Gmail", said)
             self.assertEqual(len(sends), 1, "no yes, no Send")
             self.answer = True
             self.text(self.box(Windows({2: ("Document1 - Word", "winword")})), "send_email", to="a@b.co", subject="s", body="b", using="the mail app")
             self.assertEqual(drafts[-1][0], "app", "the user named the mail app")
-            self.mail = {"connected": False, "through": "auto"}
             self.text(self.box(Windows({2: ("Document1 - Word", "winword")})), "send_email", to="a@b.co", subject="s", body="b")
-            self.assertEqual(drafts[-1][0], "app", "nothing says Gmail: the PC's own mail app")
+            self.assertEqual((drafts[-1][0], drafts[-1][4]), ("app", "Outlook on this PC"), "the only way there is, by its name")
             mailer.open_draft = lambda kind, *a, **k: mailer.Draft(kind, problem="Gmail is not signed in in the user's browser. Nothing was sent.")
             self.assertIn("not signed in", self.text(box, "send_email", to="a@b.co", subject="s", body="b", using="gmail"))
         finally:
             mailer.open_draft, mailer.press_send = original
 
     def test_which_way_an_email_goes(self):
-        for using, connected, preferred, titles, way in (("", True, "auto", [], "account"), ("", False, "auto", ["Inbox - Gmail - Comet"], "gmail"),
-                                                         ("", False, "auto", ["Notepad"], "app"), ("", False, "gmail", ["Notepad"], "gmail"),
-                                                         ("in Outlook", False, "gmail", ["Inbox - Gmail"], "app"), ("gmail", True, "auto", [], "gmail"),
-                                                         ("", False, "app", ["Inbox - Gmail - Comet"], "app")):
-            self.assertEqual(mailer.choose(using, connected, preferred, titles), way, (using, connected, preferred, titles))
+        # The account a message goes from is part of the message: what the user named, or the only one there is. Never another.
+        school, tab = "asha.k@example.edu", ["Inbox - Gmail - Comet"]
+        for using, connected, preferred, titles, online, address, way in (
+                ("", True, "auto", [], False, "", "ask"),                        # an account in JARVIS and the mail app: which?
+                ("", False, "auto", tab, False, "", "ask"),                      # Gmail open, and the mail app
+                ("", False, "auto", ["Notepad"], False, "", "app"),              # the only way there is
+                ("", False, "gmail", ["Notepad"], False, "", "gmail"),           # what the owner chose, with no account connected
+                ("", False, "app", tab, False, "", "app"),
+                ("", False, "gmail", ["Notepad"], True, school, "ask"),             # ...but never over a connected account
+                ("", False, "auto", [], True, school, "ask"),                       # the connected account and Outlook: ask
+                ("connected account", False, "auto", [], True, school, "online"),
+                ("yes, the connected one", False, "auto", [], True, "", "online"),
+                ("asha.k", False, "auto", [], True, school, "online"),
+                ("ASHA.K@EXAMPLE.EDU", False, "auto", [], True, school, "online"),
+                ("asha.k@example.edu", False, "auto", [], True, "", "online"),       # an address not known yet: the helper checks it
+                ("someone@else.com", False, "auto", [], True, school, "none"),
+                ("someone@else.com", False, "auto", [], False, "", "none"),
+                ("me@x.com", True, "auto", [], True, school, "account"),
+                ("my school email", False, "auto", [], False, "", "none"),       # nothing by that name
+                ("my account", True, "auto", [], False, "", "account"),
+                ("in Outlook", False, "gmail", tab, True, school, "app"),
+                ("the mail app", True, "auto", [], True, school, "app"),
+                ("in the browser", False, "auto", [], True, school, "gmail"),
+                ("comet", False, "auto", [], True, school, "gmail"),
+                ("gmail", False, "auto", tab, True, school, "ask"),                 # a Gmail tab and a connected account that is not Gmail
+                ("gmail", False, "auto", [], True, school, "online"),               # no Gmail tab: the connected account
+                ("gmail", False, "auto", tab, True, "me@gmail.com", "online"),    # the connected account is the Gmail one
+                ("gmail", False, "auto", [], False, "", "gmail")):               # nothing connected: Gmail in the browser
+            self.assertEqual(mailer.choose(using, connected, preferred, titles, online=online, address=address,
+                                           smtp_address="me@x.com" if connected else ""), way, (using, connected, preferred, titles, online, address))
+        found = mailer.ways(True, True, school, "auto", tab, "me@x.com", "Outlook on this PC")
+        self.assertEqual(mailer.listing(found), "your connected account (asha.k@example.edu), your email account in JARVIS (me@x.com), "
+                                                "Outlook on this PC, or Gmail in your browser")
+        self.assertEqual(mailer.listing(mailer.ways(online=True, app="Outlook on this PC")), "your connected account, or Outlook on this PC")
         self.assertEqual(mailer.gmail_link("a@b.co; c@d.org", "Hi there", "Hello\nworld"),
                          "https://mail.google.com/mail/?view=cm&fs=1&to=a%40b.co%2C%20c%40d.org&su=Hi%20there&body=Hello%0Aworld")
 
@@ -405,7 +439,7 @@ class TestTools(unittest.TestCase):
         self.assertEqual((draft.problem, draft.title, opened), ("", "Compose Mail - me@example.com - Gmail - Comet", [mailer.gmail_link("a@b.co", "Hi", "Hello")]))
         draft.opened -= 10
         desk.titles = ["Compose Mail - me@example.com - Gmail - Comet", "Compose Mail - me@example.com - Gmail - Comet", "Gmail - Comet"]
-        self.assertEqual(mailer.press_send(draft, desk, None, lambda: 5, "a@b.co", pause=lambda s: None), "The email to a@b.co was sent from Gmail.")
+        self.assertEqual(mailer.press_send(draft, desk, None, lambda: 5, "a@b.co", pause=lambda s: None), "Sent to a@b.co from Gmail in your browser.")
         self.assertEqual(desk.done, [{"action": "key", "keys": "ctrl+enter"}])
         desk = Desk(["Compose Mail - Gmail - Comet"])
         self.assertIn("may NOT have been sent", mailer.press_send(draft, desk, None, lambda: 5, "a@b.co", pause=lambda s: None))

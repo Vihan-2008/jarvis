@@ -143,6 +143,23 @@ class TestAKeyForComposiosOwnServer(OnlineCase):
         self.assertEqual(gate["args"][2:4], ["connect", ""])
         self.assertEqual(allowed, "mcp__accounts__COMPOSIO_SEARCH_TOOLS,mcp__accounts__COMPOSIO_MANAGE_CONNECTIONS")
 
+    def test_an_email_to_send_gets_the_act_gate_whatever_its_words_say(self):
+        secrets.store("composio", self.ck)
+        request = online.send_request("a@b.com", "Hi", "Please connect my Gmail to the new laptop.\nThanks", "connected account")
+        self.assertTrue(online.wants_connection(request), "(its words alone would make it a request to connect an account)")
+        seen = []
+
+        def runner(argv, **kw):
+            seen.append((argv, kw))
+            return Done({"result": "Done.\nSent from: asha.k@example.edu", "is_error": False})
+        got = online.run(self.cfg, request, change=True, exe="claude", opener=self.server, runner=runner, sending=True)
+        argv, kw = seen[-1]
+        gate = json.loads(argv[argv.index("--mcp-config") + 1])["mcpServers"]["accounts"]
+        self.assertEqual(gate["args"][2:4], ["act", "github,gmail,google_classroom"], "a send acts: it is never taken for connecting")
+        self.assertIn('"Please connect my Gmail to the new laptop.\\nThanks"', kw["input"], "the body arrives whole, its line break kept")
+        self.assertIn("To: a@b.com Subject: Hi", kw["input"])
+        self.assertEqual(online.read_send(got["text"]), {"sent": True, "address": "asha.k@example.edu"})
+
     def test_when_composio_does_not_say_what_is_connected_nothing_is_looked_up(self):
         secrets.store("composio", self.ck)
         with self.assertRaises(online.OnlineError) as unknown:
@@ -567,6 +584,41 @@ class TestTheTool(unittest.TestCase):
             box.use_accounts("   ")
 
 
+class TestSendingFromTheConnectedAccount(OnlineCase):
+    def test_the_helper_is_asked_for_exactly_one_message_from_one_account(self):
+        asked = online.send_request("a@b.com", "Hi", 'Line one\nLine "two"', "connected account")
+        self.assertIn("Send exactly one email from the connected email account, once.", asked)
+        self.assertIn('"Line one\\nLine \\"two\\""', " ".join(asked.split()), "the body word for word, its line breaks kept on one line")
+        self.assertIn("Do not send it from any other account.", asked)
+        self.assertIn('"Sent from: <the address it was sent from>"', asked)
+        self.assertIn('from the connected email account the user called "my school email"', online.send_request("a@b.com", "Hi", "x", "my school email"))
+        self.assertIn("Send exactly one email from asha.k@example.edu, once.", online.send_request("a@b.com", "Hi", "x", "connected account", "asha.k@example.edu"))
+
+    def test_only_a_report_that_names_the_address_counts_as_sent(self):
+        self.assertEqual(online.read_send("Done!\nSent from: ASHA.K@example.edu"), {"sent": True, "address": "asha.k@example.edu"})
+        self.assertEqual(online.read_send("**Sent from:** <me@gmail.com>"), {"sent": True, "address": "me@gmail.com"})
+        self.assertEqual(online.read_send("Not sent: Gmail is not connected."), {"sent": False, "problem": "Gmail is not connected."})
+        self.assertFalse(online.read_send("I could not send it because the account needs signing in again.")["sent"])
+        self.assertIsNone(online.read_send("I have sent the email.")["sent"], "no address: not certain")
+        self.assertIsNone(online.read_send("")["sent"])
+
+    def test_the_connected_accounts_address_is_kept_and_forgotten_with_it(self):
+        self.assertEqual(online.address(self.cfg), "")
+        self.assertEqual(online.keep_address(self.cfg, "Nothing here"), "")
+        self.assertEqual(online.keep_address(self.cfg, "Your connected Gmail account (ASHA.K@example.edu) has 3 new emails."), "asha.k@example.edu")
+        self.assertEqual(online.address(self.cfg), "asha.k@example.edu")
+        self.assertEqual(online.keep_address(self.cfg, "Sent from: other@example.edu"), "other@example.edu")
+        self.assertEqual(online.address(self.cfg), "other@example.edu")
+        online.disconnect(self.cfg)
+        self.assertEqual(online.address(self.cfg), "", "disconnecting forgets it")
+
+    def test_the_question_names_the_account(self):
+        ctx = policy.Context(state_dir=str(self.cfg.state_dir))
+        asked = policy.decide("send_email", {"to": "a@b.com", "subject": "Hi", "body": "x", "from": "your connected account (asha.k@example.edu)"}, ctx)
+        self.assertEqual(asked.question, "Send this email to a@b.com from your connected account (asha.k@example.edu)?")
+        self.assertEqual(policy.decide("send_email", {"to": "a@b.com", "subject": "Hi", "body": "x"}, ctx).question, "Shall I send this email to a@b.com?")
+
+
 class TestInTheApp(GuiTestCase):
     def tearDown(self):
         secrets.delete("composio")
@@ -595,6 +647,43 @@ class TestInTheApp(GuiTestCase):
         self.state.perform("use_accounts", {"request": "what is new"}, None)
         self.state.perform("use_accounts", {"request": "delete it", "change": True, "full": True}, None)
         self.assertEqual(seen, [("open the mail from Mira", False, True), ("what is new", False, False), ("delete it", True, False)])
+
+    def test_an_email_from_the_connected_account_is_sent_once_and_reported_truly(self):
+        seen, said = [], {"text": "Done.\nSent from: ASHA.K@example.edu"}
+
+        def runner(cfg, request, change=False, name="JARVIS", sending=False):
+            seen.append((request, change))
+            self.assertTrue(sending, "the helper is told it is a send, not a request to connect an account")
+            if isinstance(said["text"], Exception):
+                raise said["text"]
+            return {"text": said["text"], "model": "sonnet"}
+        self.state.accounts_runner = runner
+        email = {"to": "a@b.com", "subject": "Hi", "body": "Line one\nLine two", "via": "online", "account": "connected account"}
+        got = self.state.perform("send_email", email, None)
+        self.assertEqual((got["sent"], got["address"]), (True, "asha.k@example.edu"))
+        self.assertEqual(len(seen), 1, "asked once")
+        self.assertTrue(seen[0][1], "as a change")
+        self.assertIn("Send exactly one email from the connected email account, once.", seen[0][0])
+        self.assertIn('"Line one\\nLine two"', seen[0][0])
+        self.assertEqual(online.address(self.state.cfg), "asha.k@example.edu", "its address is kept, so the next one names it")
+        self.state.perform("send_email", email, None)
+        self.assertIn("Send exactly one email from asha.k@example.edu, once.", seen[1][0])
+        said["text"] = "Not sent: Gmail is not connected."
+        self.assertEqual(self.state.perform("send_email", email, None)["sent"], False)
+        said["text"] = "I think it went."
+        self.assertIsNone(self.state.perform("send_email", email, None)["sent"], "not certain is never called sent")
+        said["text"] = online.OnlineError(online.PARTLY)
+        self.assertIsNone(self.state.perform("send_email", email, None)["sent"], "stopped partway: it may have gone, so it is not called not sent")
+        said["text"] = online.OnlineError("No account is connected yet.")
+        self.assertEqual(self.state.perform("send_email", email, None), {"sent": False, "problem": "No account is connected yet."})
+        before = len(seen)
+        said["text"] = "Sent from: asha.k@example.edu"
+        self.assertTrue(self.state.perform("send_email", {**email, "body": "x" * 6000}, None)["sent"], "the longest body the tool takes goes whole")
+        before = len(seen)
+        got = self.state.perform("send_email", {**email, "body": "x" * 9000}, None)
+        self.assertEqual((got["sent"], len(seen)), (False, before), "too long to go whole: not sent at all, rather than cut short")
+        self.assertEqual(self.state.perform("send_email", {"to": "a@b.com", "subject": "Hi", "body": "x"}, None)["sent"], False,
+                         "with no account set up in JARVIS itself, that way does not send")
 
     def test_it_is_in_the_connections_list_with_its_own_key(self):
         item = next(i for i in connections.overview(self.state.cfg) if i["id"] == "accounts")

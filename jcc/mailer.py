@@ -43,21 +43,96 @@ NO_APP = ("No mail app is set up on this PC, so the draft could not be opened. T
 
 THROUGH = ("auto", "gmail", "app")       # what the owner chose for when no account is connected
 
+# What the owner may call each way. Whatever they name, the message goes that way or not at all: the account it is sent
+# from is part of the message, so it is never picked or switched behind their back.
+_APP_WORDS = re.compile(r"outlook|thunderbird|mail app|windows mail|\bapp\b", re.I)
+_BROWSER_WORDS = re.compile(r"browser|comet|chrome|\bedge\b|firefox|brave|safari|\btab\b", re.I)
+_GOOGLE_WORDS = re.compile(r"gmail|google", re.I)
+_ACCOUNT_WORDS = re.compile(r"connected|composio|\baccount\b", re.I)
+_GOOGLE_MAIL = ("@gmail.com", "@googlemail.com")
+_app_name: str | None = None
 
-def choose(using: str = "", connected: bool = False, preferred: str = "auto", titles=()) -> str:
-    """Which way a message goes: "account" (the connected one), "gmail" (Gmail in the browser) or "app" (the PC's mail app).
 
-    using: what the owner said, if they named one ("in Gmail", "with Outlook").  titles: the windows that are open."""
+def app_label() -> str:
+    """The PC's own mail app, as its owner knows it: "Outlook on this PC"."""
+    global _app_name
+    if _app_name is None:
+        _app_name = ""
+        try:
+            from jcc import system
+            if system.kind() == "windows":
+                import winreg
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                    r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\mailto\UserChoice") as key:
+                    prog = str(winreg.QueryValueEx(key, "ProgId")[0])
+                for pattern, name in ((r"outlook|olk", "Outlook"), (r"thunderbird", "Thunderbird"),
+                                      (r"windowscommunicationsapps|windowslive|msmail", "Windows Mail")):
+                    if re.search(pattern, prog, re.I):
+                        _app_name = name
+                        break
+            elif system.kind() == "mac":
+                _app_name = "Mail"
+        except (OSError, ImportError, ValueError):
+            _app_name = ""
+    return (_app_name + " on this PC") if _app_name else "the mail app on this PC"
+
+
+def ways(smtp: bool = False, online: bool = False, address: str = "", preferred: str = "auto", titles=(), smtp_address: str = "",
+         app: str = "") -> list[tuple[str, str]]:
+    """Every way an email can go out right now, as (way, what the owner calls it)."""
+    found = []
+    if online:
+        found.append(("online", f"your connected account ({address})" if address else "your connected account"))
+    if smtp:
+        found.append(("account", f"your email account in JARVIS ({smtp_address})" if smtp_address else "your email account in JARVIS"))
+    found.append(("app", app or app_label()))
+    if preferred == "gmail" or any(re.search(r"\bgmail\b", str(title), re.I) for title in titles):
+        found.append(("gmail", "Gmail in your browser"))
+    return found
+
+
+def listing(found) -> str:
+    """ "your connected account (a@b.co), Outlook on this PC, or Gmail in your browser" """
+    names = [label for _, label in found]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + ", or " + names[-1]
+
+
+def choose(using: str = "", connected: bool = False, preferred: str = "auto", titles=(), online: bool = False, address: str = "",
+           smtp_address: str = "") -> str:
+    """Which way a message goes: "online" (the account connected through Composio: the one the assistant reads mail in),
+    "account" (an account set up in JARVIS itself), "gmail" (Gmail in the browser) or "app" (the PC's mail app). Or
+    "ask": more than one could send it and the owner has not said which. Or "none": they named one that cannot send it.
+
+    using: what the owner said, if they named one ("from asha.k", "with Outlook", "connected account").
+    connected: an account is set up in JARVIS itself (smtp_address).  online: one is connected through Composio (address,
+    once it is known).  titles: the windows that are open."""
     said = " ".join(str(using or "").lower().split())
-    if re.search(r"gmail|google", said):
-        return "gmail"
-    if re.search(r"outlook|thunderbird|mail app|windows mail|\bapp\b", said):
-        return "app"
-    if connected:
-        return "account"
-    if preferred in ("gmail", "app"):
-        return preferred
-    return "gmail" if any(re.search(r"\bgmail\b", str(title), re.I) for title in titles) else "app"
+    gmail_open = preferred == "gmail" or any(re.search(r"\bgmail\b", str(title), re.I) for title in titles)
+    if said:
+        if _APP_WORDS.search(said):
+            return "app"
+        if _BROWSER_WORDS.search(said):
+            return "gmail"
+        named = ADDRESS.search(said)
+        if named:
+            wanted = named.group(0).lower()
+            if connected and wanted == smtp_address.lower():
+                return "account"
+            if online and (not address or wanted == address.lower()):
+                return "online"           # (an address not known yet is checked by the helper: it sends from that one or not at all)
+            return "none"
+        if _GOOGLE_WORDS.search(said) and not _ACCOUNT_WORDS.search(said):
+            # Gmail in the browser and a connected Google account may be two different people's mail: only one, or say which.
+            if online and (address.lower().endswith(_GOOGLE_MAIL) or not gmail_open):
+                return "online"
+            return "ask" if online else "gmail"
+        if online:
+            return "online"               # "connected account", "asha.k", "my school email": the helper sends from that one or says it cannot
+        return "account" if connected and _ACCOUNT_WORDS.search(said) else "none"
+    if preferred in ("gmail", "app") and not online and not connected:
+        return preferred                  # (the owner chose where their mail is written when no account is connected)
+    found = ways(connected, online, address, preferred, titles, smtp_address, app="-")
+    return found[0][0] if len(found) == 1 else "ask"
 
 
 def gmail_link(to: str, subject: str, body: str) -> str:
@@ -72,17 +147,19 @@ class Draft:
     title: str = ""               # the draft window's title, once it is open
     problem: str = ""             # why there is no draft to send
     opened: float = field(default_factory=time.monotonic)
+    label: str = ""               # what the owner calls it: "Outlook on this PC"
 
     @property
     def where(self) -> str:
-        return "Gmail" if self.kind == "gmail" else "the mail app"
+        return self.label or ("Gmail in your browser" if self.kind == "gmail" else "the mail app on this PC")
 
 
 _SIGNED_OUT = re.compile(r"sign in|google accounts|choose an account", re.I)
 
 
-def open_draft(kind: str, desktop, to: str, subject: str, body: str, opener=None, wait: float = 12.0, pause=time.sleep) -> Draft:
+def open_draft(kind: str, desktop, to: str, subject: str, body: str, opener=None, wait: float = 12.0, pause=time.sleep, label: str = "") -> Draft:
     """Show the message as a draft the owner can see: in Gmail in their browser, or in the PC's mail app. Nothing is sent."""
+    where = Draft(kind, label=label).where
     before = desktop.window_title()
     if kind == "gmail":
         link = gmail_link(to, subject, body)
@@ -105,15 +182,13 @@ def open_draft(kind: str, desktop, to: str, subject: str, body: str, opener=None
         pause(0.5)
         title = desktop.window_title()
         if kind == "gmail" and title and _SIGNED_OUT.search(title):
-            return Draft(kind, title, "Gmail is not signed in in the user's browser, so the message could not be written there. Nothing was sent. "
-                                      "Ask them to sign in to Gmail, or offer the PC's mail app instead (using: mail app).")
+            return Draft(kind, title, "NOT sent. Gmail is not signed in in the user's browser, so the message could not be written there. "
+                                      "Ask them to sign in to Gmail, or which other account to send it from.", label=label)
         if title and title != before and looks.search(title):
-            return Draft(kind, title)
-    return Draft(kind, problem=("The draft was opened in the mail app, but it did not come to the front, so Send was not pressed. Tell the user the draft "
-                                "is waiting for them, or that they can connect an email account in JARVIS so messages are sent directly.")
-                 if kind != "gmail" else
-                 "Gmail was opened with the message filled in, but its window did not come to the front, so Send was not pressed. Nothing was sent. "
-                 "Tell the user the draft is waiting for them in Gmail.")
+            return Draft(kind, title, label=label)
+    return Draft(kind, problem=f"NOT sent. A draft was opened in {where}, but its window did not come to the front, so Send was not pressed. "
+                               "Tell the user the draft is waiting there for them to press Send, or that they can name another account to send it from. "
+                               "Never call it sent.", label=label)
 
 
 def press_send(draft: Draft, desktop, uia, handle_of, to: str, pause=time.sleep) -> str:
@@ -130,8 +205,8 @@ def press_send(draft: Draft, desktop, uia, handle_of, to: str, pause=time.sleep)
         for _ in range(16):
             pause(0.5)
             if desktop.window_title() != title:
-                return f"The email to {to} was sent from Gmail."
-        return ("Send was pressed in Gmail, but the message window still seems to be open. It may NOT have been sent. Look at the screen to check "
+                return f"Sent to {to} from {draft.where}."
+        return (f"Send was pressed in {draft.where}, but the message window still seems to be open. It may NOT have been sent. Look at the screen to check "
                 "before telling the user it was sent.")
     looks = re.compile(r"mail|outlook|gmail|message|compose|thunderbird|" + re.escape(title[:16] or "\x00"), re.I)
     pause(1.2)   # let the draft finish loading
@@ -157,8 +232,8 @@ def press_send(draft: Draft, desktop, uia, handle_of, to: str, pause=time.sleep)
     for _ in range(12):
         pause(0.5)
         if desktop.window_title() != title:
-            return f"The email to {to} was sent from the mail app."
-    return ("Send was pressed in the mail app, but the draft still seems to be open. It may NOT have been sent. Look at the screen to check "
+            return f"Sent to {to} from {draft.where}."
+    return (f"Send was pressed in {draft.where}, but the draft still seems to be open. It may NOT have been sent. Look at the screen to check "
             "before telling the user it was sent.")
 
 

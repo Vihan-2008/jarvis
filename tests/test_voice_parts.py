@@ -653,11 +653,11 @@ class TestMail(EngineTestCase):
         send = {"t": "Button", "n": "Send", "x": 10, "y": 10, "on": True}
         desk, controls = Desk(["Chat - JARVIS", "Hi - Message (HTML)", "Hi - Message (HTML)", "Hi - Message (HTML)", "Inbox - Outlook"]), Controls(send)
         result = mailer.send_with_app(desk, controls, lambda: 5, "a@b.co", "Hi", "Hello there", opened.append, pause=lambda s: None)
-        self.assertIn("was sent", result)
+        self.assertEqual(result, "Sent to a@b.co from the mail app on this PC.")
         self.assertEqual(opened, ["mailto:a%40b.co?subject=Hi&body=Hello%20there"])
         self.assertEqual((controls.calls, desk.done), (["find", "press"], []))
         desk, controls = Desk(["Chat - JARVIS", "New message - Mail", "New message - Mail", "New message - Mail", "Inbox - Mail"]), Controls(None)
-        self.assertIn("was sent", mailer.send_with_app(desk, controls, lambda: 5, "a@b.co", "Hi", "Hello", opened.append, pause=lambda s: None))
+        self.assertIn("Sent to a@b.co", mailer.send_with_app(desk, controls, lambda: 5, "a@b.co", "Hi", "Hello", opened.append, pause=lambda s: None))
         self.assertEqual(desk.done, [{"action": "key", "keys": "ctrl+enter"}], "no Send button found, so the usual shortcut is used")
         desk = Desk(["Chat - JARVIS"])
         result = mailer.send_with_app(desk, Controls(send), lambda: 5, "a@b.co", "Hi", "Hello", opened.append, wait=0.01, pause=lambda s: None)

@@ -78,13 +78,16 @@ TOOLS = [
            "ultra": {"type": "boolean", "description": "Ultracode: the strongest AI, thinking as hard as it can, with a second opinion. Only when the user asks for it."}},
           ["project", "task"]),
     _tool("list_projects", "List the user's JARVIS projects (name, key and folder)."),
-    _tool("send_email", "Write an email and send it for the user. It is shown to them where they write their mail (their connected account, Gmail in their "
-          "browser, or the PC's mail app: JARVIS picks the one they use) and JARVIS asks them for a yes before it goes. Set using to 'gmail' or 'mail app' "
-          "only when the user names one. Say 'sent' only if the result says it was sent.", {"to": _S, "subject": _S, "body": _S, "using": _S}, ["to", "subject", "body"]),
+    _tool("send_email", "Send an email for the user. It can go from their connected account (the same account use_accounts reads their mail in), "
+          "from the PC's mail app (such as Outlook), or from Gmail in their browser. Put in using the account the user named, in their words: "
+          "an address or part of one ('asha.k'), 'connected account', 'Outlook', 'mail app' or 'Gmail in the browser'. With nothing named, JARVIS "
+          "uses the only account there is, or tells you to ask which one. It never sends from an account the user did not choose. JARVIS asks "
+          "them for a yes before it goes. The result says whether it was sent and from which account: tell the user exactly that, and say "
+          "'sent' only if the result says it was sent.", {"to": _S, "subject": _S, "body": _S, "using": _S}, ["to", "subject", "body"]),
     _tool("use_accounts", "Look something up in the user's email, calendar, messages or another online account they connected, or (change: true) create, "
           "change or delete something there, or connect an account. Say the whole request in plain words: a helper carries it out and reports back. "
           "A lookup comes back as who, when and the subject. Set full true only when the user asks to open, read or hear the whole of one message, "
-          "thread or document: then its complete text comes back. To send an email use send_email.",
+          "thread or document: then its complete text comes back. To send an email use send_email: it sends from this same connected account.",
           {"request": _S, "change": {"type": "boolean"}, "full": {"type": "boolean"}}, ["request"]),
     _tool("list_sites", "The websites the user connected to JARVIS (WordPress, WordPress.com, Shopify, Wix, Squarespace): each one's name, platform, and what JARVIS "
           "can change there. Only these can be read or changed."),
@@ -146,7 +149,7 @@ BRIEF = {"find_files": "find_files(name): find files on this PC by part of their
          "move_window": "move_window(screen, title?): move a window to another screen: its number, or other, main, left, right, above, below",
          "where_to_watch": "where_to_watch(title): which services a film or series is streaming on in the user's country",
          "use_accounts": "use_accounts(request, change?): the user's email, calendar and other online accounts: look something up, or with change true "
-         "create, change or delete something, or connect an account. To send an email use send_email",
+         "create, change or delete something, or connect an account. To send an email use send_email: it sends from this same connected account",
          "list_sites": "list_sites(): the user's connected websites (WordPress, WordPress.com, Shopify, Wix, Squarespace)",
          "site_read": "site_read(site, kind: post|page|product, item?): a connected website's latest posts, pages or products, or one in full",
          "site_change": "site_change(site, kind, summary, item?, title?, content?, price?, visible?): a new or changed post, page or product on a "
@@ -1302,20 +1305,43 @@ class Toolbox:
         subject, body = " ".join(str(subject).split())[:300], str(body)[:6000]
         details = {"to": targets, "subject": subject, "body": body}
         try:
-            mail = self.service("mail", {})            # is an account connected, and where does the owner write their mail?
-        except Exception:  # noqa: BLE001 - if the app cannot say, go on as if an account might be connected
+            mail = self.service("mail", {})            # which accounts can send, and where does the owner write their mail?
+        except Exception:  # noqa: BLE001 - if the app cannot say, only the PC's own mail app is known
             mail = {}
         mail = mail if isinstance(mail, dict) else {}
-        known = isinstance(mail.get("connected"), bool)
-        way = mailer.choose(using, mail.get("connected") is True or not known, str(mail.get("through") or "auto"),
-                            [row["title"] for row in self.win.all()])
+        smtp, online = mail.get("connected") is True, mail.get("online") is True
+        address, smtp_address = str(mail.get("address") or ""), str(mail.get("smtp_address") or "")
+        through, titles = str(mail.get("through") or "auto"), [row["title"] for row in self.win.all()]
+        # The account it goes from is part of the message: what the owner named, or the only one there is. Never another.
+        way = mailer.choose(using, smtp, through, titles, online=online, address=address, smtp_address=smtp_address)
+        found = mailer.ways(smtp, online, address, through, titles, smtp_address, str(mail.get("app") or ""))
+        label = dict(found).get(way, "") or ("Gmail in your browser" if way == "gmail" else "")
+        if way == "ask":
+            return ("NOT sent yet. Ask the user which account to send it from: " + mailer.listing(found) + ". Then send it with using "
+                    "set to their answer. Do not choose for them.")
+        if way == "none":
+            return (f'NOT sent. "{" ".join(str(using).split())[:80]}" is not an account JARVIS can send from on this PC. Nothing was sent and no '
+                    f"draft was opened. It can send from: {mailer.listing(found)}. Ask the user which one; do not choose for them.")
+        if way == "online":
+            # Through the helper for the owner's online accounts: once, from that account, or not at all.
+            answer = self._do("send_email", {**details, "from": label, "via": "online", "account": " ".join(str(using or "").split())[:120]})
+            if answer.get("sent") is True:
+                went = answer.get("address") or address
+                return (f"Sent to {targets} from {f'your connected account ({went})' if went else label}. "
+                        "Tell the user it was sent and which account it went from.")
+            if answer.get("sent") is False:
+                return (f"NOT sent. {label[0].upper() + label[1:]} could not send it: {answer.get('problem') or 'no reason was given'}. "
+                        "Nothing was sent. Do not try another account unless the user asks.")
+            return (f'NOT confirmed. {label[0].upper() + label[1:]} was asked to send it, but its report did not say for certain that it went: '
+                    f'"{answer.get("report") or ""}". Tell the user to check its Sent folder before trying again. Do not send it again yourself.')
         if way == "account":
-            answer = self._do("send_email", details)   # JARVIS asks the owner first; then the app sends it through their account
+            answer = self._do("send_email", {**details, "from": label})     # JARVIS asks the owner first; then the app sends it
             if answer.get("sent"):
                 return str(answer.get("message"))
-            # No account after all. The owner has already said yes to this message, so it goes through the mail app.
-            return mailer.send_with_app(self.desktop, self.uia, self.win.foreground, targets, subject, body)
+            return (f"NOT sent. {label[0].upper() + label[1:]} could not send it: {answer.get('problem') or 'no reason was given'}. "
+                    "Nothing was sent. Do not try another account unless the user asks.")
         # Shown to the owner first, as a draft where they write their mail. It is sent only after their yes.
+        details = {**details, "from": label}
         self.gate("write_email", details)
         if system.kind() != "windows":
             # Off Windows JARVIS cannot see the draft's window or press its Send button: the draft is opened, and the owner sends it.
@@ -1328,7 +1354,7 @@ class Toolbox:
                 return "The mail app could not be opened, so the message was not written. Nothing was sent."
             return ("The message is open as a draft for the user to check. JARVIS cannot press Send on this computer, so it was NOT sent: "
                     "tell them to send it themselves.")
-        draft = mailer.open_draft(way, self.desktop, targets, subject, body)
+        draft = mailer.open_draft(way, self.desktop, targets, subject, body, label=label)
         if draft.problem:
             return draft.problem
         front = self.win.foreground()
@@ -1339,13 +1365,8 @@ class Toolbox:
         except Refused as refused:
             if "stop" in str(refused).lower():
                 raise
-            return (f"The message is written and open as a draft in {draft.where}, but the user did not say yes, so it was NOT sent. "
+            return (f"NOT sent. The message is written and open as a draft in {draft.where}, but the user did not say yes. "
                     "Tell them it is waiting there as a draft.")
-        if way == "gmail" and mail.get("through") == "auto":
-            try:
-                self.service("mail", {"use": "gmail"})   # they use Gmail: next time it is the first choice even when it is not open
-            except Exception:  # noqa: BLE001
-                pass
         return mailer.press_send(draft, self.desktop, self.uia, self.win.foreground, targets)
 
     # ------------------------------------------------------------------ clipboard, sound, screen

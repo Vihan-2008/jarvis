@@ -94,14 +94,49 @@ class BrainCase(AssistantCase):
 
 class TestChoosingTheModel(unittest.TestCase):
     def test_everyday_requests_get_the_quick_model_and_real_work_a_stronger_one(self):
-        for text in ("open netflix", "what time is it", "play some music", "send it", "write an email to mum saying I will be late", "thanks", "pause"):
+        for text in ("open netflix", "what time is it", "play some music", "thanks", "pause", "why is the sky blue"):
             self.assertEqual(assistant.route(text), "haiku", text)
+        # Acting in the owner's name (it reaches other people, or cannot be taken back) is never left to the quick model.
+        for text in ("send it", "write an email to mum saying I will be late", "send an email to Mira", "reply to Asha", "email John the notes",
+                     "delete the file", "post it on LinkedIn"):
+            self.assertEqual(assistant.route(text), "sonnet", text)
         for text in ("write me an essay about the French revolution", "compare the iPhone and the Pixel for me", "help me decide between two laptops",
                      "analyse my spending this month", "explain why the sky is blue step by step", "draft a business plan for a bakery"):
             self.assertEqual(assistant.route(text), "sonnet", text)
         self.assertEqual(assistant.route("who won the match", research=True), "sonnet")
         self.assertEqual(assistant.route("think hard about this chess position"), "opus")
         self.assertEqual(assistant.route("use fable for this one"), "fable")
+
+    def test_the_conversation_decides_too(self):
+        def reply(content, model="haiku", **more):
+            return {"role": "assistant", "content": content, "model": model, "fast": True, "status": "done", **more}
+
+        def said(content):
+            return {"role": "user", "content": content}
+        # "Shall I use the connected account?" asked by Sonnet: the answer carries on with Sonnet.
+        asked = [said("send an email to Mira"), reply("Shall I send it from your connected account?", "sonnet")]
+        self.assertEqual(assistant.route("yes, use the connected account", recent=asked), "sonnet")
+        self.assertEqual(assistant.route("yes", recent=asked), "sonnet")
+        # Pushing back, insults and shouting after a quick reply: a stronger model.
+        quick = [said("send it from my school account"), reply("Done, sent from Outlook.")]
+        for text in ("no, I said the connected account", "that's not what I asked", "why did you use outlook", "are you stupid",
+                     "USE THE CONNECTED ACCOUNT NOW"):
+            self.assertEqual(assistant.route(text, recent=quick), "sonnet", text)
+        # ...but not ordinary talk that happens to start with "no".
+        for text in ("no idea, what's 2+2", "no worries, what time is it", "no problem"):
+            self.assertEqual(assistant.route(text, recent=quick), "haiku", text)
+        self.assertEqual(assistant.route("what's 2+2"), "haiku", "a first message has nothing to go on")
+        # The same thing asked again, or after a failure: stronger.
+        self.assertEqual(assistant.route("open my calendar", recent=[said("open my calendar"), reply("I opened it.")]), "sonnet")
+        self.assertEqual(assistant.route("try again", recent=[said("x"), reply("Something went wrong.", status="failed")]), "sonnet")
+        # Overheard by the open microphone: only acting counts ("no mum, later" is not said to JARVIS).
+        self.assertEqual(assistant.route("no mum, I will call you back", recent=quick, heard=True), "haiku")
+        self.assertEqual(assistant.route("send it", recent=quick, heard=True), "sonnet")
+        # Once stepped up, it stays up for the next two messages, then goes back to the quick one.
+        up = reply("Which account should it go from?", "sonnet", routed="up")
+        self.assertEqual(assistant.route("what time is it", recent=[up]), "sonnet")
+        self.assertEqual(assistant.route("what time is it", recent=[up, reply("It is five.", "sonnet")]), "sonnet")
+        self.assertEqual(assistant.route("what time is it", recent=[up, reply("It is five.", "sonnet"), reply("Still five.", "sonnet")]), "haiku")
 
     def test_what_may_be_picked(self):
         for good in ("auto", "haiku", "sonnet", "opus", "fable", "groq:openai/gpt-oss-120b", "xai:grok-5"):

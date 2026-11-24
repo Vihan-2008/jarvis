@@ -91,7 +91,7 @@ Understanding the user (this matters most):
 Getting it done:
 - Your tools really act on this PC: apps, files and websites, music and shows, windows, buttons and boxes by name, the screen, the mouse and keyboard, commands, timers and reminders, volume, web pages, the weather, projects, email and pictures. The less common ones (files, commands, projects, pictures, the clipboard, notes) are reached through the tool called more.
 - A request is finished when the user has what they asked for: the song is playing, the show is running, the page is open at the right place, the text is in the right box. A page of search results is not "playing", and words typed into a search box without Enter are not a search. Take the last step yourself.
-- Pick the most direct tool: play_music for songs and music; play_show for films and series (name a service only if the user did: it uses the one that is open, and otherwise finds where the title is streaming; with no title it carries on what they were watching); find_videos and then open_website for other videos; open_website with site to search inside a site; send_email for email; site_change for the user's websites (list_sites says which are connected; it only makes a preview that the user publishes, so say the preview is ready, never that it is live); use_accounts for their mail, calendar and messages (it tells who, when and the subject; ask for the whole text, with full, only when the user wants to open, read or hear one); media for pause, resume, next and previous. To work inside a window use list_controls and then click_control or type_into: they are fast and exact. Use see_screen with click only when the controls are not listed. On a web page, the page's own controls are the ones listed under "on the page".
+- Pick the most direct tool: play_music for songs and music; play_show for films and series (name a service only if the user did: it uses the one that is open, and otherwise finds where the title is streaming; with no title it carries on what they were watching); find_videos and then open_website for other videos; open_website with site to search inside a site; send_email to send an email (it sends from the account the user names, including the connected account that use_accounts reads their mail in, and its result says which account it went from: tell them); site_change for the user's websites (list_sites says which are connected; it only makes a preview that the user publishes, so say the preview is ready, never that it is live); use_accounts for their mail, calendar and messages (it tells who, when and the subject; ask for the whole text, with full, only when the user wants to open, read or hear one); media for pause, resume, next and previous. To work inside a window use list_controls and then click_control or type_into: they are fast and exact. Use see_screen with click only when the controls are not listed. On a web page, the page's own controls are the ones listed under "on the page".
 - Read what each tool reports. Say that something was done, sent, played or opened only when the report says so. If a report says it could not confirm, look once (list_controls or see_screen) and try the obvious fix once; if that does not work either, stop and tell the user plainly what happened and what is left to do. Never guess, never claim success to be agreeable, and do not keep trying one thing after another.
 - You work in one window at a time: the one you opened, switched to with focus_window, or clicked in. The tools tell you which. JARVIS's own window is never that window. If a tool says a window could not be brought to the front, do not type; use click_control and type_into, or tell the user.
 - To build or change real software (a website, an app, a tool), use create_project if needed and then build_with_coding_agents. That takes minutes: say it has started: its progress and its changes show in this chat. For a small single file such as a simple web page, just write_file it and then open_file it.
@@ -194,13 +194,59 @@ HEAVY = re.compile(
 DEEP = re.compile(r"\b(?:think (?:hard|harder|deeply|carefully)|ultrathink|your best|smartest|most capable|use (?:opus|fable)|with (?:opus|fable))\b", re.I)
 
 
-def route(text: str, research: bool = False, spoken: bool = False) -> str:
+# Doing something in the owner's name, out in the world: worth the stronger model's care.
+ACTS = re.compile(r"\b(?:send|reply|forward|publish|delete|pay|transfer)\b|\bpost (?:it|this|that|on|to)\b|"
+                  r"\b(?:write|draft|compose) (?:an? |the )?(?:e-?mail|message|reply)\b|^\W*e-?mail (?!me\b)\w", re.I)
+# The owner pushing back: JARVIS got it wrong, and the quick model has just shown it did not understand.
+PUSHBACK = re.compile(r"^\W*(?:no|nope|wrong|stop)\b(?!\s+(?:idea|worries|problem|thanks|thank|rush|need|way\b))|\bi (?:said|told you|asked)\b|"
+                      r"\bthat'?s not\b|\bthats not\b|\byou didn'?t\b|\bnot what i\b|\bwhy (?:are|did|didn'?t|aren'?t|won'?t) you\b|"
+                      r"\b(?:moron|idiot|stupid|dumb|useless|wtf|ffs)\b", re.I)
+STRONGER = ("sonnet", "opus", "fable")
+# Talk about email: the model is told every account it can send from, so "use the connected one" means something to it.
+EMAILISH = re.compile(r"\be-?mails?\b|\bmail\b|\binbox\b|\bgmail\b|\boutlook\b|\bconnected account\b", re.I)
+
+
+def _shouting(text: str) -> bool:
+    letters = [c for c in str(text) if c.isalpha()]
+    return len(re.findall(r"[A-Za-z']+", str(text))) >= 3 and sum(c.isupper() for c in letters) >= 0.7 * len(letters)
+
+
+def escalates(text: str, recent=(), heard: bool = False) -> str:
+    """The stronger model a message needs because of the conversation it is in ("" when it does not): the owner is acting
+    in their name, pushing back, answering a question a stronger model asked, or repeating what did not work.
+    heard: picked up by the open microphone, so it may be said to someone else ("no mum, later"): only acting counts."""
+    text = str(text)
+    if ACTS.search(text):
+        return "sonnet"
+    replies = [m for m in recent if isinstance(m, dict) and m.get("role") == "assistant" and m.get("fast")]
+    if not replies:
+        return ""
+    last = replies[-1]
+    if not heard and (PUSHBACK.search(text) or _shouting(text) or last.get("status") == "failed"):
+        return "sonnet"
+    if str(last.get("content") or "").rstrip().endswith("?") and last.get("model") in STRONGER:
+        return str(last["model"])                 # (an answer to its question carries on with the model that asked it)
+    said = " ".join(text.lower().split())
+    if said and not heard and any(m.get("role") == "user" and " ".join(str(m.get("content") or "").lower().split()) == said for m in recent):
+        return "sonnet"                           # (asked again: the last answer did not do it)
+    return ""
+
+
+def route(text: str, research: bool = False, spoken: bool = False, recent=(), heard: bool = False) -> str:
     """The Claude model for a request when the owner leaves the choice to JARVIS: the quick one for everyday talk and
-    commands, a stronger one for writing, analysis and research, the strongest only when asked for."""
+    commands, a stronger one for writing, analysis and research, for acting in the owner's name and whenever the owner has
+    to push back, the strongest only when asked for. recent: the chat's last messages."""
     text = str(text)
     if DEEP.search(text):
         return "fable" if re.search(r"\bfable\b", text, re.I) else "opus"
     if research or HEAVY.search(text) or len(text) > (500 if spoken else 900):
+        return "sonnet"
+    up = escalates(text, recent, heard)
+    if up:
+        return up
+    # Once it had to step up, it stays up for the next two messages: the owner is still sorting out the same thing.
+    replies = [m for m in recent if isinstance(m, dict) and m.get("role") == "assistant" and m.get("fast")]
+    if any(m.get("routed") == "up" for m in replies[-2:]):
         return "sonnet"
     return "haiku"
 
@@ -678,6 +724,7 @@ class Turn:
         self.text, self.research, self.attached, self.before, self.seen = "", False, "", "", ""
         self.how = ""                 # (research) who was asked for by name for this one request; "": the usual choice
         self.choice, self.options, self.helper = "auto", {}, {}
+        self.recent: list = []        # the chat's last messages before this one (which model suits it depends on them)
         self.plan: list[tuple] = []   # the brains that may answer this, in the order they are tried
         self.tried: set[str] = set()
         self.left: list[tuple] = []   # brains that had to stop part of the way through (a usage limit)
@@ -1242,7 +1289,8 @@ class Assistant:
         threading.Thread(target=run, daemon=True, name="assistant-prewarm").start()
 
     # ------------------------------------------------------------------ which brain answers
-    def _first(self, choice: str, text: str, research: bool = False, spoken: bool = False, how: str = "") -> tuple:
+    def _first(self, choice: str, text: str, research: bool = False, spoken: bool = False, how: str = "", recent=(),
+               heard: bool = False) -> tuple:
         """The brain to try first: the one the owner picked, or (left to JARVIS) the one that suits the request.
 
         Research has a choice of its own (`how` for this one request, otherwise the setting): Perplexity at a chosen
@@ -1266,14 +1314,14 @@ class Assistant:
         elif name and service != "claude" and valid_choice(choice):
             spec = ("api", service, name)
         else:
-            spec = ("claude", route(text, research, spoken))
+            spec = ("claude", route(text, research, spoken, recent, heard))
         return ("claude", "sonnet") if research and spec == ("claude", "haiku") else spec
 
     def _plan(self, turn: Turn) -> list[tuple]:
         """Every brain that may answer this request, best first: the one picked (or that suits it); its maker's other models,
         nearest first; the accounts the owner signed in with (Claude, ChatGPT); then the AI services connected with a key."""
         from jcc import codex_brain
-        first = self._first(turn.choice, turn.text, turn.research, turn.spoken, turn.how)
+        first = self._first(turn.choice, turn.text, turn.research, turn.spoken, turn.how, turn.recent, turn.heard)
         plan = [first]
         if first[0] == "claude":
             plan += [("claude", name) for name in reversed(MODELS[:MODELS.index(first[1])])]
@@ -1589,7 +1637,16 @@ class Assistant:
                 return self._instant(text, done, chat_id, spoken, project)
         choice = model if model and valid_choice(model) else (helper["model"] or options["model"])
         how = how if research and valid_research(how) else ""
-        spec = self._first(choice, asked, research, spoken, how)
+        recent = []
+        if chat_id:
+            try:
+                recent = [m for m in Chats(self.cfg).get(chat_id).get("messages", [])[-10:] if isinstance(m, dict)]
+            except (ValueError, OSError):
+                recent = []
+        overheard = bool(heard and spoken and not attached and not research)
+        spec = self._first(choice, asked, research, spoken, how, recent, overheard)
+        # (Left to JARVIS and stepped up because of the conversation: it stays up for the next two messages.)
+        up = choice not in MODELS and not str(choice or "").partition(":")[2] and not research and bool(escalates(asked, recent, overheard))
         lead = self._lead(spec)
         spec = lead or spec
         with self.lock:
@@ -1605,11 +1662,12 @@ class Assistant:
             before = chats.context(chat_id)
             chats.update(chat_id, archived=False, message={"role": "user", "content": text, "receipt": rid})
             chats.update(chat_id, message={"role": "assistant", "content": "", "receipt": rid, "status": "running",
-                                           "agent": "claude" if spec[0] == "claude" else spec[1], "model": spec[-1], "fast": True, "assistant": helper["name"]})
+                                           "agent": "claude" if spec[0] == "claude" else spec[1], "model": spec[-1], "fast": True, "assistant": helper["name"],
+                                           **({"routed": "up"} if up else {})})
             turn = Turn(rid, chat_id, spec[-1], spoken, None)
             turn.text, turn.research, turn.attached, turn.before = asked, bool(research), attached, before
-            turn.choice, turn.options, turn.helper, turn.how = choice, options, helper, how
-            turn.heard = bool(heard and spoken and not attached and not research)
+            turn.choice, turn.options, turn.helper, turn.how, turn.recent = choice, options, helper, how, recent
+            turn.heard = overheard
             turn.noisy = bool(noisy and spoken)
             turn.near = bool(near)
             if interrupts is not None and spoken:
@@ -1683,6 +1741,11 @@ class Assistant:
         if LASTING.search(text) and not plain:
             # Said so that it holds from now on. The AI is reminded to keep it, so the user never has to say it twice.
             prompt += "\n(This sounds like something the user wants from now on: do it, and save it with remember.)"
+        if not plain and (EMAILISH.search(text) or any(EMAILISH.search(str(m.get("content") or "")) for m in turn.recent[-2:])):
+            ways = self._mail_ways(seen)
+            if ways:
+                prompt += ("\n(Email can be sent from: " + ways + ". send_email sends from any of these, the connected account "
+                           "included: pass the user's own words for the account as using. If they have not said which, ask them.)")
         with self.lock:
             direct = [] if plain else self.unseen.pop(chat_id, [])      # (kept for the next brain that can act on the PC)
             told = self.history.get(chat_id, [])
@@ -1716,6 +1779,16 @@ class Assistant:
                        + ('It had said so far: "' + said.strip()[-400:] + '". ' if said.strip() else "")
                        + "Carry on from there and finish what the user asked, without starting over.)")
         return prompt
+
+    def _mail_ways(self, seen: str = "") -> str:
+        """Every account an email can go out from right now, as the owner knows them ("" when that cannot be told)."""
+        try:
+            from jcc import mailer, online
+            smtp = mailer.status(self.cfg)
+            return mailer.listing(mailer.ways(bool(smtp["connected"]), online.connected(self.cfg), online.address(self.cfg),
+                                              settings(self.cfg)["mail"], [seen], smtp["address"]))
+        except (OSError, ValueError, KeyError, TypeError):
+            return ""
 
     def look(self) -> str:
         """What is on the screen now, for the AI. (JCC_NO_SCREEN: tests and previews never read the real screen.)"""

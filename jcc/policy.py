@@ -455,7 +455,10 @@ def _decide(tool: str, args: dict, ctx: Context) -> Decision:
         return _allow()
 
     if tool == "send_email":
-        return _ask("send", f"Shall I send this email to {str(args.get('to', ''))[:80]}?",
+        # The account it goes from is part of the message: the owner says yes to both together.
+        sender = " ".join(str(args.get("from") or "").split())[:120]
+        return _ask("send", f"Send this email to {str(args.get('to', ''))[:80]} from {sender}?" if sender else
+                    f"Shall I send this email to {str(args.get('to', ''))[:80]}?",
                     f"Subject: {args.get('subject', '')}\n\n{args.get('body', '')}", core=True)
 
     return _ask("careful" if careful else "risky", f"Shall I use {tool.replace('_', ' ')}?", redact(str(args))[:300], core=True)

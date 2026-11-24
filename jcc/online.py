@@ -179,7 +179,75 @@ def disconnect(cfg) -> dict:
     secrets.delete("composio")
     with _lock:
         _sessions.clear()
+    try:
+        (cfg.state_dir / ACCOUNT_FILE).unlink(missing_ok=True)       # (its address goes with it)
+    except OSError:
+        pass
     return status(cfg)
+
+
+# ---------------------------------------------------------------------- email from the connected account
+# The connected email account's address, as the helper's reports show it, so JARVIS can name the account it sends from.
+ACCOUNT_FILE = "mail-account.json"
+_EMAIL = r"[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)+"
+# (The report line may come dressed in Markdown: "**Sent from:** <a@b.co>".)
+_SENT_FROM = re.compile(r"^\W*sent from\b\W*(" + _EMAIL + r")", re.I | re.M)
+_NOT_SENT = re.compile(r"^\W*not sent\b\W*(.+)$", re.I | re.M)
+_NOTHING_DONE = re.compile(r"\bnothing was (?:sent|done|changed)\b|\bdid not send\b|\bcould not send\b|\bwas not sent\b", re.I)
+_ACCOUNT_SAID = re.compile(r"\bconnected\b[^.\n]{0,60}?\baccount\b[^.\n@]{0,40}?(" + _EMAIL + r")", re.I)
+
+
+def address(cfg) -> str:
+    """The connected email account's address, once a report has shown it ("" until then)."""
+    saved = read_json(cfg.state_dir / ACCOUNT_FILE, {})
+    found = str((saved if isinstance(saved, dict) else {}).get("address") or "")
+    return found if re.fullmatch(_EMAIL, found) else ""
+
+
+def keep_address(cfg, text: str) -> str:
+    """Remember the connected account's address from a helper's report: the one it sent from, or the one it said it read."""
+    found = _SENT_FROM.search(str(text or "")) or _ACCOUNT_SAID.search(str(text or ""))
+    if not found:
+        return ""
+    value = found.group(1).lower()
+    if value != address(cfg):
+        cfg.state_dir.mkdir(parents=True, exist_ok=True)
+        atomic_write(cfg.state_dir / ACCOUNT_FILE, json.dumps({"address": value}))
+    return value
+
+
+def send_request(to: str, subject: str, body: str, account: str = "", known: str = "") -> str:
+    """What the helper is asked, to send one email from the connected account: the exact message, and a last line that says
+    for certain whether it went and from which address."""
+    named = " ".join(str(account or "").split())[:120]
+    if known:
+        sender = known
+    elif named and not re.fullmatch(r"(?:the |my |your )?(?:connected|composio)?\s*(?:e-?mail\s+)?account", named, re.I):
+        sender = f'the connected email account the user called "{named}"'
+    else:
+        sender = "the connected email account"
+    # (The request reaches the helper on one line, so the body goes as a JSON string: its line breaks are kept as \n.)
+    return (f"Send exactly one email from {sender}, once.\nTo: {to}\nSubject: {subject}\n"
+            f"Body, as a JSON string (send its text word for word, with its line breaks; do not change it, add to it or sign it): "
+            f"{json.dumps(str(body), ensure_ascii=False)}\n"
+            "If that account is not connected or cannot send it, send nothing. Do not send it from any other account.\n"
+            "End your answer with one line on its own: \"Sent from: <the address it was sent from>\" if it was sent, "
+            "or \"Not sent: <why>\" if it was not.")
+
+
+def read_send(text: str) -> dict:
+    """What a helper's report says about a send: {"sent": True, "address"}, {"sent": False, "problem"} or, when it does not
+    say for certain, {"sent": None}. Only a report that names the address it went from counts as sent."""
+    text = str(text or "")
+    failed = _NOT_SENT.search(text)
+    if failed:
+        return {"sent": False, "problem": failed.group(1).strip()[:300]}
+    went = _SENT_FROM.search(text)
+    if went:
+        return {"sent": True, "address": went.group(1).lower()}
+    if _NOTHING_DONE.search(text):
+        return {"sent": False, "problem": " ".join(text.split())[:300]}
+    return {"sent": None}
 
 
 def verify(cfg, opener=None) -> str:
@@ -332,6 +400,8 @@ SIGNED_OUT_CHATGPT_OUT = "Claude is not signed in, and ChatGPT has reached its u
 CLAUDE_OUT ="Claude has reached its usage limit, so nothing was {did} in your accounts. "
 CHATGPT_OUT = "ChatGPT has reached its usage limit, so nothing was {did} in your accounts. "
 SIGN_IN_CHATGPT = " Sign in to ChatGPT in Settings, AI models & accounts, and JARVIS will switch to it when this happens."
+ASKED_MOST = 3000                              # the longest request the helper is given (characters)
+SEND_MOST = 9000                               # ...and the longest email it is asked to send (a 6,000-character body, escaped)
 PARTLY = "The usage limit was reached partway through, so this may be only partly done. Check before asking again."
 NOT_USED = "ChatGPT tried to do something it may not do here, so its answer was not used. Nothing else was done."
 INVENTED = "ChatGPT answered without looking in your accounts, so its answer was not used. Nothing was done."
@@ -446,15 +516,16 @@ def _chatgpt(cfg, chatgpt: bool | None, codex: str | None = None) -> str:
 
 
 def run(cfg, request: str, change: bool = False, name: str = "JARVIS", exe: str | None = None, runner=None, opener=None, timeout: float = EACH,
-        full: bool = False, codex: str | None = None, chatgpt: bool | None = None) -> dict:
+        full: bool = False, codex: str | None = None, chatgpt: bool | None = None, sending: bool = False) -> dict:
     """Have the helper do one thing in the owner's online accounts. Returns {"text", "model", "engine", "usage", "cost"}.
     full: the owner asked to read the whole of one message, thread or document (only for looking up, never with change).
-    codex / chatgpt: the Codex program and whether ChatGPT is signed in (asked of jcc/accounts.py when not given)."""
+    codex / chatgpt: the Codex program and whether ChatGPT is signed in (asked of jcc/accounts.py when not given).
+    sending: this is an email to send (send_request), never a request to connect an account, whatever its words say."""
     full = bool(full) and not change
-    request = redact(" ".join(str(request or "").split()))[:3000]
+    request = redact(" ".join(str(request or "").split()))[:SEND_MOST if sending else ASKED_MOST]
     if not request:
         raise OnlineError("Say what to look up or do.")
-    connect = bool(change) and wants_connection(request)
+    connect = bool(change) and not sending and wants_connection(request)
     did = "changed" if change else "looked up"
     work = cfg.state_dir / "assistant"
     work.mkdir(parents=True, exist_ok=True)

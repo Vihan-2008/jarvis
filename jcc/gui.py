@@ -258,9 +258,13 @@ class GuiState:
             return answer
         if op == "mail":       # how the owner's email goes out, so the tools write it where they really write their mail
             from jcc import assistant as helper, mailer
+            from jcc import online
             if body.get("use") in ("gmail", "app") and helper.settings(self.cfg)["mail"] == "auto":
                 helper.configure(self.cfg, {"mail": body["use"]})
-            return {"connected": bool(mailer.status(self.cfg)["connected"]), "through": helper.settings(self.cfg)["mail"]}
+            smtp = mailer.status(self.cfg)
+            # (Every way it can go: an account set up in JARVIS, the one connected through Composio, the PC's mail app.)
+            return {"connected": bool(smtp["connected"]), "smtp_address": smtp["address"], "through": helper.settings(self.cfg)["mail"],
+                    "online": online.connected(self.cfg), "address": online.address(self.cfg), "app": mailer.app_label()}
         if op == "turn":       # which request the tools are working on, so they start each one without a window left over from the last
             turn = self.assistant.turn_for(sid)
             return {"turn": turn.id if turn else ""}
@@ -446,16 +450,30 @@ class GuiState:
         from jcc import mailer, memory, quick, reminders as clock
         cfg, helper = self.cfg, self.assistant
         if tool == "use_accounts":     # the owner's email, calendar and other online accounts, through a helper of their own (jcc/online.py)
-            from jcc import online, usage as used
-            from jcc.assistant import active_assistant
-            began = time.time()
+            from jcc import online
             whole = {"full": True} if args.get("full") is True and args.get("change") is not True else {}      # the whole of a message, when its owner asked to read it
-            got = (getattr(self, "accounts_runner", None) or online.run)(cfg, str(args.get("request", "")), change=args.get("change") is True, name=active_assistant(cfg)["name"], **whole)
-            spent = got.get("usage") or {}
-            used.log_turn(cfg.state_dir, {"engine": str(got.get("engine") or "claude"), "model": str(got.get("model") or "sonnet") + " (accounts)", "status": "done", "input": spent.get("input_tokens"),
-                                          "cached": spent.get("cache_read_input_tokens"), "written": spent.get("cache_creation_input_tokens"), "output": spent.get("output_tokens"),
-                                          "cost": got.get("cost"), "seconds": time.time() - began})
-            return {"text": str(got.get("text") or "")}
+            text = str(self._accounts(str(args.get("request", "")), args.get("change") is True, **whole).get("text") or "")
+            online.keep_address(cfg, text)        # (so the account can be named when JARVIS sends from it or asks which to use)
+            return {"text": text}
+        if tool == "send_email" and args.get("via") == "online":
+            # From the account connected through Composio: the exact message the owner said yes to, sent once, and a report that
+            # says for certain whether it went. It is never moved to another account when it does not go.
+            from jcc import online
+            request = online.send_request(str(args.get("to", "")), str(args.get("subject", "")), str(args.get("body", "")),
+                                          str(args.get("account") or ""), online.address(cfg))
+            if len(" ".join(request.split())) > online.SEND_MOST:
+                return {"sent": False, "problem": "the message is too long to send through the connected account without being cut short"}
+            try:
+                text = str(self._accounts(request, True, sending=True).get("text") or "")
+            except online.OnlineError as problem:
+                if str(problem) in (online.PARTLY, online.TOO_LONG, online.NOT_USED):
+                    # (Stopped after the helper had begun: it may have gone. Never "not sent", which invites sending it again.)
+                    return {"sent": None, "report": str(problem)}
+                return {"sent": False, "problem": str(problem)}
+            result = online.read_send(text)
+            if result.get("address"):
+                online.keep_address(cfg, "Sent from: " + result["address"])
+            return {**result, "report": " ".join(text.split())[:400]}
         if tool in ("list_sites", "site_read", "site_change", "site_publish"):
             from jcc import sites
             try:
@@ -544,9 +562,25 @@ class GuiState:
             return {"message": "Noted in Quick notes."}
         if tool == "send_email":
             if not mailer.status(cfg)["connected"]:
-                return {"sent": False}
-            return {"sent": True, "message": mailer.send(cfg, str(args.get("to", "")), str(args.get("subject", "")), str(args.get("body", "")))}
+                return {"sent": False, "problem": "No email account is set up in JARVIS itself."}
+            try:
+                return {"sent": True, "message": mailer.send(cfg, str(args.get("to", "")), str(args.get("subject", "")), str(args.get("body", "")))}
+            except (ValueError, OSError) as problem:
+                return {"sent": False, "problem": str(problem)[:300]}
         raise ValueError("Unknown request.")
+
+    def _accounts(self, request: str, change: bool, **more) -> dict:
+        """Have the helper for the owner's online accounts do one thing (jcc/online.py), and count what it used."""
+        from jcc import online, usage as used
+        from jcc.assistant import active_assistant
+        began = time.time()
+        got = (getattr(self, "accounts_runner", None) or online.run)(self.cfg, request, change=change, name=active_assistant(self.cfg)["name"], **more)
+        spent = got.get("usage") or {}
+        used.log_turn(self.cfg.state_dir, {"engine": str(got.get("engine") or "claude"), "model": str(got.get("model") or "sonnet") + " (accounts)", "status": "done",
+                                           "input": spent.get("input_tokens"), "cached": spent.get("cache_read_input_tokens"),
+                                           "written": spent.get("cache_creation_input_tokens"), "output": spent.get("output_tokens"),
+                                           "cost": got.get("cost"), "seconds": time.time() - began})
+        return got
 
     def screenshot(self, body: dict) -> dict:
         """List the open windows, or take a picture of one (or of the whole screen) and keep it as an attachment."""
