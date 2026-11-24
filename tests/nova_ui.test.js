@@ -8,6 +8,57 @@ function load() {
 }
 const { rich } = load();
 
+const voice = fs.readFileSync(path.join(__dirname, '../jcc/static/nova-voice.js'), 'utf8');
+function modelBar(pick, api, save) {
+  const events = {}, kept = { 'jcc-brain': pick }, N = { modelLabel() {} };
+  const context = { N, api, options: {}, Promise, store: { get: k => kept[k], keep: (k, v) => { kept[k] = v; }, set: (k, v) => { kept[k] = v; return save?.(v); } },
+    window: { addEventListener: (k, fn) => { events[k] = fn; } },
+    document: { hidden: false, addEventListener: (k, fn) => { events[k] = fn; }, getElementById: () => null } };
+  vm.createContext(context);
+  vm.runInContext(voice.slice(voice.indexOf('const CLAUDE_PICKS'), voice.indexOf('// "/model"')) + '\nthis.bar = { refreshBrain, brainName, loadGptModels, setBrain, pick: () => brainPick };', context);
+  return { ...context.bar, events, kept, N };
+}
+
+test('model pick refresh validates, updates cached prefs and listens across profiles', async () => {
+  let value = 'opus';
+  const bar = modelBar('sonnet', async () => ({ prefs: { 'jcc-brain': value } }));
+  await bar.events.focus();
+  assert.equal(bar.pick(), 'opus'); assert.equal(bar.kept['jcc-brain'], 'opus');
+  value = '<invalid>'; await bar.refreshBrain(); assert.equal(bar.pick(), 'auto');
+  bar.events.storage({ key: 'jcc-brain', newValue: 'haiku' });
+  assert.equal(bar.pick(), 'haiku'); assert.equal(bar.kept['jcc-brain'], 'haiku');
+  value = 'sonnet'; bar.events.visibilitychange(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(bar.pick(), 'sonnet');
+  assert.match(voice, /await Promise\.race\(\[refreshBrain\(\), new Promise\(resolve => setTimeout\(resolve, 400\)\)\]\)\.catch\(\(\) => \{\}\);\s+const model = brainPick/);
+});
+
+test('a pick just made is saved before the saved pick is read back', async () => {
+  let saved = 'sonnet', landed;
+  const bar = modelBar('sonnet', async () => ({ prefs: { 'jcc-brain': saved } }), v => new Promise(resolve => { landed = () => { saved = v; resolve(); }; }));
+  bar.setBrain('opus');
+  const reading = bar.refreshBrain();
+  await new Promise(resolve => setImmediate(resolve));
+  landed(); await reading;
+  assert.equal(bar.pick(), 'opus', 'the old saved pick must not come back');
+});
+
+test('ChatGPT pick preloads one shared list and has a readable fallback', async () => {
+  let calls = 0, finish;
+  const bar = modelBar('chatgpt:gpt-6.2-sol', () => { calls++; return new Promise(resolve => { finish = resolve; }); });
+  assert.equal(calls, 1); assert.equal(bar.brainName(bar.pick()), 'GPT 6.2 Sol');
+  const pending = bar.loadGptModels(); assert.equal(calls, 1);
+  finish({ models: [{ id: 'gpt-6.2-sol', name: 'GPT Sol' }] }); await pending;
+  assert.equal(bar.brainName(bar.pick()), 'GPT Sol');
+  await bar.loadGptModels(); assert.equal(calls, 1);
+});
+
+test('prefs failures preserve the pick and model list failures preserve readable labels', async () => {
+  const bar = modelBar('chatgpt:gpt-6.2-sol', async () => { throw new Error('offline'); });
+  await bar.refreshBrain(); await bar.loadGptModels();
+  assert.equal(bar.pick(), 'chatgpt:gpt-6.2-sol');
+  assert.equal(bar.brainName(bar.pick()), 'GPT 6.2 Sol');
+});
+
 test('model text can never inject markup or scripts', () => {
   const html = rich('<img src=x onerror=alert(1)> <script>alert(2)</script>\n\n[x](javascript:alert(3)) [y](https://ok.example/a"onmouseover="alert(4))');
   assert.ok(!/<img|<script/i.test(html), html);

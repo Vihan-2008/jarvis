@@ -87,6 +87,19 @@ class TestGuiSecurity(GuiTestCase):
 
 
 class TestGuiApi(GuiTestCase):
+    def test_window_prefs_read_requires_token_and_is_read_only(self):
+        from jcc import placement
+
+        placement.set_pref(self.state.cfg, 'jcc-brain', 'opus')
+        expected = placement.prefs(self.state.cfg)
+        for token in (False, 'wrong'):
+            self.assertEqual(self.req('POST', '/api/window', {'prefs': True}, token=token)[0], 401)
+        status, result = self.req('POST', '/api/window', {'prefs': True})
+        self.assertEqual(status, 200)
+        self.assertEqual(result, {'prefs': expected})
+        self.assertEqual(result['prefs']['jcc-brain'], 'opus')
+        self.assertEqual(placement.prefs(self.state.cfg), expected)
+
     def test_ask_goes_through_engine_and_writes_receipt(self):
         status, r = self.req("POST", "/api/ask", {"text": "what is gravity"})
         self.assertEqual(status, 200)

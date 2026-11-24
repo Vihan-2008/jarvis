@@ -43,9 +43,10 @@ const el = (tag, props = {}, html) => { const node = document.createElement(tag)
 const KEPT = (typeof PREFS === 'object' && PREFS) || {};
 const store = {
   get(k, d) { if (k in KEPT) return KEPT[k]; try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+  keep(k, v) { KEPT[k] = String(v); try { localStorage.setItem(k, v); } catch {} },
   set(k, v) {
     KEPT[k] = String(v); try { localStorage.setItem(k, v); } catch {}
-    try { fetch('/api/window', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-JCC-Token': TOKEN }, body: JSON.stringify({ pref: k, value: String(v) }) }).catch(() => {}); } catch {}
+    try { return fetch('/api/window', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-JCC-Token': TOKEN }, body: JSON.stringify({ pref: k, value: String(v) }) }).catch(() => {}); } catch {}
   },
 };
 // A link in a reply opens in your own browser (where you are signed in to things), not inside JARVIS's window.

@@ -692,6 +692,7 @@ function rest() {   // "stop", "never mind", the Stop button: be quiet and wait 
   if (voiceMode) { setPhase('idle'); hint(speech.settings.wake ? 'Say “Hey ' + (options.assistant?.name || 'JARVIS') + '” or press Space to talk again.' : 'Press Space or tap Talk when you need me.'); }
 }
 async function send(text, spoken, extra = {}) {
+  await Promise.race([refreshBrain(), new Promise(resolve => setTimeout(resolve, 400))]).catch(() => {});
   const model = brainPick === 'auto' ? undefined : brainPick;      // the model bar's pick, typed and spoken alike (Automatic: the default decides)
   expecting = true;
   try {
@@ -847,14 +848,14 @@ N.aiChanged = () => loadServices(false);
 const CLAUDE_PICKS = ['haiku', 'sonnet', 'opus', 'fable'];
 const PICK_SHAPE = /^[\w.\/:@\- ]{1,140}$/;
 let brainPick = (() => { const kept = String(store.get('jcc-brain', 'auto') || 'auto'); return PICK_SHAPE.test(kept) ? kept : 'auto'; })();
-let gptModels = null, gptAll = false, resting = {};
+let gptModels = null, gptLoading = null, gptAll = false, resting = {}, brainRead = 0, brainSaving = null;
 const serviceModels = {}, serviceOpen = {};      // serviceModels[id]: 'loading', {error}, or the names
 const titled = s => s ? s[0].toUpperCase() + s.slice(1) : '';
 function brainName(value) {
   if (!value || value === 'auto') return 'Automatic';
   if (CLAUDE_PICKS.includes(value)) return titled(value);
   const at = value.indexOf(':'), service = value.slice(0, at), model = value.slice(at + 1);
-  if (service === 'chatgpt') return model === 'default' ? 'ChatGPT' : ((gptModels || []).find(m => m.id === model) || {}).name || model;
+  if (service === 'chatgpt') return model === 'default' ? 'ChatGPT' : ((gptModels || []).find(m => m.id === model) || {}).name || modelTitle(model).replace(/^Gpt\b/, 'GPT');
   return modelTitle(model) || service;
 }
 // A service's model id as a name: "gemini-2.5-flash-lite" is "Gemini 2.5 Flash Lite".
@@ -869,8 +870,29 @@ function restingUntil(value) {
   const until = Math.max(0, ...keys.map(k => Number(resting[k]) || 0));
   return until * 1000 > Date.now() ? until : 0;
 }
+function loadGptModels() {
+  if (gptModels !== null) return Promise.resolve();
+  return gptLoading ||= api('/api/providers', { action: 'account_models', id: 'chatgpt' }).then(got => { gptModels = got.models || []; }, () => { gptModels = []; }).then(() => { N.modelLabel?.(); });
+}
+function brainLabelModels() {
+  if (brainPick.startsWith('chatgpt:') && brainPick !== 'chatgpt:default') loadGptModels();
+}
+function keepBrain(value) {
+  value = String(value || 'auto'); brainPick = PICK_SHAPE.test(value) ? value : 'auto';
+  store.keep('jcc-brain', brainPick); N.modelLabel?.(); brainLabelModels();
+}
+async function refreshBrain() {
+  const read = ++brainRead;
+  // (A pick just made here is saved first: read before it lands, the old pick would come back and undo it.)
+  try { await brainSaving; const got = await api('/api/window', { prefs: true }); if (read === brainRead) keepBrain(got.prefs?.['jcc-brain']); } catch {}
+}
+// The listening window has its own browser profile, so it must read the saved pick.
+window.addEventListener('focus', refreshBrain);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshBrain(); });
+window.addEventListener('storage', event => { if (event.key === 'jcc-brain') { ++brainRead; keepBrain(event.newValue); } });
+brainLabelModels();
 function setBrain(value) {
-  brainPick = PICK_SHAPE.test(value) ? value : 'auto'; store.set('jcc-brain', brainPick); N.modelLabel?.();
+  ++brainRead; brainPick = PICK_SHAPE.test(value) ? value : 'auto'; brainSaving = store.set('jcc-brain', brainPick); N.modelLabel?.(); brainLabelModels();
   document.getElementById('nv-model-name')?.closest('button')?.focus();
 }
 // "/model" opens the menu; "/model opus", "/model chatgpt", "/model gemini" or "/model auto" picks.
@@ -897,7 +919,7 @@ N.brainMenu = p => {
   if (pickedIn && brainPick !== pickedIn.id + ':' + pickedIn.model) serviceOpen[pickedIn.id] = true;
   const filters = {};
   let focusAfter = '';      // a list just unfolded: once it is there, the keyboard goes to its filter, or its first model
-  if (chatgpt && gptModels === null) api('/api/providers', { action: 'account_models', id: 'chatgpt' }).then(got => { gptModels = got.models || []; }, () => { gptModels = []; }).then(() => { if (p.isConnected) draw(); });
+  if (chatgpt && gptModels === null) loadGptModels().then(() => { if (p.isConnected) draw(); });
   api('/api/providers', { action: 'resting' }).then(got => { resting = got.resting || {}; if (p.isConnected) draw(); }, () => {});
   function draw() {
     const was = document.activeElement?.dataset?.brain;

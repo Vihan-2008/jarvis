@@ -1223,6 +1223,8 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                     self._json(HTTPStatus.OK, result);return
                 if self.path == '/api/window':               # the app window says where it is, so it can open there next time
                     from jcc import placement
+                    if body.get('prefs') is True:
+                        self._json(HTTPStatus.OK, {'prefs': placement.prefs(state.cfg)});return
                     if 'pref' in body:                       # ...and what its owner chose in it (theme, panel width)
                         self._json(HTTPStatus.OK, placement.set_pref(state.cfg, body.get('pref'), body.get('value')));return
                     if 'fullscreen' in body:                 # into or out of full screen, and that is how it opens next time
