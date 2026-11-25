@@ -77,15 +77,25 @@ def app_label() -> str:
     return (_app_name + " on this PC") if _app_name else "the mail app on this PC"
 
 
+def outlook_label(account: str) -> str:
+    """What JARVIS calls an account in classic Outlook on this PC: in its questions, its answers and the email's "from"."""
+    return f"Outlook on this PC ({str(account).lower()})"
+
+
 def ways(smtp: bool = False, online: bool = False, address: str = "", preferred: str = "auto", titles=(), smtp_address: str = "",
-         app: str = "") -> list[tuple[str, str]]:
-    """Every way an email can go out right now, as (way, what the owner calls it)."""
+         app: str = "", outlook=()) -> list[tuple[str, str]]:
+    """Every way an email can go out right now, as (way, what the owner calls it). outlook: the accounts the owner let
+    JARVIS use in classic Outlook on this PC (jcc/outlook.py); each is a way of its own, "outlook:<address>"."""
     found = []
     if online:
         found.append(("online", f"your connected account ({address})" if address else "your connected account"))
     if smtp:
         found.append(("account", f"your email account in JARVIS ({smtp_address})" if smtp_address else "your email account in JARVIS"))
-    found.append(("app", app or app_label()))
+    for account in outlook or ():
+        found.append(("outlook:" + str(account).lower(), outlook_label(account)))
+    label = app or app_label()
+    if not (outlook and re.match(r"\s*outlook\b", label, re.I)):
+        found.append(("app", label))         # (while Outlook itself sends, a draft in the same Outlook would be the same mail twice over)
     if preferred == "gmail" or any(re.search(r"\bgmail\b", str(title), re.I) for title in titles):
         found.append(("gmail", "Gmail in your browser"))
     return found
@@ -97,17 +107,53 @@ def listing(found) -> str:
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + ", or " + names[-1]
 
 
+_OUTLOOK_MAIL = ("@outlook.com", "@hotmail.com", "@live.com", "@msn.com")
+_FILLER = frozenset("my the a an from with using use via through in on by send it its me email e-mail mail account address "
+                    "work school office business personal outlook connected composio new classic app one this pc please but and".split())
+_CONNECTED = re.compile(r"\b(connected|composio)\b")
+# "not the connected one", "anything except Outlook", "instead of asha.k": a negator directly before what is ruled out.
+# ("no, the connected account" is a yes: a bare "no" rules nothing out.)
+_NEGATED = re.compile(r"\b(?:not|instead of|rather than|other than|except)\s+(?:(?:the|my|that|from|using|use|through|via|with|in)\s+)*"
+                      r"([a-z0-9][a-z0-9.@+_\-]*)")
+_SAME_AS = {"composio": "connected", "google": "gmail"}           # (what a ruled-out word is called in the list of ways)
+
+
+def _choose_negated(said: str, connected: bool, preferred: str, titles, online: bool, address: str, smtp_address: str,
+                    outlook: list[str], app: str) -> str:
+    """choose() when the owner ruled a way out ("not asha.k", "not Outlook"): never that way. The rest of what they said
+    chooses among the others, and when that is not clear, they are asked."""
+    found = ways(connected, online, address, preferred, titles, smtp_address, app=app, outlook=outlook)
+    out = {_SAME_AS.get(word.strip("."), word.strip(".")) for word in _NEGATED.findall(said)}
+    out = {word for word in out if len(word) > 2 and word not in ("the", "one", "this", "that", "its", "you", "your")}
+    excluded = {way for way, label in found if any(word in label.lower() or word == way for word in out)}
+    rest = " ".join(_NEGATED.sub(" ", said).split())
+    if [w for w in re.findall(r"[a-z0-9][a-z0-9.\-_+@]*", rest) if w not in _FILLER]:
+        picked = choose(rest, connected, preferred, titles, online, address, smtp_address, outlook, app)
+        return "ask" if picked in excluded else picked
+    left = [way for way, _ in found if way not in excluded]
+    return left[0] if len(left) == 1 else "ask"
+
+
 def choose(using: str = "", connected: bool = False, preferred: str = "auto", titles=(), online: bool = False, address: str = "",
-           smtp_address: str = "") -> str:
+           smtp_address: str = "", outlook=(), app: str = "") -> str:
     """Which way a message goes: "online" (the account connected through Composio: the one the assistant reads mail in),
-    "account" (an account set up in JARVIS itself), "gmail" (Gmail in the browser) or "app" (the PC's mail app). Or
-    "ask": more than one could send it and the owner has not said which. Or "none": they named one that cannot send it.
+    "account" (an account set up in JARVIS itself), "outlook:<address>" (that account in classic Outlook on this PC),
+    "gmail" (Gmail in the browser) or "app" (the PC's mail app). Or "ask": more than one could send it and the owner has
+    not said which. Or "none": they named one that cannot send it.
 
     using: what the owner said, if they named one ("from asha.k", "with Outlook", "connected account").
     connected: an account is set up in JARVIS itself (smtp_address).  online: one is connected through Composio (address,
-    once it is known).  titles: the windows that are open."""
+    once it is known).  outlook: the Outlook accounts the owner let JARVIS use.  titles: the windows that are open.
+    app: what the PC's mail app is called (looked up when not given)."""
     said = " ".join(str(using or "").lower().split())
     gmail_open = preferred == "gmail" or any(re.search(r"\bgmail\b", str(title), re.I) for title in titles)
+    outlook = [str(a).lower() for a in outlook or () if str(a).strip()]
+    if said and _NEGATED.search(said):
+        return _choose_negated(said, connected, preferred, titles, online, address, smtp_address, outlook, app)
+    if outlook:
+        picked = _choose_with_outlook(said, outlook, connected, preferred, titles, online, address, smtp_address, app)
+        if picked:
+            return picked
     if said:
         if _APP_WORDS.search(said):
             return "app"
@@ -132,6 +178,62 @@ def choose(using: str = "", connected: bool = False, preferred: str = "auto", ti
     if preferred in ("gmail", "app") and not online and not connected:
         return preferred                  # (the owner chose where their mail is written when no account is connected)
     found = ways(connected, online, address, preferred, titles, smtp_address, app="-")
+    return found[0][0] if len(found) == 1 else "ask"
+
+
+def _choose_with_outlook(said: str, outlook: list[str], connected: bool, preferred: str, titles, online: bool, address: str,
+                         smtp_address: str, app: str) -> str:
+    """choose() while Outlook on this PC is switched on: "" leaves the choice to the rules for when it is off."""
+    address, smtp_address = address.lower(), smtp_address.lower()
+    if not said:
+        found = ways(connected, online, address, preferred, titles, smtp_address, app=app, outlook=outlook)
+        return found[0][0] if len(found) == 1 else "ask"
+    named = ADDRESS.search(said)
+    if online and _CONNECTED.search(said):
+        # JARVIS calls the Composio one "your connected account": an answer that says so never goes through Outlook.
+        # ("not the connected one" never reaches here: choose() takes out what the owner ruled out first.)
+        wanted = named.group(0).lower().strip(".") if named else ""
+        # (unless it names an address that is not the connected one: then which of the two they meant is not clear)
+        return "ask" if wanted and wanted != address and (address or wanted in outlook) else "online"
+    app_is_outlook = bool(re.match(r"\s*outlook\b", app or app_label(), re.I))
+    if named:
+        wanted = named.group(0).lower().strip(".")
+        if wanted in outlook:
+            # The same account in Outlook and through Composio: two ways to send one person's mail, so the owner says which.
+            return "ask" if online and address and wanted == address else "outlook:" + wanted
+        if _APP_WORDS.search(said) and not app_is_outlook:
+            return ""                     # (another mail app: as when Outlook is off)
+        if connected and wanted == smtp_address:
+            return "account"
+        if online and (not address or wanted == address):
+            return "online"
+        return "none"                     # (an Outlook account the owner did not tick included: it is never used)
+    if re.search(r"\boutlook\b", said) or (app_is_outlook and _APP_WORDS.search(said)):
+        picks = {"outlook:" + a: a for a in outlook}
+        if online and address.endswith(_OUTLOOK_MAIL):
+            picks["online"] = address
+        words = [w for w in re.findall(r"[a-z0-9][a-z0-9.\-_+]*", said) if w not in _FILLER]
+        if words:                         # ("Outlook, but with asha.k": the other words say which of them)
+            picks = {way: known for way, known in picks.items() if known and all(w in known for w in words)} or picks
+        return next(iter(picks)) if len(picks) == 1 else "ask"
+    if _APP_WORDS.search(said) or _BROWSER_WORDS.search(said):
+        return ""                         # (another mail app, or Gmail in the browser)
+    candidates = {"outlook:" + a: a for a in outlook}
+    if online:
+        candidates["online"] = address
+    if connected:
+        candidates["account"] = smtp_address
+    words = [w for w in re.findall(r"[a-z0-9][a-z0-9.\-_+]*", said) if w not in _FILLER]
+    if words:
+        hits = [way for way, known in candidates.items() if known and all(w in known for w in words)]
+        if len(hits) == 1:
+            return hits[0]
+        if not hits and _GOOGLE_WORDS.search(said) and not any(a.endswith(_GOOGLE_MAIL) for a in outlook):
+            return ""                     # ("my Gmail", and no Outlook account is a Gmail one: as when Outlook is off)
+        return "ask"
+    if online and _ACCOUNT_WORDS.search(said):
+        return "ask"                      # ("my account": Outlook's accounts are the owner's too)
+    found = ways(connected, online, address, preferred, titles, smtp_address, app=app, outlook=outlook)
     return found[0][0] if len(found) == 1 else "ask"
 
 

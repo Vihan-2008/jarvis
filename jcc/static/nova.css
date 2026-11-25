@@ -1185,6 +1185,7 @@ dialog.nv-settings[open]{display:flex;flex-direction:column;height:min(88vh,820p
 .nv-settings .assistant-check input[type=checkbox]::after{content:"";position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:var(--ink-2);transition:transform var(--fast),background var(--fast)}
 .nv-settings .assistant-check input[type=checkbox]:checked{background:var(--accent);border-color:var(--accent)}
 .nv-settings .assistant-check input[type=checkbox]:checked::after{transform:translateX(17px);background:#fff}
+.nv-settings .assistant-check input[type=checkbox]:disabled{opacity:.45;cursor:default}
 @media (max-width:760px){.nv-set-main{grid-template-columns:1fr}.nv-set-side{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line)}
   .nv-settings .nv-set-tabs{flex-direction:row}.nv-settings .nv-set-tabs hr,.nv-set-search{display:none}.nv-settings .nv-field{grid-template-columns:1fr}}
 

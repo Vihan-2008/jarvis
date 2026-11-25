@@ -136,12 +136,20 @@ def overview(cfg) -> list[dict]:
                                "Allowed" if yes else "Not allowed yet" if yes is False else "Could not be checked",
                                how=f"Open System Settings, Privacy & Security, {where}, and switch on JARVIS (or Terminal, if you started it from there)."))
     mail = mailer.status(cfg)
+    from jcc import outlook
+    try:
+        desk = outlook.card(cfg)          # (the registry and the owner's choices only: Outlook itself is never started for this list)
+    except Exception:  # noqa: BLE001 - a damaged settings file or registry must not break the list
+        desk = None
+    by_outlook = " Email from your Outlook accounts is sent by Outlook itself." if desk and desk["state"] == "ok" else ""
     items.append(_item("mail", "hands", "Email", "Sending email for you, after you have said yes to each one.",
                        "ok" if mail["connected"] else "off", ("Connected as " + mail["address"]) if mail["connected"] else "Not connected",
-                       detail="" if mail["connected"] else {"gmail": "Without an account JARVIS writes the email in Gmail in your browser, shows it to you, and sends it after your yes.",
+                       detail=by_outlook.strip() if mail["connected"] else {"gmail": "Without an account JARVIS writes the email in Gmail in your browser, shows it to you, and sends it after your yes.",
                                                             "app": "Without an account JARVIS writes the email in the mail app on this PC, shows it to you, and sends it after your yes."}.get(
-                           options["mail"], "Without an account JARVIS writes the email where you write your mail (Gmail in your browser, or your mail app), shows it to you, and sends it after your yes."),
+                           options["mail"], "Without an account JARVIS writes the email where you write your mail (Gmail in your browser, or your mail app), shows it to you, and sends it after your yes.") + by_outlook,
                        open="email", check=mail["connected"]))
+    if desk:
+        items.append(desk)
     from jcc import online
     linked = online.connected(cfg)
     items.append(_item("accounts", "hands", "Email, calendar and other online accounts", "Lets JARVIS look things up in Gmail, Outlook, Google Calendar and hundreds of "
@@ -153,7 +161,8 @@ def overview(cfg) -> list[dict]:
                                 + online.settings(cfg)["user"] + "” are used.")) if linked else "",
                        user=online.settings(cfg)["user"] if linked and not online.consumer() else "",
                        how="Make a free account at composio.dev, copy your API key from the Composio dashboard (it starts with ck_ or ak_), "
-                           "and paste it here."))
+                           "and paste it here." + (" If your work account asks for an admin's approval, use “Outlook on this PC” "
+                                                   "in this list instead." if desk else "")))
     added = read_json(cfg.state_dir / "connectors.json", {}).get("mcpServers", {})
     names = sorted(str(name) for name in added) if isinstance(added, dict) else []
     items.append(_item("connectors", "hands", "Connectors", "Extra tools you have added yourself (a calendar, Gmail, a database).",
@@ -213,8 +222,8 @@ def _held(lock_path) -> bool:
         return False
 
 
-def check(cfg, ident: str) -> dict:
-    """Really try one connection now. Returns {"ok", "status"}; never a key."""
+def check(cfg, ident: str, run=None) -> dict:
+    """Really try one connection now. Returns {"ok", "status"}; never a key. run: stands in for PowerShell (tests)."""
     from jcc import mailer, quota, speech
     if ident in ("groq", "openai"):
         secret = secrets.get(ident)
@@ -251,4 +260,9 @@ def check(cfg, ident: str) -> dict:
             return {"ok": True, "status": mailer.verify(cfg)}
         except (ValueError, OSError) as problem:
             return {"ok": False, "status": str(problem)[:200]}
+    if ident == "outlook":
+        from jcc import outlook
+        if not outlook.settings(cfg)["on"]:
+            return {"ok": False, "status": "Outlook is not switched on in JARVIS. Switch it on in Settings, Email."}
+        return outlook.check(cfg, run=run)
     raise ValueError("That cannot be checked from here.")

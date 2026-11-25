@@ -83,11 +83,13 @@ class TestConnections(SpeechMixin, EngineTestCase):
             self.assertNotIn(secret, shown)
 
     def test_damaged_files_do_not_break_the_list(self):
-        for name in ("quota-claude.json", "connectors.json", "github-status.json", "cloud-memory-status.json", "tray-status.json", "mail.json", "speech.json", "assistant.json"):
+        for name in ("quota-claude.json", "connectors.json", "github-status.json", "cloud-memory-status.json", "tray-status.json", "mail.json", "speech.json",
+                     "assistant.json", "outlook.json"):
             (self.cfg.state_dir / name).write_text("{", "utf-8")
         (self.cfg.state_dir / "capture-chatgpt-status.json").write_text('["odd"]', "utf-8")
         from jcc import system
-        self.assertEqual(len(self.by_id()), 17 + (2 if system.kind() == "mac" else 0))
+        # (a Mac also shows the two things macOS must allow; Windows shows Outlook on this PC)
+        self.assertEqual(len(self.by_id()), 17 + {"mac": 2, "windows": 1}.get(system.kind(), 0))
 
     def test_each_connection_can_really_be_checked(self):
         self.assertEqual(connections.check(self.cfg, "groq"), {"ok": False, "status": "No key is saved."})
@@ -130,7 +132,7 @@ class TestConnectionsApi(GuiTestCase):
         self.assertEqual(status, 200)
         self.assertEqual([group[0] for group in data["groups"]], ["brain", "voice", "hands", "memory"])
         from jcc import system
-        count = 17 + (2 if system.kind() == "mac" else 0)          # (a Mac also shows the two things macOS must allow)
+        count = 17 + {"mac": 2, "windows": 1}.get(system.kind(), 0)     # (a Mac also shows the two things macOS must allow; Windows, Outlook)
         self.assertEqual(len(data["items"]), count)
         self.assertEqual(data["summary"]["of"], count)
         self.assertEqual(self.req("GET", "/api/connections", token=False)[0], 401)

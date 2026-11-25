@@ -113,14 +113,14 @@ STEP_WORDS = {"open_app": "Opening {name}", "open_website": "Opening {address_or
               "write_clipboard": "Copying it for you", "media": "Controlling playback", "set_volume": "Changing the volume",
               "set_brightness": "Changing the brightness", "lock_pc": "Locking the PC", "read_web_page": "Reading a web page",
               "find_videos": "Looking for {query} on YouTube", "play_music": "Playing {query}", "play_show": "Putting on {title}",
-              "where_to_watch": "Finding where {title} is streaming",
+              "where_to_watch": "Finding where {title} is streaming", "use_outlook": "Looking in Outlook",
               "WebSearch": "Searching the web"}
 
 
 # What JARVIS says the moment the AI starts on something that takes a moment, so the user hears it at once (about a second
 # after they stop talking) instead of waiting in silence until it is finished. Quick things (pause, volume, a timer) need none.
 LEAD_WORDS = {"open_app": "Opening {name}.", "play_music": "Putting on {query}.", "play_show": "Putting on {title}.", "send_email": "Writing the email.",
-              "focus_window": "Switching to {title}.", "move_window": "Moving it.", "click_control": "One moment.", "type_into": "One moment.", "use_accounts": "Checking your accounts.",
+              "focus_window": "Switching to {title}.", "move_window": "Moving it.", "click_control": "One moment.", "type_into": "One moment.", "use_accounts": "Checking your accounts.", "use_outlook": "Checking Outlook.",
               "set_reminder": "Setting that up.", "add_note": "Noting that.", "weather": "Checking the weather.",
               "find_videos": "Looking for it.", "where_to_watch": "Finding where it is.", "read_web_page": "Reading that.", "WebSearch": "Looking that up.", "build_with_coding_agents": "Starting the build.",
               "make_image": "Making the picture.", "create_project": "Creating the project.", "find_files": "Looking for it.", "run_command": "One moment.",
@@ -1746,6 +1746,8 @@ class Assistant:
             if ways:
                 prompt += ("\n(Email can be sent from: " + ways + ". send_email sends from any of these, the connected account "
                            "included: pass the user's own words for the account as using. If they have not said which, ask them.)")
+            if "Outlook on this PC (" in ways:
+                prompt += "\n(Their mail and calendar in Outlook on this PC are read with use_outlook.)"
         with self.lock:
             direct = [] if plain else self.unseen.pop(chat_id, [])      # (kept for the next brain that can act on the PC)
             told = self.history.get(chat_id, [])
@@ -1783,10 +1785,10 @@ class Assistant:
     def _mail_ways(self, seen: str = "") -> str:
         """Every account an email can go out from right now, as the owner knows them ("" when that cannot be told)."""
         try:
-            from jcc import mailer, online
+            from jcc import mailer, online, outlook
             smtp = mailer.status(self.cfg)
             return mailer.listing(mailer.ways(bool(smtp["connected"]), online.connected(self.cfg), online.address(self.cfg),
-                                              settings(self.cfg)["mail"], [seen], smtp["address"]))
+                                              settings(self.cfg)["mail"], [seen], smtp["address"], outlook=outlook.ticked(self.cfg)))
         except (OSError, ValueError, KeyError, TypeError):
             return ""
 

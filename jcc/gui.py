@@ -49,7 +49,7 @@ SCRIPTS = ("/workbench.js", "/assistant.js", "/horizon.js", "/horizon.css", "/de
            "/nova-audio.js", "/nova-mic.js", "/nova-work.js", "/nova-security.js", "/nova-permissions.js", "/nova-routines.js", "/nova-kinds.js", "/nova-gallery.js", "/nova-start.js", "/nova-sites.js", "/nova-connectors.js", "/vendor/xterm.js", "/vendor/xterm.css", "/vendor/addon-fit.js")
 # Tools the JARVIS app itself carries out for the assistant, each only with a one-time permit from the gate.
 APP_TOOLS = frozenset({"open_app", "list_projects", "create_project", "build_with_coding_agents", "make_image", "set_timer", "set_reminder",
-                       "list_reminders", "cancel_reminder", "remember", "forget", "add_note", "send_email", "use_accounts",
+                       "list_reminders", "cancel_reminder", "remember", "forget", "add_note", "send_email", "use_accounts", "use_outlook",
                        "list_sites", "site_read", "site_change", "site_publish"})
 # A page JARVIS shows (something a reply made, a file of a project, a pinned panel) runs in a sealed frame at an address of
 # its own: it cannot reach JARVIS, the conversation or the files on this PC. Sealed, it cannot reach the internet either: no
@@ -261,10 +261,13 @@ class GuiState:
             from jcc import online
             if body.get("use") in ("gmail", "app") and helper.settings(self.cfg)["mail"] == "auto":
                 helper.configure(self.cfg, {"mail": body["use"]})
+            from jcc import outlook
             smtp = mailer.status(self.cfg)
-            # (Every way it can go: an account set up in JARVIS, the one connected through Composio, the PC's mail app.)
+            # (Every way it can go: an account set up in JARVIS, the one connected through Composio, the accounts the owner
+            # switched on in classic Outlook, the PC's mail app. Only the owner's settings change which Outlook accounts.)
             return {"connected": bool(smtp["connected"]), "smtp_address": smtp["address"], "through": helper.settings(self.cfg)["mail"],
-                    "online": online.connected(self.cfg), "address": online.address(self.cfg), "app": mailer.app_label()}
+                    "online": online.connected(self.cfg), "address": online.address(self.cfg), "app": mailer.app_label(),
+                    "outlook_on": outlook.settings(self.cfg)["on"], "outlook": outlook.ticked(self.cfg)}
         if op == "turn":       # which request the tools are working on, so they start each one without a window left over from the last
             turn = self.assistant.turn_for(sid)
             return {"turn": turn.id if turn else ""}
@@ -474,6 +477,23 @@ class GuiState:
             if result.get("address"):
                 online.keep_address(cfg, "Sent from: " + result["address"])
             return {**result, "report": " ".join(text.split())[:400]}
+        if tool == "use_outlook":      # the owner's mail and calendar in classic Outlook on this PC, read only (jcc/outlook.py)
+            from jcc import outlook
+            asked = {key: args[key] for key in ("action", "account", "folder", "query", "from_person", "unread", "since", "until", "limit", "id")
+                     if key in args}
+            try:
+                return {"text": outlook.look(cfg, run=getattr(self, "outlook_runner", None), **asked)}
+            except outlook.OutlookError as problem:
+                return {"error": str(problem)}
+        if tool == "send_email" and args.get("via") == "outlook":
+            # From one Outlook account the owner switched on: the exact message they said yes to, from the account named in
+            # the question they answered, sent once. Outlook itself sends it.
+            from jcc import outlook
+            account = str(args.get("account") or "").lower()
+            if str(args.get("from") or "") != mailer.outlook_label(account):
+                return {"sent": False, "problem": "the account asked about and the account to send from were not the same"}
+            return outlook.send(cfg, account, str(args.get("to", "")), str(args.get("subject", "")), str(args.get("body", "")),
+                                run=getattr(self, "outlook_runner", None))
         if tool in ("list_sites", "site_read", "site_change", "site_publish"):
             from jcc import sites
             try:
@@ -987,7 +1007,9 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                     elif url.path == '/api/speech/voices':
                         result = {'voices': speech.voices(state.cfg)}
                     elif url.path == '/api/mail':
-                        result = mailer.status(state.cfg)
+                        from jcc import outlook
+                        desk = outlook.card(state.cfg)      # (Outlook on this PC: the registry and the owner's choices, never Outlook itself)
+                        result = {**mailer.status(state.cfg), **({'outlook': {**outlook.public(state.cfg), 'card': desk}} if desk else {})}
                     else:
                         result = helper.assistants(state.cfg)
                     self._json(HTTPStatus.OK, result)
@@ -1284,12 +1306,21 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                     if body.get('action') == 'accounts_user':      # whose accounts at Composio are used (the name they were connected under)
                         from jcc import online
                         self._json(HTTPStatus.OK, online.configure(state.cfg, body.get('user')));return
+                    if body.get('action') == 'outlook':            # the owner switches Outlook on this PC on or off, or ticks its accounts
+                        from jcc import outlook
+                        try:
+                            if 'on' in body: result = outlook.switch(state.cfg, body.get('on') is True, run=getattr(state, 'outlook_runner', None))
+                            elif 'accounts' in body: result = outlook.choose_accounts(state.cfg, body.get('accounts') if isinstance(body.get('accounts'), list) else [])
+                            else: result = outlook.public(state.cfg)
+                        except outlook.OutlookError as problem:
+                            result = {**outlook.public(state.cfg), 'problem': str(problem)}
+                        self._json(HTTPStatus.OK, {**result, 'card': outlook.card(state.cfg)});return
                     if body.get('action') == 'mac_settings':       # the page of System Settings where a permission is switched on
                         from jcc import macdesk, system
                         if system.kind() != 'mac': raise ValueError('That is on a Mac only.')
                         self._json(HTTPStatus.OK, {'opened': macdesk.open_settings(str(body.get('which', '')))});return
                     if body.get('action') != 'check': raise ValueError('Unknown request.')
-                    self._json(HTTPStatus.OK, connections.check(state.cfg, str(body.get('id', ''))));return
+                    self._json(HTTPStatus.OK, connections.check(state.cfg, str(body.get('id', '')), run=getattr(state, 'outlook_runner', None)));return
                 if self.path == '/api/mail':
                     from jcc import mailer
                     action = body.get('action')

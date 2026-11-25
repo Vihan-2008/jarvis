@@ -39,7 +39,7 @@ ALLOW, CONFIRM, DENY = "allow", "confirm", "deny"
 # Tools that do not touch the computer itself; they stay available when PC control is switched off.
 WITHOUT_PC = frozenset({"set_timer", "set_reminder", "list_reminders", "cancel_reminder", "weather", "where_to_watch", "remember", "forget", "add_note",
                         "read_web_page", "make_image", "list_projects", "create_project", "build_with_coding_agents", "connector", "use_accounts",
-                        "list_sites", "site_read", "site_change", "site_publish"})
+                        "use_outlook", "list_sites", "site_read", "site_change", "site_publish"})
 
 def _on_mac() -> bool:
     from jcc import system
@@ -266,7 +266,7 @@ PLAN_FIRST = ("Plan mode is on: the owner wants a plan before anything is change
 def decide(tool: str, args: dict, ctx: Context) -> Decision:
     """The single place where an assistant action is allowed, held for a yes, or refused."""
     decision = _decide(tool, args, ctx)
-    looks = tool in QUIET_TOOLS or tool in PLAN_LOOKS or (tool == "use_accounts" and not (args or {}).get("change"))
+    looks = tool in QUIET_TOOLS or tool in PLAN_LOOKS or tool == "use_outlook" or (tool == "use_accounts" and not (args or {}).get("change"))
     if ctx.level == "plan" and decision.verdict != DENY and not looks:
         return _deny(PLAN_FIRST)
     if ctx.level == "all" and decision.verdict == ALLOW and tool not in QUIET_TOOLS:
@@ -275,7 +275,7 @@ def decide(tool: str, args: dict, ctx: Context) -> Decision:
                 "click": "click there", "click_control": "press “" + (ctx.control or str(given.get("name", "")))[:40] + "”",
                 "type_text": "type that", "type_into": "type that", "press_keys": "press " + str(given.get("keys", "that key"))[:30],
                 "run_command": "run that command", "write_file": "write that file", "play_music": "play that", "play_show": "put that on",
-                "write_email": "write that email"}.get(tool, "use " + tool.replace("_", " "))
+                "write_email": "write that email", "use_outlook": "look this up in your Outlook"}.get(tool, "use " + tool.replace("_", " "))
         return _ask("all", f"Shall I {what}?", redact(str(given))[:300])
     return decision
 
@@ -318,6 +318,12 @@ def _decide(tool: str, args: dict, ctx: Context) -> Decision:
         if args.get("change"):
             return _ask("send", "Shall I do this in your online accounts?", request, core=True)
         return _ask("careful", "Shall I look this up in your online accounts?", request) if careful else _allow()
+
+    if tool == "use_outlook":
+        # The owner's mail and calendar in classic Outlook on this PC (jcc/outlook.py): it only reads, and only the accounts
+        # the owner switched on. Sending goes through send_email, which is always asked about.
+        what = " ".join(str(args.get(key) or "") for key in ("action", "folder", "query", "from_person") if args.get(key))
+        return _ask("careful", "Shall I look this up in your Outlook?", what[:300]) if careful else _allow()
 
     if tool in ("remember", "forget"):
         # Memory is read at the start of every future chat, so outside content must not be able to write it.
@@ -494,7 +500,7 @@ def marks(tool: str, args: dict) -> tuple[bool, bool]:
         return reads_content(str((args or {}).get("command", ""))), True
     if short == "list_projects":
         return False, True
-    if short == "use_accounts":
+    if short in ("use_accounts", "use_outlook"):
         return True, True  # emails and invitations are other people's writing, and the owner's own business
     if short == "connector" or (tool.startswith("mcp__") and not tool.startswith("mcp__jarvis__")):
         return True, True  # a connector the owner added: its output is outside content

@@ -1356,26 +1356,81 @@ async function openSettings(tab = 'assistant') {
     pane.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => edit(data.items.find(a => a.id === b.dataset.edit)));
     pane.querySelector('[data-add]').onclick = () => edit({});
   }
-  async function emailTab() {
+  async function emailTab(note = '', focus = '') {
     let mail = speech.mail || {}; try { mail = await api('/api/mail'); } catch {}
     if (showing !== 'email') return;
-    pane.innerHTML = mail.connected
-      ? '<p class="nv-ok">' + icon('check') + 'Connected as ' + esc(mail.address) + '</p><p>When you ask JARVIS to send an email, it shows you the exact message, waits for your yes, and then sends it from this address.</p><div class="actions"><button class="plain" data-off>Disconnect</button></div>'
+    const ol = mail.outlook || null, olOn = !!(ol && ol.on), bypass = options.ask === 'bypass';    // (Bypass: sends are not asked about)
+    pane.innerHTML = (mail.connected
+      ? '<p class="nv-ok">' + icon('check') + 'Connected as ' + esc(mail.address) + '</p><p>' + (bypass ? 'When you ask JARVIS to send an email, it sends it from this address. Permissions are set to Bypass, so it does not ask you first.' : 'When you ask JARVIS to send an email, it shows you the exact message, waits for your yes, and then sends it from this address.') + '</p><div class="actions"><button class="plain" data-off>Disconnect</button></div>'
       : '<p>Without a connected account, JARVIS writes the message where you write your mail, shows it to you as a draft, and sends it once you say yes.</p>' +
         row('Write my emails in', pick('em-through', [['auto', 'Automatic: Gmail if I use it, otherwise my mail app'], ['gmail', 'Gmail, in my browser'], ['app', 'The mail app on this PC (Outlook, Mail)']]),
-          'You can also just say “in Gmail” or “with Outlook”') +
-        '<h3>Or connect an account</h3><p>Then JARVIS sends directly, without opening anything. It still shows you the exact message and waits for your yes.</p>' +
+          'You can also just say “in Gmail” or “in my mail app”' + (olOn ? '. Outlook is switched on below, so email from your Outlook accounts is sent by Outlook itself' + (bypass ? '.' : ', after your yes.') : '')) +
+        '<h3>Or connect an account</h3><p>Then JARVIS sends directly, without opening anything.' + (bypass ? '' : ' It still shows you the exact message and waits for your yes.') + '</p>' +
         row('Your email address', '<input id="em-address" type="email" autocomplete="off" placeholder="you@gmail.com">') + row('Your name', '<input id="em-name" maxlength="60" placeholder="Shown as the sender">') +
         row('App password', '<input id="em-pass" type="password" autocomplete="off" spellcheck="false">', 'Not your normal password') +
-        '<details class="nv-how"><summary>How to get an app password</summary><p><b>Gmail:</b> turn on 2-Step Verification in your Google Account, then open myaccount.google.com/apppasswords, create one called JARVIS, and paste the 16 letters here.</p><p><b>Yahoo, iCloud, Zoho:</b> look for “app password” in the account’s security settings.</p><p><b>Outlook and Hotmail</b> no longer allow this; JARVIS uses your mail app for those.</p><p>The password is kept in Windows Credential Manager, never in a file or a chat.</p></details>' +
-        '<div class="actions"><button class="primary" data-on>Connect</button></div>';
+        '<details class="nv-how"><summary>How to get an app password</summary><p><b>Gmail:</b> turn on 2-Step Verification in your Google Account, then open myaccount.google.com/apppasswords, create one called JARVIS, and paste the 16 letters here.</p><p><b>Yahoo, iCloud, Zoho:</b> look for “app password” in the account’s security settings.</p><p><b>Outlook, Hotmail and work or school accounts</b> do not take app passwords.' + (ol ? ' Use “Outlook on this PC” below: it needs no password.' : ' JARVIS uses your mail app for those.') + '</p><p>The password is kept in Windows Credential Manager, never in a file or a chat.</p></details>' +
+        '<div class="actions"><button class="primary" data-on>Connect</button></div>') + (ol ? outlookSection(ol, bypass) : '');
     const off = pane.querySelector('[data-off]'), on = pane.querySelector('[data-on]');
+    if (ol) bindOutlook(note, focus);
     bind('em-through', options.mail || 'auto', 'mail', setAssistant);
     if (off) off.onclick = async () => { try { await api('/api/mail', { action: 'disconnect' }); emailTab(); } catch (error) { toast(error.message); } };
     if (on) on.onclick = async () => {
       on.disabled = true; on.textContent = 'Checking…';
       try { await api('/api/mail', { action: 'connect', address: pane.querySelector('#em-address').value, password: pane.querySelector('#em-pass').value, name: pane.querySelector('#em-name').value }); notify('Email is connected.'); emailTab(); }
       catch (error) { toast(error.message); on.disabled = false; on.textContent = 'Connect'; }
+    };
+  }
+  /* Outlook on this PC (jcc/outlook.py): work and school accounts, through the Outlook app with the account already signed in.
+     Only this page switches it on and ticks its accounts; the assistant cannot. */
+  const OL_UNAVAILABLE = ['Outlook is not installed on this PC', 'Only the new Outlook is on this PC'];
+  function outlookSection(ol, bypass) {
+    const card = ol.card || {}, blocked = OL_UNAVAILABLE.includes(card.status), on = !!ol.on, found = ol.found || [], ticked = new Set(ol.accounts || []);
+    const head = '<h3>Outlook on this PC</h3><p>For work and school accounts. JARVIS uses classic Outlook on this PC, with the account already signed in there. No password and no admin approval are needed.</p>';
+    // (Outlook cannot be used on this PC: what to do instead, and no switch that cannot be switched on)
+    if (blocked) return head + '<p class="nv-careful-note">' + SHIELD + '<span><b>' + esc(card.status) + '.</b> ' + esc(card.how_here || card.how || '') + '</span></p>';
+    return head +
+      '<label class="assistant-check"><input type="checkbox" role="switch" id="em-outlook"' + (on ? ' checked' : '') + '> <span>Let JARVIS use Outlook<small>' +
+        (on ? 'JARVIS works through classic Outlook in the background, so you can keep using the new Outlook.' : 'JARVIS does not touch Outlook until you switch it on.') +
+        '</small></span></label>' +
+      (on && found.length ? '<p>JARVIS may read and send from:</p><div role="group" aria-label="Accounts JARVIS may read and send from">' +
+        found.map(a => '<label class="assistant-check"><input type="checkbox" role="switch" data-ol-account="' + esc(a.address) + '"' +
+          (ticked.has(a.address) ? ' checked' : '') + '> <span>' + esc(a.address) + (a.name && a.name.toLowerCase() !== a.address ? '<small>' + esc(a.name) + '</small>' : '') + '</span></label>').join('') +
+        '</div><p class="small">' + (bypass ? 'Permissions are set to Bypass, so JARVIS sends without asking you first.' : 'JARVIS asks you before every send.') +
+        ' It never deletes or moves mail.</p>' : '') +
+      (on ? '<div id="em-ol-problem">' + olProblem(card) + '</div>' : '') +
+      '<p class="small" id="em-ol-live" role="status" aria-live="polite"></p>' +
+      (on ? '<div class="actions"><button class="plain" data-ol-check>Check</button></div>' : '');
+  }
+  function olProblem(card) {             // (kept current after each change on this page, so it never shows a problem already fixed)
+    return card && card.state === 'problem' ? '<p class="nv-careful-note">' + SHIELD + '<span>' + esc(card.status + '. ' + (card.how_here || card.how || '')) + '</span></p>' : '';
+  }
+  function bindOutlook(note = '', focus = '') {
+    const sw = pane.querySelector('#em-outlook'), live = pane.querySelector('#em-ol-live'), say = text => { if (live) live.textContent = text; };
+    // After the page is drawn again: keyboard focus back where it was, and the outcome said in the live line (so it is announced).
+    if (focus) pane.querySelector(focus)?.focus({ preventScroll: true });
+    if (note) setTimeout(() => say(note), 60);
+    if (sw) sw.onchange = async () => {
+      const want = sw.checked; sw.disabled = true; say(want ? 'Looking in Outlook…' : '');
+      try {
+        const got = await api('/api/connections', { action: 'outlook', on: want });
+        if (got.problem) { sw.checked = false; sw.disabled = false; say(got.problem); return; }
+        await emailTab(want ? 'Switched on.' : (got.message || 'Switched off. JARVIS no longer touches Outlook.'), '#em-outlook');
+      } catch (error) { sw.checked = !want; sw.disabled = false; say(error.message); }
+    };
+    for (const box of pane.querySelectorAll('[data-ol-account]')) box.onchange = async () => {
+      const accounts = [...pane.querySelectorAll('[data-ol-account]')].filter(b => b.checked).map(b => b.dataset.olAccount);
+      try {
+        const got = await api('/api/connections', { action: 'outlook', accounts }), problem = pane.querySelector('#em-ol-problem');
+        if (problem && got.card) problem.innerHTML = olProblem(got.card);
+        say(got.problem || 'Saved.');
+      }
+      catch (error) { box.checked = !box.checked; say(error.message); }
+    };
+    const check = pane.querySelector('[data-ol-check]');
+    if (check) check.onclick = async () => {
+      check.disabled = true; say('Looking in Outlook…');
+      try { const got = await api('/api/connections', { action: 'check', id: 'outlook' }); await emailTab(got.status, '[data-ol-check]'); }
+      catch (error) { check.disabled = false; say(error.message); }
     };
   }
   /* The skills library: packs of playbooks for the coding agents. Every pack is scanned before it is kept; its owner decides what is switched on. */
