@@ -19,6 +19,7 @@ from tests.test_gui import GuiTestCase
 SEED = bytes(range(32))                       # a made-up test key (never the real one)
 TEST_KEY = ed25519.public_key(SEED)
 REPO = updates.repo_name(updates.DEFAULTS["repo"])
+REAL_HEAD = updates._head                     # (the tests below stand in for it: nothing goes on the internet)
 
 
 def release(version: str, files: dict, signed=True, sign_with=SEED, manifest_version=None, body="Fixes and improvements."):
@@ -57,11 +58,17 @@ class UpdateCase(EngineTestCase):
         self.addCleanup(lambda: shutil.rmtree(self.app, ignore_errors=True))
         (self.app / "VERSION").write_text("0.1.3\n", "utf-8")
         (self.app / ".jarvis-files").write_text("VERSION\n", "utf-8")
-        self.served, self.asked = {}, []
+        self.served, self.asked, self.points = {}, [], {}
         for patch in (mock.patch.object(updates, "ROOT", self.app), mock.patch.object(updates, "PUBLIC_KEY", TEST_KEY),
-                      mock.patch.object(updates, "_open", self.open), mock.patch.object(system, "PLATFORM", "win32")):
+                      mock.patch.object(updates, "_open", self.open), mock.patch.object(updates, "_head", self.head),
+                      mock.patch.object(system, "PLATFORM", "win32")):
             patch.start()
             self.addCleanup(patch.stop)
+
+    def head(self, url):
+        """GitHub's "latest release" link, stood in for: where it points."""
+        self.asked.append("HEAD " + url)
+        return self.points.get(url, "")
 
     def open(self, url, accept="*/*", timeout=30.0):
         self.asked.append(url)
@@ -213,6 +220,87 @@ class TestFetchingAndInstalling(UpdateCase):
         stop.wait = mock.Mock(side_effect=[False, True])
         updates.background(self.cfg, stop, pause=0, first=0)
         self.assertTrue(updates.ready(self.cfg), "checked, and fetched the signed update")
+
+
+class TestHearingOfANewVersionQuickly(UpdateCase):
+    LATEST = f"https://github.com/{REPO}/releases/latest"
+
+    def point_at(self, version):
+        self.points[self.LATEST] = f"https://github.com/{REPO}/releases/tag/v{version}"
+
+    def test_the_latest_release_link_tells_the_newest_version(self):
+        self.point_at("0.1.4")
+        self.assertEqual(updates.peek(self.cfg), "0.1.4")
+        self.assertEqual(self.asked, ["HEAD " + self.LATEST], "one small request, and not to GitHub's API")
+        for odd in ("", f"https://github.com/{REPO}/releases", f"https://github.com/{REPO}/releases/tag/nightly",
+                    f"https://github.com/{REPO}/releases/tag/v0.1.4/../../evil"):
+            self.points[self.LATEST] = odd
+            self.assertEqual(updates.peek(self.cfg), "", odd)
+
+    def test_the_link_is_read_without_following_it(self):
+        import urllib.error
+        made = []
+
+        class Shut:
+            def open(self, request, timeout=None):
+                made.append((request.get_method(), request.full_url))
+                raise urllib.error.HTTPError(request.full_url, 302, "Found", {"Location": "https://github.com/x/y/releases/tag/v9.9.9"}, None)
+        with mock.patch.object(updates.urllib.request, "build_opener", lambda *handlers: made.append(handlers) or Shut()):
+            self.assertEqual(REAL_HEAD("https://github.com/x/y/releases/latest"), "https://github.com/x/y/releases/tag/v9.9.9")
+        self.assertEqual(made, [(updates._Stay,), ("HEAD", "https://github.com/x/y/releases/latest")], "redirects are not followed")
+
+        class Gone:
+            def open(self, request, timeout=None):
+                raise OSError("offline")
+        with mock.patch.object(updates.urllib.request, "build_opener", lambda *handlers: Gone()):
+            self.assertEqual(REAL_HEAD("https://github.com/x/y/releases/latest"), "")
+
+    def test_news_is_a_version_newer_than_this_copy_and_than_the_one_known(self):
+        self.point_at("0.1.3")
+        self.assertFalse(updates.news(self.cfg), "the version this copy is")
+        self.point_at("0.1.4")
+        self.assertTrue(updates.news(self.cfg))
+        self.served = release("0.1.4", {"JARVIS-windows.zip": b"PK"})
+        updates.check(self.cfg)
+        self.assertFalse(updates.news(self.cfg), "already known, and signed")
+        self.points.clear()
+        self.assertFalse(updates.news(self.cfg), "GitHub out of reach is no news")
+
+    def test_a_release_still_waiting_for_its_signature_is_looked_at_again(self):
+        self.point_at("0.1.4")
+        self.served = release("0.1.4", {"JARVIS-windows.zip": b"PK"}, signed=False)
+        found = updates.check(self.cfg)
+        self.assertEqual((found["available"], found["signed"]), (True, False))
+        self.assertTrue(updates.news(self.cfg), "the signature comes a few minutes after the release")
+        self.served = release("0.1.4", {"JARVIS-windows.zip": b"PK"})
+        self.assertTrue(updates.check(self.cfg)["signed"])
+        self.assertFalse(updates.news(self.cfg))
+
+    def run_loop(self, rounds, clock, look):
+        stop = mock.Mock()
+        stop.wait = mock.Mock(side_effect=[False] + [False] * (rounds - 1) + [True])
+        told = []
+        updates.background(self.cfg, stop, pause=0, first=0, changed=lambda: told.append(1), look=look, clock=clock)
+        return told
+
+    def test_the_loop_looks_every_ten_minutes_and_tells_the_window_at_once(self):
+        updates.check(self.cfg)                                  # (looked today: only news makes it look again)
+        self.served = release("0.1.4", {"JARVIS-windows.zip": b"PK"})
+        times, looked = iter([0, 60, 120, updates.PEEK, updates.PEEK + 60]), []
+        answers = iter([False, True])
+        told = self.run_loop(5, lambda: next(times), lambda cfg: looked.append(1) or next(answers))
+        self.assertEqual(len(looked), 2, "at the start, and ten minutes later: not every minute")
+        self.assertEqual(told, [1], "the window is told once, when the new version is found")
+        self.assertTrue(updates.ready(self.cfg), "and with updates automatic it is fetched straight away")
+
+    def test_the_loop_is_silent_when_updates_are_off_or_come_another_way(self):
+        looked = []
+        updates.set_mode(self.cfg, "off")
+        self.assertEqual(self.run_loop(2, time.time, lambda cfg: looked.append(1) or True), [])
+        updates.set_mode(self.cfg, "auto")
+        (self.app / ".git").mkdir()
+        self.assertEqual(self.run_loop(2, time.time, lambda cfg: looked.append(1) or True), [])
+        self.assertEqual((looked, self.asked), ([], []), "nothing was asked of GitHub")
 
 
 class TestTheWindowsView(GuiTestCase):

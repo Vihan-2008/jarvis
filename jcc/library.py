@@ -69,6 +69,6 @@ def branch(cfg,cid,index,title=''):
     if len(selected)>300 or sum(len(m.get('content','')) for m in selected)>500000:raise ValueError('This branch is too large; start from a compact project handoff.')
     result=chats.create(title or original['title']+' · branch',original.get('project'))
     result['branched_from']={'chat':cid,'message_index':index,'at':time.time()}
-    result['messages']=[{k:m[k] for k in ('role','content','at','image_ids') if k in m} for m in selected]
+    result['messages']=[{k:m[k] for k in ('role','content','at','image_ids','doc_ids') if k in m} for m in selected]
     chats.save(result)
     return result

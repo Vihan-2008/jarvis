@@ -14,10 +14,10 @@ $('agent').classList.add('hidden');
 optionRow.insertAdjacentHTML('beforeend','<select id="model" aria-label="AI model"><option value="auto">Auto · best fit</option></select><select id="effort" aria-label="Reasoning effort"><option value="auto">Auto effort</option></select>');
 const attachments=document.createElement('div');attachments.id='attachment-chips';attachments.className='attachment-chips';$('message').after(attachments);
 const attachButton=document.createElement('button');attachButton.type='button';attachButton.className='attach-button';attachButton.title='Attach text or code files';attachButton.textContent='＋ File';optionRow.prepend(attachButton);
-const upload=document.createElement('input');upload.type='file';upload.multiple=true;upload.className='hidden';upload.accept='.txt,.md,.py,.js,.ts,.tsx,.jsx,.html,.css,.json,.toml,.yaml,.yml,.csv,.tsv,.log,.sql,.xml,.docx,.odt,.xlsx,.pdf,.png,.jpg,.jpeg';document.body.append(upload);attachButton.onclick=()=>upload.click();
+const upload=document.createElement('input');upload.type='file';upload.multiple=true;upload.className='hidden';upload.accept='.txt,.md,.py,.js,.ts,.tsx,.jsx,.html,.css,.json,.toml,.yaml,.yml,.csv,.tsv,.log,.sql,.xml,.docx,.odt,.xlsx,.pptx,.pdf,.png,.jpg,.jpeg';document.body.append(upload);attachButton.onclick=()=>upload.click();
 const pageCheck=document.createElement('label');pageCheck.className='page-attach hidden';pageCheck.innerHTML='<input type="checkbox" id="attach-page"> Shared page attached';$('composer').append(pageCheck);
 function renderAttachments(){
- $('attachment-chips').innerHTML=[...window.jarvisFiles.map((f,i)=>`<button type="button" data-remove-file="${i}">▤ ${esc(f.path)} ×</button>`),...window.pendingUploads.map((f,i)=>`<button type="button" data-remove-upload="${i}">▤ ${esc(f.name)} ×</button>`)].join('');
+ $('attachment-chips').innerHTML=[...window.jarvisFiles.map((f,i)=>`<button type="button" data-remove-file="${i}">▤ ${esc(f.path)} ×</button>`),...window.pendingUploads.map((f,i)=>`<button type="button" data-remove-upload="${i}" aria-label="Remove ${esc(f.name)}">▤ ${esc(f.name)}${f.label?' · '+esc(f.label):''} ×</button>`),...(window.jarvisReading?[`<span class="reading" role="status">Reading ${esc(window.jarvisReading)}…</span>`]:[])].join('');
 }
 window.clearJarvisAttachments=()=>{window.jarvisFiles=[];window.pendingUploads=[];$('attach-page').checked=false;pageCheck.classList.add('hidden');renderAttachments()};
 upload.onchange=async()=>{
@@ -32,12 +32,17 @@ upload.onchange=async()=>{
     window.pendingUploads.push({name:f.name,text:'What is said in the recording '+f.name+':\n'+said.slice(0,60000)})
    }catch(e){toast(e.message)}
    continue}
-  if(f.size>1000000){toast(f.name+' exceeds the 1 MB attachment limit.');continue}
-  try{const bytes=new Uint8Array(await f.arrayBuffer());let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));const d=await api('/api/attachments/extract',{name:f.name,base64:btoa(binary)});
+  // Documents (PDF, Word, PowerPoint, Excel) go up to 20 MB: JARVIS turns their pages and pictures into images a job can look at.
+  const document_=/\.(pdf|docx|pptx|xlsx|odt)$/i.test(f.name),most=document_?20000000:1000000;
+  if(f.size>most){toast(document_?f.name+' is '+Math.max(1,Math.round(f.size/1000000))+' MB. The most JARVIS can take is 20 MB.':f.name+' exceeds the 1 MB attachment limit.');continue}
+  if(document_&&window.pendingUploads.filter(u=>u.doc_id).length>=3){toast('You can attach three documents to one message.');continue}
+  try{if(document_){window.jarvisReading=f.name;attachButton.textContent='Reading '+f.name+'…';renderAttachments()}
+   const bytes=new Uint8Array(await f.arrayBuffer());let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));const d=await api('/api/attachments/extract',{name:f.name,base64:btoa(binary)});
    if((current||'new:'+scope())!==initialScope){toast('You changed chats while the file was loading. Attach it again in the chat you want.');break}
-   window.pendingUploads.push(d.image_id?{name:d.name,image_id:d.image_id,mime:d.mime}:{name:d.name,text:d.text});if(d.truncated||d.notes.length)toast(d.name+': '+(d.truncated?'text shortened. ':'')+d.notes.join(' '))
-  }catch(e){toast(e.message)}
- }}finally{window.jarvisUploading=false;attachButton.disabled=false;attachButton.textContent=previousLabel;$('send').disabled=typeof busy!=='undefined'&&busy;upload.value='';renderAttachments()}
+   window.pendingUploads.push(d.image_id?{name:d.name,image_id:d.image_id,mime:d.mime}:d.doc_id?{name:d.name,doc_id:d.doc_id,text:d.text,label:d.label}:{name:d.name,text:d.text});
+   if(d.notice)toast(d.notice);else if(d.truncated||d.notes.length)toast(d.name+': '+(d.truncated?'text shortened. ':'')+d.notes.join(' '))
+  }catch(e){toast(e.message)}finally{window.jarvisReading='';attachButton.textContent='Preparing file…'}
+ }}finally{window.jarvisUploading=false;window.jarvisReading='';attachButton.disabled=false;attachButton.textContent=previousLabel;$('send').disabled=typeof busy!=='undefined'&&busy;upload.value='';renderAttachments()}
 };
 document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.removeFile!==undefined){window.jarvisFiles.splice(Number(b.dataset.removeFile),1);renderAttachments()}if(b.dataset.removeUpload!==undefined){window.pendingUploads.splice(Number(b.dataset.removeUpload),1);renderAttachments()}if(b.dataset.workbench)showTool(b.dataset.workbench);if(b.dataset.filePath!==undefined)loadFiles(b.dataset.filePath)});
 let catalogSignature='';

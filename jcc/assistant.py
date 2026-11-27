@@ -2024,8 +2024,12 @@ class Assistant:
                 session.heard = len(told)
             elif session and (self.sessions.get(chat_id) is session or session in self.alt.values()):
                 self._end(session)
-        if turn.carry and status == "done" and not self.window_open():
-            notify_native("JARVIS has finished what was waiting: " + turn.text[:120])
+        try:                                                   # (the Windows notification, when the owner is not looking: jcc/notices.py)
+            from jcc import notices
+            notices.finished(self.cfg, rid, status, chat=chat_id, seconds=time.time() - turn.started, background=bool(turn.carry),
+                             spoken=bool(turn.spoken) and self.voice_busy())
+        except Exception:  # noqa: BLE001 - a notification must never break an answer
+            pass
         self.emit("done", id=rid, chat=chat_id, status=status, text=content, seconds=round(time.time() - turn.started, 1),
                   model=spec[-1], agent="claude" if spec[0] == "claude" else spec[1])
 

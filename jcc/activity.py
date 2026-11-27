@@ -1,9 +1,7 @@
 """Durable, bounded activity and local completion alerts."""
-import base64
 import json
 import os
 import re
-import subprocess
 import time
 from pathlib import Path
 from jcc.vault import atomic_write, parse_frontmatter
@@ -54,6 +52,13 @@ def recent(cfg):
     return rows
 
 
+def _chat_of(cfg, rid):
+    """The chat a job belongs to (for a click on its notification), or ''."""
+    try: fm, _ = parse_frontmatter((cfg.vault / 'Jobs' / f'{job_id(rid)}.md').read_text('utf-8'))
+    except (OSError, ValueError): return ''
+    return str(fm.get('chat_id') or '')
+
+
 def alert(cfg, rid, status):
     if status not in ('done', 'failed', 'needs_approval','paused'): return
     path = cfg.jobs_root / job_id(rid) / 'alert.json'
@@ -63,15 +68,10 @@ def alert(cfg, rid, status):
     # The island already shows a status its job wrote last; this is for one reached another way (a recovered worker).
     if notch.enabled(cfg) and (events(cfg, rid) or [{}])[-1].get('stage') != status:
         notch.tell(cfg, rid, ISLAND[status], value['message'])
-    from jcc.learning import settings
-    if os.name != 'nt' or not settings(cfg)['desktop_alerts'] or os.environ.get('JCC_NO_CREDMAN'): return
-    heartbeat=cfg.state_dir/'ui-active'
-    if heartbeat.exists() and time.time()-heartbeat.stat().st_mtime<12: return
-    # Fixed strings only: task text and secrets never enter a shell or notification.
-    script = "Add-Type -AssemblyName System.Windows.Forms; $n=New-Object System.Windows.Forms.NotifyIcon; $n.Icon=[System.Drawing.SystemIcons]::Information; $n.Visible=$true; $n.BalloonTipTitle='JARVIS'; $n.BalloonTipText='A job finished or needs review. Open JARVIS for details.'; $n.ShowBalloonTip(5000); Start-Sleep -Seconds 6; $n.Dispose()"
-    encoded = base64.b64encode(script.encode('utf-16-le')).decode()
-    subprocess.Popen(['powershell.exe', '-NoProfile', '-EncodedCommand', encoded], stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
+    # The Windows notification (fixed words; shown by the tray helper, or a PowerShell balloon without it): jcc/notices.py.
+    from jcc import notices
+    try: notices.finished(cfg, rid, status, chat=_chat_of(cfg, rid), background=True)
+    except Exception: pass  # noqa: BLE001 - a notification must never break a job
 
 
 def alerts(cfg):

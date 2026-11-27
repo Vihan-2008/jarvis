@@ -186,6 +186,9 @@ class GuiState:
             image_ids=selected_images(chat,text,uploads)
             from jcc.image_inputs import validate as validate_images
             validate_images(self.cfg,image_ids)
+            from jcc import doc_inputs
+            doc_ids=doc_inputs.selected(chat,text,uploads)
+            doc_inputs.validate(self.cfg,doc_ids)
             message_text = text + ("\n\nAttached: " + ", ".join(labels) if labels else "")
             stopped = None if as_job or text.lstrip().startswith("/") else job_control.stopped_job(self.cfg, chat)
             if stopped:
@@ -211,7 +214,7 @@ class GuiState:
                                                                  "job": True, "task": text[:300], "child": work_chat})
                 cid = master_id
             else:
-                chats.update(cid, archived=False, message={"role": "user", "content": message_text, "receipt": rid,"image_ids":image_ids})
+                chats.update(cid, archived=False, message={"role": "user", "content": message_text, "receipt": rid,"image_ids":image_ids,"doc_ids":doc_ids})
             if mode not in ("auto", "code", "chat"):
                 raise ValueError("Choose Auto, Build or Ask mode.")
             from jcc import mods
@@ -231,7 +234,7 @@ class GuiState:
                 self.busy += 1
             try:
                 r = e.process(text, rid=rid, project=project or chat.get("project") or "none", agent=agent,
-                              chat_id=work_chat, context=context, mode=mode, manual_model=manual_model, effort=effort,image_ids=image_ids)
+                              chat_id=work_chat, context=context, mode=mode, manual_model=manual_model, effort=effort,image_ids=image_ids,doc_ids=doc_ids)
             finally:
                 e.close()
                 with self.lock:
@@ -1112,7 +1115,7 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
             except ValueError:
                 length = -1
             route = urlparse(self.path).path
-            cap = history.MAX_BYTES if route == "/api/import" else 26_000_000 if route in ("/api/web/upload", "/api/speech/transcribe") else 4_100_000 if route == "/api/speech/stt" else 2_100_000 if route == "/api/preview" else 4_100_000 if route == "/api/artifacts" else 4_000_000 if route in ("/api/capture", "/api/browser/share") else 2_000_000 if route == "/api/attachments/extract" else 2_000_000 if route == "/api/chat/send" else 700_000 if route == "/api/files/save" else 250_000 if route in ("/api/pty", "/api/web") else 2_000_000 if route == "/api/voice" else 900_000 if route == "/api/mods" else 20_000
+            cap = history.MAX_BYTES if route == "/api/import" else 26_000_000 if route in ("/api/web/upload", "/api/speech/transcribe") else 4_100_000 if route == "/api/speech/stt" else 2_100_000 if route == "/api/preview" else 4_100_000 if route == "/api/artifacts" else 4_000_000 if route in ("/api/capture", "/api/browser/share") else 28_000_000 if route == "/api/attachments/extract" else 2_000_000 if route == "/api/chat/send" else 700_000 if route == "/api/files/save" else 250_000 if route in ("/api/pty", "/api/web") else 2_000_000 if route == "/api/voice" else 900_000 if route == "/api/mods" else 20_000
             if length < 0 or length > cap:
                 self.close_connection = True
                 left = length if 0 < length <= 64_000_000 else 0   # take in a moderately oversized upload so the window gets a clear answer
@@ -1166,6 +1169,11 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                     self._json(HTTPStatus.OK, {"window": state.assistant.hand("", attend=True)})
                 elif action == "name":        # its name, heard while a spoken conversation is going on: the window holding it takes it from there
                     self._json(HTTPStatus.OK, state.assistant.name_said(json.loads(raw).get("text")))
+                elif action == "open_chat":   # a click on a "JARVIS finished" notification: the window shows that chat
+                    chat = str(json.loads(raw).get("text", ""))
+                    if re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", chat):
+                        state.assistant.emit("open_chat", chat=chat)
+                    self._json(HTTPStatus.OK, {"window": window})
                 elif action == "control":     # "JARVIS, stop" and the like
                     try:
                         self._json(HTTPStatus.OK, state.assistant.control(str(json.loads(raw).get("text", ""))))
@@ -1352,7 +1360,7 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                         watcher.RETRY_SOON.set()
                         self._json(HTTPStatus.OK, {'chat': stopped_chat['id'], 'instant': True, 'model': 'instant', 'say': 'Carrying on with that.'});return
                     if action=='say':
-                        extra=state.bench.attachment_context(body.get('files') or [],bool(body.get('use_browser')),[u for u in (body.get('uploads') or []) if isinstance(u,dict) and not u.get('image_id')])
+                        extra=state.bench.attachment_context(body.get('files') or [],bool(body.get('use_browser')),[u for u in (body.get('uploads') or []) if isinstance(u,dict) and not u.get('image_id') and not u.get('doc_id')])
                         result=state.assistant.say(text,str(body.get('chat') or '') or None,body.get('spoken') is True,body.get('model'),extra,str(body.get('project') or '') or None,body.get('research') is True,body.get('heard') is True,how=str(body.get('research_model') or '')[:60],
                                                    noisy=body.get('noisy') is True,near=body.get('near') is True,interrupts=body.get('interrupts') if isinstance(body.get('interrupts'),list) else None)
                     elif action=='stop':result=state.assistant.stop(str(body.get('chat') or '') or None)
@@ -1753,8 +1761,11 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                     if cid:supplied+='\n\n<chat-history>\n'+Chats(state.cfg).context(cid)+'\n</chat-history>'
                     from jcc.image_inputs import selected as selected_images,validate as validate_images
                     images=selected_images(chat,text,body.get('uploads') or []);validate_images(state.cfg,images)
+                    from jcc import doc_inputs
+                    docs=doc_inputs.selected(chat,text,body.get('uploads') or []);doc_inputs.validate(state.cfg,docs)
                     result=planning.preview(state.cfg,text,project,str(body.get('mode','auto')),str(body.get('model','auto')),str(body.get('effort','auto')),agent or 'auto',supplied)
                     result['images']={'count':len(images),'scope':'Owner-attached image context; text token estimates exclude image usage.'}
+                    result['documents']={'count':len(docs),'scope':'Owner-attached documents: their pages and pictures are read as images, which text token estimates exclude.'}
                     self._json(HTTPStatus.OK,result);return
                 if self.path == '/api/delivery/settings':
                     self._json(HTTPStatus.OK,delivery.configure(state.cfg,body.get('settings')));return
@@ -1995,10 +2006,11 @@ def serve(port: int = 8765, open_browser: bool = True, watch: bool = True,
     threading.Thread(target=routine_loop, name="routines", daemon=True).start()
 
     def update_loop():
-        # Updates (jcc/updates.py): asks GitHub once a day which version is newest and, set to automatic, fetches a
-        # signed one in the background. Installing happens when JARVIS next starts, or when the owner presses Install.
+        # Updates (jcc/updates.py): looks every ten minutes whether GitHub has a new release and, set to automatic, fetches
+        # a signed one in the background; open windows are told at once (their Update button). Installing happens when
+        # JARVIS next starts, or when the owner presses Install.
         from jcc import updates
-        updates.background(state.cfg, state.stop)
+        updates.background(state.cfg, state.stop, changed=lambda: state.assistant.emit("update"))
     threading.Thread(target=update_loop, name="updates", daemon=True).start()
     threading.Thread(target=lambda: _quietly(review.tidy, state.cfg), name="tidy-reviews", daemon=True).start()
     # A sound left lowered by a crash while JARVIS was listening is put back.

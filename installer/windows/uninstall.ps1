@@ -95,6 +95,7 @@ if (Test-Path -LiteralPath $list) {
 Set-Location -LiteralPath ([IO.Path]::GetTempPath())
 Remove-Item -LiteralPath $InstallDir -Recurse -Force
 Remove-Item -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\JARVIS' -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -Path 'HKCU:\Software\Classes\AppUserModelId\JarvisCommand.JARVIS' -Recurse -Force -ErrorAction SilentlyContinue   # (the name its notifications show)
 Write-Host "Removed the app from $InstallDir."
 $kept = @()
 if ($DeleteData -and (Test-Path -LiteralPath $data)) { To-RecycleBin $data; Write-Host "Moved JARVIS's data folder to the Recycle Bin: $data" }

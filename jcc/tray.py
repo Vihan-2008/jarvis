@@ -57,6 +57,23 @@ def icon_bytes(size: int = 32) -> bytes:
     return icon.ico(size)
 
 
+def own_name(icon_path) -> bool:
+    """Make Windows show the tray helper's notifications as "JARVIS", with its icon, not as "Python": register the name
+    (HKCU\\Software\\Classes\\AppUserModelId\\<id>, removed again by uninstall.ps1) and claim it for this program. Must
+    come before the tray icon is added."""
+    from jcc.notices import AUMID
+    if os.name != "nt" or os.environ.get("JCC_NO_CREDMAN"):
+        return False
+    try:
+        import winreg
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"Software\Classes\AppUserModelId\{AUMID}") as key:
+            winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, "JARVIS")
+            winreg.SetValueEx(key, "IconUri", 0, winreg.REG_SZ, str(icon_path))
+        return ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(ctypes.c_wchar_p(AUMID)) == 0
+    except (OSError, AttributeError):
+        return False
+
+
 def hotkeys(cfg) -> dict:
     desktop = cfg.raw.get("desktop", {}) if isinstance(cfg.raw.get("desktop"), dict) else {}
     return {"tray": desktop.get("tray", True) is not False, "hotkey": desktop.get("hotkey", True) is not False}
@@ -389,14 +406,36 @@ def main() -> int:
     def stop_computer() -> None:
         (cfg.state_dir / "computer-stop").write_text("stop", "utf-8")
 
-    def balloon(text: str) -> None:
-        """A short Windows notification from the tray icon."""
+    def balloon(text: str, title: str = "JARVIS", quiet: bool = False) -> None:
+        """A short Windows notification from the tray icon, with JARVIS's own icon; `quiet`: without Windows' sound."""
         if not tray_added:
             return
         data.uFlags = 0x1 | 0x2 | 0x4 | 0x10
-        data.szInfoTitle, data.szInfo, data.dwInfoFlags = "JARVIS", text[:250], 0x1
+        data.szInfoTitle, data.szInfo = title[:63], text[:250]
+        data.dwInfoFlags = (0x4 if data.hIcon else 0x1) | (0x10 if quiet else 0)     # NIIF_USER (the icon) | NIIF_NOSOUND
+        data.hBalloonIcon = data.hIcon
         shell32.Shell_NotifyIconW(1, ctypes.byref(data))
         data.uFlags = 0x1 | 0x2 | 0x4
+
+    from jcc import notices
+    clicked = {"chat": ""}
+
+    def deliver() -> None:
+        """Show what finished (jcc/notices.py): silent while a JARVIS window is open (it plays the sound itself), with
+        Windows' sound when none is, and nothing while a window is in front."""
+        try:
+            (cfg.state_dir / "tray-alive").write_text("", "utf-8")
+            waiting = notices.take(cfg)
+        except OSError:
+            return
+        if not waiting or not tray_added:
+            return
+        if notices.focused(cfg):
+            return
+        from jcc.learning import settings
+        app = (ask_service(cfg, "status") or {}).get("app") is True
+        title, text, clicked["chat"] = notices.words(cfg, waiting)     # (several at once: the most urgent says it)
+        balloon(text, title, quiet=app or not settings(cfg).get("done_sound", True))
 
     from jcc.dictate import Dictation
     from jcc.wake import Ears
@@ -466,9 +505,15 @@ def main() -> int:
                 open_jarvis()
             elif lparam == WM_RBUTTONUP:
                 menu(window)
+            elif lparam == 0x0405 and clicked["chat"]:   # NIN_BALLOONUSERCLICK: open JARVIS at the chat that finished
+                ask_service(cfg, "open_chat", clicked["chat"])
+                open_jarvis()
+            elif lparam == 0x0405:
+                open_jarvis()
             return 0
-        if message == 0x0113:   # the timer: keep the wake-word listener in step with the settings and with JARVIS's window
-            keep_ears()
+        if message == 0x0113:   # the timer: keep the wake-word listener in step with the settings and with JARVIS's window,
+            keep_ears()         # and show what has finished
+            deliver()
             return 0
         if message == WM_HOTKEY:
             if wparam == HOTKEY_OPEN:
@@ -503,6 +548,7 @@ def main() -> int:
             icon = user32.LoadImageW(None, str(icon_path), 1, 32, 32, 0x0010)
         except OSError:
             icon = None
+        own_name(icon_path)
         data.cbSize, data.hWnd, data.uID = ctypes.sizeof(NOTIFYICONDATAW), window, 1
         data.uFlags, data.uCallbackMessage = 0x1 | 0x2 | 0x4, WM_APP_TRAY
         data.hIcon = icon or user32.LoadIconW(None, ctypes.c_void_p(32512))

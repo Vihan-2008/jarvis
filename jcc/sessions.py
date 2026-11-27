@@ -9,7 +9,7 @@ from jcc.vault import atomic_write
 
 def reference_hash(spec):
     references=re.sub(r"<chat-history>[\s\S]*?</chat-history>","",spec.get('context','')).strip()
-    return hashlib.sha256((references+json.dumps(spec.get('image_ids') or [])).encode()).hexdigest()
+    return hashlib.sha256((references+json.dumps(spec.get('image_ids') or [])+(json.dumps(spec['doc_ids']) if spec.get('doc_ids') else '')).encode()).hexdigest()
 
 
 def workspace(cfg, spec, fallback):

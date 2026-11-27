@@ -706,7 +706,7 @@ async function send(text, spoken, extra = {}) {
   finally { expecting = false; }
 }
 N.assistantSend = (text, extra) => send(text, false, extra);
-N.assistantUsable = attachments => $('mode').value !== 'code' && !(attachments.uploads || []).some(u => u.image_id);
+N.assistantUsable = attachments => $('mode').value !== 'code' && !(attachments.uploads || []).some(u => u.image_id || u.doc_id);   // (pictures and documents are looked at in a job)
 N.assistantLive = rid => turns.has(rid);
 N.assistantStop = async () => {
   speaker.hush();
@@ -1059,8 +1059,12 @@ function handle(event) {
     else if (event.chat === current) api('/api/chat?id=' + encodeURIComponent(current)).then(c => { if (c.id === current) { lastMessages = ''; renderChat(c); } }).catch(() => {});
     refresh().catch(() => {});
   }
+  else if (k === 'update') upLoad();   // the app found news about an update (jcc/updates.py)
+  else if (k === 'open_chat') { if (!MINI && event.chat) openChat(event.chat).catch(() => {}); }   // a click on JARVIS's Windows notification
   else if (k === 'done') {
     const mine = focus === event.id;
+    // The finished sound, and a toast for another chat (a failure you are listening to has its own sound, below).
+    if (!MINI) N.finished?.({ id: event.id, chat: event.chat, status: event.status, seconds: event.seconds, spoken: !!turn?.spoken || (mine && event.status === 'failed') });
     if (turn) { if (!turn.text) turn.text = event.status === 'done' ? event.text : ''; if (mine && event.status !== 'cancelled') speakProgress(turn, true); turns.delete(event.id); }
     if (mine) {
       lastTurnAt = Date.now();
@@ -1630,7 +1634,12 @@ async function openSettings(tab = 'assistant') {
       '</b><small>' + esc(h.text) + '</small></div><div class="nv-link-do"><button class="plain" data-switch>' + (h.on ? 'Switch off' : 'Switch on') + '</button><button class="plain" data-remove>Remove</button></div></div>';
     const panel = p => '<div class="nv-link nv-mod" data-panel="' + p.id + '" data-state="ok"><span class="nv-dot"></span><div class="nv-link-text"><b>' + esc(p.name) + '</b><small>Beside the chat, among the panels</small></div>' +
       '<div class="nv-link-do"><button class="plain" data-open>Open</button><button class="plain" data-remove>Remove</button></div></div>';
-    pane.innerHTML = '<h3>Commands</h3><p class="small">Type / in the message box and pick one. A command stands for a longer request. Write $ARGUMENTS where whatever you type after its name should go.</p>' +
+    const prefs = state?.learning?.settings || (await api('/api/state').catch(() => null))?.learning?.settings || {};
+    if (showing !== 'mods') return;
+    pane.innerHTML = '<h3>When JARVIS finishes</h3>' + check('md-done-sound', 'Play a sound when a task finishes', 'A short two-note chime. Quick answers stay silent.') +
+      check('md-done-alert', 'Show a Windows notification when JARVIS is not in front', 'Says that a task finished, not what it was.') +
+      check('md-done-name', 'Name the chat in the notification', 'Shows the chat’s first words. Anyone who can see your screen can read them.') +
+      '<h3>Commands</h3><p class="small">Type / in the message box and pick one. A command stands for a longer request. Write $ARGUMENTS where whatever you type after its name should go.</p>' +
       (data.commands.map(command).join('') || '<p class="small">None of your own yet.</p>') +
       '<div class="nv-mod-form"><div class="nv-mod-row"><input id="md-name" maxlength="31" placeholder="name (one word)" spellcheck="false" aria-label="The command\'s name"><input id="md-about" maxlength="160" placeholder="What it does (shown in the list)" aria-label="What it does"></div>' +
       '<textarea id="md-text" rows="3" maxlength="6000" aria-label="What JARVIS should do" placeholder="What JARVIS should do. For example: Summarise what I did today from my notes, in three short points. $ARGUMENTS"></textarea><button class="primary" id="md-save">Save command</button></div>' +
@@ -1664,6 +1673,12 @@ async function openSettings(tab = 'assistant') {
     }
     const status = () => act({ action: 'status', on: field('md-status').checked, items: [...pane.querySelectorAll('[data-item]:checked')].map(box => box.dataset.item) });
     field('md-status').checked = data.status.on; field('md-status').onchange = status;
+    const pref = (id, key, asked = false) => { const box = field(id); box.checked = asked ? prefs[key] === true : prefs[key] !== false;
+      box.onchange = async () => { try { const saved = (await api('/api/assistant/settings', { settings: { [key]: box.checked } })).settings; if (state?.learning) state.learning.settings = saved; notify('Saved.'); }
+        catch (error) { box.checked = !box.checked; toast(error.message); } }; };
+    pref('md-done-sound', 'done_sound'); pref('md-done-alert', 'desktop_alerts'); pref('md-done-name', 'notice_titles', true);
+    const naming = () => { field('md-done-name').disabled = !field('md-done-alert').checked; };   // (a name only goes with the notification)
+    naming(); field('md-done-alert').addEventListener('change', naming);
     pane.querySelectorAll('[data-item]').forEach(box => box.onchange = status);
   }
   /* What has been used: each account's allowance, the voice, the other AI services, and JARVIS's own answers. */
@@ -1683,19 +1698,21 @@ async function openSettings(tab = 'assistant') {
     else if (u.problem) said = esc(u.problem);
     else if (u.checked_at) said = 'This is the newest version.';
     else said = 'JARVIS has not looked for updates yet.';
-    const outcome = result.version ? (result.ok ? 'Updated from ' + esc(result.from || '?') + ' to ' + esc(result.version) + ' on ' + esc(when(result.at)) + '.'
-      : 'The update to ' + esc(result.version) + ' did not work' + (result.rolled_back ? ', so JARVIS went back to ' + esc(result.from || 'the version before') : '') + ': ' + esc(result.problem)) : '';
-    pane.innerHTML = '<h3>Updates</h3><p>This is <b>JARVIS ' + esc(u.current) + '</b>.</p><p class="nv-update-said">' + said + '</p>' +
+    const outcome = result.version ? (result.ok ? 'Updated ' + (result.from ? 'from ' + esc(result.from) + ' ' : '') + 'to ' + esc(result.version) + (result.at ? ' on ' + esc(when(result.at)) : '') + '.'
+      : 'The update to ' + esc(result.version) + ' did not work' + (result.rolled_back ? ', so JARVIS went back to ' + esc(result.from || 'the version before') : '') + '. ' + esc(result.problem)) : '';
+    pane.innerHTML = '<h3>This version</h3><p>This is <b>JARVIS ' + esc(u.current) + '</b>.</p><p class="nv-update-said">' + said + '</p>' +
       (outcome ? '<p class="small">' + outcome + '</p>' : '') +
-      (u.managed ? '' : '<div class="nv-sound"><button class="plain" type="button" data-update-check>' + icon('retry') + 'Check now</button>' +
+      (u.managed ? '' : '<div class="nv-sound"><button class="plain" type="button" data-update-check' + (u.installing ? ' disabled' : '') + '>' + icon('retry') + 'Check now</button>' +
         (u.available && u.signed && !u.installing ? '<button type="button" data-update-install>' + icon('down') + 'Install and restart</button>' : '') + '</div>') +
       (u.checked_at ? '<p class="small">Last looked: ' + esc(when(u.checked_at)) + (u.page ? ' · <a href="' + esc(u.page) + '" target="_blank" rel="noopener noreferrer">the release page</a>' : '') + '</p>' : '') +
-      (u.available && u.notes ? '<details class="nv-update-notes"><summary>What is new in ' + esc(u.latest) + '</summary><pre>' + esc(u.notes) + '</pre></details>' : '') +
-      (u.managed ? '' : row('How updates happen', pick('up-mode', [['auto', 'Automatically: fetch it, and install it the next time JARVIS starts'], ['ask', 'Tell me, and I choose when to install'], ['off', 'Never look for updates']]))) +
-      '<p class="small">JARVIS asks GitHub, where its releases are published, once a day. Nothing about you is sent. An update is installed only when ' +
+      (u.available && u.notes ? '<details class="nv-update-notes"><summary>What’s new in ' + esc(u.latest) + '</summary><div class="nv-update-notes-list">' + upNotes(u.notes) + '</div></details>' : '') +
+      (u.managed ? '' : row('How updates happen', pick('up-mode', [['auto', 'Automatically'], ['ask', 'Ask me first'], ['off', 'Off']])) + '<p class="small" id="up-mode-note"></p>') +
+      '<p class="small">JARVIS looks on GitHub, where its releases are published, for a new version every ten minutes, and the Update button appears in the top bar when there is one. Nothing about you is sent. An update is installed only when ' +
       'its signature from JARVIS’s maker checks out, and if the new version does not start, JARVIS goes back to the one you had.</p>';
     const mode = pane.querySelector('#up-mode');
-    if (mode) { mode.value = u.mode; mode.onchange = async () => { try { await api('/api/updates', { action: 'mode', mode: mode.value }); notify('Saved.'); } catch (error) { toast(error.message); } }; }
+    const MODE_SAID = { auto: 'A new version is downloaded by itself and installed the next time JARVIS starts.', ask: 'The Update button appears in the top bar when there is a new version. Nothing is installed until you choose.', off: 'JARVIS does not look for new versions.' };
+    const modeSaid = () => { const note = pane.querySelector('#up-mode-note'); if (note && mode) note.textContent = MODE_SAID[mode.value] || ''; };
+    if (mode) { mode.value = u.mode; modeSaid(); mode.onchange = async () => { modeSaid(); try { await api('/api/updates', { action: 'mode', mode: mode.value }); notify('Saved.'); upLoad(); } catch (error) { toast(error.message); } }; }
     const again = pane.querySelector('[data-update-check]');
     if (again) again.onclick = async () => {
       again.disabled = true; again.lastChild.textContent = 'Looking…';
@@ -1924,19 +1941,117 @@ setPhase('idle'); pump();
 // this PC), the window listens for its name itself.
 loadSpeech().then(() => { micSync(); if (speech.shortcuts?.wake_waits) setTimeout(() => loadSpeech().then(() => micSync()), 9000); });
 
-// Once per version: an update that is ready (or a version just installed) is mentioned, with where to find more.
-setTimeout(async () => {
-  let u; try { u = await api('/api/updates'); } catch { return; }
-  const told = store.get('nv-update-told', ''), result = u.result || {};
-  if (result.version && told !== 'done:' + result.version + ':' + result.at) {
-    store.set('nv-update-told', 'done:' + result.version + ':' + result.at);
-    if (result.ok) notify('JARVIS was updated to ' + result.version + '.');
-    else notify('The update to ' + result.version + ' did not work' + (result.rolled_back ? ', so JARVIS went back to the version you had' : '') + '. Settings, Updates says why.');
-  } else if (!u.managed && u.mode !== 'off' && u.available && u.signed && told !== 'ready:' + u.latest) {
-    store.set('nv-update-told', 'ready:' + u.latest);
-    notify('JARVIS ' + u.latest + ' is out. ' + (u.mode === 'auto' ? 'It is installed the next time JARVIS starts, or now from Settings, Updates.' : 'Install it from Settings, Updates.'));
+/* ---------- the Update button (jcc/updates.py finds and checks updates; this shows them) ---------- */
+// A small button in the top bar while there is something to do about an update, with a card under it. The app itself
+// looks for new versions every ten minutes and tells open windows at once (the "update" event). The window only reads
+// what the app already knows: a few seconds after opening, every half hour, when it comes back to the front after ten
+// minutes, and when told. "Later" hides the button for a day, for that version.
+const UP = { data: null, at: 0, shown: '' }, FROM_OFFLINE = document.getElementById('offline')?.textContent || '';
+function upLater(version) { try { const later = JSON.parse(store.get('nv-update-later', '{}')); return later.v === version && later.until > Date.now(); } catch { return false; } }
+function upState(u) {
+  if (!u || u.managed || u.mode === 'off') return '';
+  const result = u.result || {};
+  if (u.installing) return 'installing';
+  if (result.version && result.ok === false && store.get('nv-update-dismissed', '') !== result.version + ':' + result.at) return 'failed';
+  if (u.downloading) return 'fetching';
+  if (u.available && u.signed) return u.ready ? 'ready' : 'out';   // (a release not yet signed, or not signable, is told in Settings, Updates)
+  return '';
+}
+// Release notes as they are written on GitHub: lines that start with "- " make a list, the others are paragraphs.
+function upNotes(text) {
+  let html = '', list = [];
+  const flush = () => { if (list.length) html += '<ul>' + list.map(line => '<li>' + esc(line) + '</li>').join('') + '</ul>'; list = []; };
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const line = raw.trim(), point = line.match(/^[-*•]\s+(.*)$/);
+    if (point) list.push(point[1]);
+    else { flush(); if (line) html += '<p>' + esc(line.replace(/^#+\s*/, '')) + '</p>'; }
   }
-}, 8000);
+  flush(); return html;
+}
+function upCard(pop, u = UP.data) {
+  const st = upState(u), result = u.result || {}, v = esc(u.latest || '');
+  const card = el('div', { class: 'nv-update-card' });
+  const notes = u.notes && (st === 'ready' || st === 'out') ? '<details><summary>What’s new in ' + v + '</summary><div class="nv-update-notes-list">' + upNotes(u.notes) + '</div></details>' : '';
+  if (st === 'failed') card.innerHTML = '<h4>The update to ' + esc(result.version) + ' did not work</h4><p>' +
+    (result.rolled_back ? 'JARVIS went back to ' + esc(result.from || 'the version you had') + '. Nothing was lost.' : 'Nothing was lost.') + '</p>' +
+    (result.problem ? '<p class="small">' + esc(result.problem) + '</p>' : '') +
+    '<div class="nv-update-do"><button class="plain" type="button" data-up="dismiss">Dismiss</button><button class="primary" type="button" data-up="settings">See details</button></div>';
+  else if (st === 'ready' || st === 'out') card.innerHTML = '<h4>JARVIS ' + v + ' is ' + (st === 'ready' ? 'ready' : 'out') + '</h4><p>' +
+    (st === 'ready' ? (u.mode === 'auto' ? 'Installs the next time JARVIS starts. Or install it now.' : 'Install it when it suits you.') : 'Install and restart downloads it, then installs it.') + '</p>' + notes +
+    '<div class="nv-update-do"><button class="plain" type="button" data-up="later">Later</button><button class="primary" type="button" data-up="install">Install and restart</button></div>';
+  else card.innerHTML = '<h4>' + (st === 'installing' ? 'Installing JARVIS ' + esc(u.installing?.version || u.latest) : 'Downloading JARVIS ' + v) + '…</h4><p>' +
+    (st === 'installing' ? 'This window reconnects by itself in a minute or two.' : 'This takes a moment.') + '</p>';
+  card.querySelectorAll('[data-up]').forEach(b => b.onclick = () => upDo(b.dataset.up, u));
+  pop.append(card);
+}
+const upChip = () => N.updateSlot?.querySelector('.nv-update-chip');
+async function upDo(what, u) {
+  N.closePop();
+  if (what === 'later') store.set('nv-update-later', JSON.stringify({ v: u.latest, until: Date.now() + 24 * 3600 * 1000 }));
+  else if (what === 'dismiss') store.set('nv-update-dismissed', (u.result?.version || '') + ':' + (u.result?.at || ''));
+  else if (what === 'settings') { N.voiceSettings?.('updates'); return; }
+  else if (what === 'install') {
+    if (!(await N.confirmBox({ title: 'Install JARVIS ' + u.latest + ' now?', text: 'JARVIS closes, installs the new version and starts again. Your chats, notes, settings and keys are kept. This window reconnects by itself.', ok: 'Install and restart' }))) { upChip()?.focus(); return; }
+    UP.data = { ...u, downloading: !u.ready }; upDraw();
+    try { const now = await api('/api/updates', { action: 'install' }); store.set('nv-installing', JSON.stringify({ v: u.latest, at: Date.now() })); UP.data = now; }
+    catch (error) { toast(error.message); UP.data = u; }
+  }
+  upDraw();
+  if (what === 'install') upChip()?.focus();
+}
+function upDraw() {
+  const slot = N.updateSlot, u = UP.data, st = upState(u); if (!slot) return;
+  let installing = null; try { installing = JSON.parse(store.get('nv-installing', 'null')); } catch {}
+  const off = document.getElementById('offline');
+  if (off) off.textContent = installing && Date.now() - installing.at < 10 * 60 * 1000 ? 'Installing JARVIS ' + installing.v + '. This window reconnects by itself in a minute or two.' : FROM_OFFLINE || off.textContent;
+  let b = upChip();
+  if (!st || ((st === 'ready' || st === 'out') && upLater(u.latest))) { if (b?.getAttribute('aria-expanded') === 'true') N.closePop(); slot.replaceChildren(); UP.shown = ''; return; }
+  const v = u.latest || '', label = { ready: 'Update', out: 'Update', fetching: 'Downloading…', installing: 'Installing…', failed: 'Update problem' }[st];
+  const name = { ready: 'Update: JARVIS ' + v + ' is ready to install', out: 'Update: JARVIS ' + v + ' is out', fetching: 'Downloading JARVIS ' + v + '…',
+    installing: 'Installing JARVIS ' + (u.installing?.version || v) + '…', failed: 'Update problem: the update to ' + (u.result?.version || '') + ' did not work' }[st];
+  if (!b) {
+    b = el('button', { class: 'nv-update-chip', type: 'button', 'aria-haspopup': 'dialog', 'aria-expanded': 'false' }); slot.replaceChildren(b);
+    b.onclick = () => N.openPop(b, pop => upCard(pop), { right: true, card: true, label: 'Update' });
+  }
+  b.classList.toggle('warn', st === 'failed');
+  b.setAttribute('aria-label', name);
+  b.dataset.tip = st === 'ready' || st === 'out' ? 'JARVIS ' + v + ': what’s new, and install' : st === 'failed' ? 'See what happened' : name;
+  if (b.dataset.look !== st + '|' + label) { b.dataset.look = st + '|' + label; b.innerHTML = icon(st === 'failed' ? 'warn' : 'down') + '<span>' + label + '</span>'; }
+  // An open card follows the news: it is drawn again for what is true now.
+  const now = st + '|' + v + '|' + (u.result?.at || '');
+  if (UP.shown && UP.shown !== now && b.getAttribute('aria-expanded') === 'true') { N.closePop(); b.click(); }
+  UP.shown = now;
+}
+async function upLoad() {
+  if (MINI) return;
+  let u; try { u = await api('/api/updates'); } catch { return; }
+  UP.data = u; UP.at = Date.now();
+  // A version that has just been installed: said once, with what is new in it.
+  const result = u.result || {}, told = store.get('nv-update-told', '');
+  if (result.version && result.ok && told !== 'done:' + result.version + ':' + result.at) {
+    store.set('nv-update-told', 'done:' + result.version + ':' + result.at); store.set('nv-installing', 'null');
+    const words = u.latest === result.version && u.notes ? u.notes : '';
+    notify('Updated to JARVIS ' + result.version + '.', words ? 'What’s new' : '', () => {
+      const d = dialog('<h2>What’s new in JARVIS ' + esc(result.version) + '</h2><div class="nv-update-notes-full">' + upNotes(words) + '</div><div class="actions"><button class="primary" type="button">Close</button></div>');
+      d.querySelector('button').onclick = () => d.close();
+    });
+  } else if (result.version && result.ok === false) store.set('nv-installing', 'null');
+  upDraw();
+}
+// "/update": look now, then show what there is.
+N.updateNow = async () => {
+  let u; try { u = await api('/api/updates', { action: 'check' }); } catch (error) { toast(error.message); return; }
+  UP.data = u; UP.at = Date.now(); store.set('nv-update-later', '{}'); upDraw();
+  const chip = upChip();
+  if (chip) { if (chip.getAttribute('aria-expanded') !== 'true') chip.click(); }
+  else if (u.managed) notify('This copy of JARVIS is ' + u.managed + ', so it is updated the way it was made.');
+  else if (u.mode === 'off') notify('Updates are switched off. Settings, Updates turns them on.', 'Open', () => N.voiceSettings?.('updates'));
+  else if (u.problem) notify(u.problem, 'Open Updates', () => N.voiceSettings?.('updates'));
+  else notify('This is the newest version: JARVIS ' + u.current + '.');
+};
+setTimeout(upLoad, 8000);
+setInterval(upLoad, 30 * 60 * 1000);
+addEventListener('focus', () => { if (Date.now() - UP.at > 10 * 60 * 1000) upLoad(); });
 loadServices(false);
 // Opened by "Hey JARVIS" or the Talk shortcut. If something was already said, answer it; otherwise listen.
 if (DIRECT && new URLSearchParams(location.search).has('listen')) setTimeout(() => pickUp(true), 600);

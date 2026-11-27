@@ -20,7 +20,7 @@ const P = {
   pulse: '<path d="M3 12h4l3-8 4 16 3-8h4"/>', star: '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9L12 3z"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>', box: '<rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v10h14V9M10 13h4"/>',
   sliders: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
-  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 1-1 1.7M12 17h.01"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 1-1 1.7M12 17h.01"/>', warn: '<path d="M12 4 2.8 19.5h18.4L12 4Z"/><path d="M12 10v4M12 17h.01"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
   chev: '<path d="m6 9 6 6 6-6"/>', check: '<path d="m5 12 5 5 9-10"/>', spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z"/>',
   clip: '<path d="M20 11.5 12 19.5a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L9.7 17.2a1.7 1.7 0 0 1-2.4-2.4L15 7"/>',
   eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>', code: '<path d="m8 7-5 5 5 5M16 7l5 5-5 5"/>',
@@ -153,7 +153,9 @@ function closePop(back) { if (!pop) return; const anchor = popAnchor; pop.remove
 function openPop(anchor, fill, options = {}) {
   if (popAnchor === anchor) return closePop();
   closePop(); hideTip();
-  pop = el('div', { class: 'nv-pop', role: 'menu' }); popAnchor = anchor; anchor.setAttribute('aria-expanded', 'true');
+  // A card (options.card, the Update card) is a small dialog, not a menu: Tab goes through it as on a page.
+  pop = el('div', options.card ? { class: 'nv-pop nv-pop-card', role: 'dialog', 'aria-label': options.label || '' } : { class: 'nv-pop', role: 'menu' });
+  popAnchor = anchor; anchor.setAttribute('aria-expanded', 'true');
   fill(pop); body.append(pop);
   // The menu opens on the side asked for if it fits there, otherwise on the side with more room, and it is never taller
   // than that room: a long menu scrolls inside itself. So its last line can be reached on any screen, at any zoom, in a
@@ -169,7 +171,8 @@ function openPop(anchor, fill, options = {}) {
   pop.style.setProperty('--ox', (r.left + r.width / 2 - left) + 'px'); pop.style.setProperty('--oy', up ? '100%' : '0%');
   pop.addEventListener('keydown', popKeys);
   const chosen = pop.querySelector('.nv-tick')?.closest('button');
-  (chosen || pop.querySelector('button,select,input'))?.focus({ preventScroll: true });
+  const first = options.card ? pop.querySelector('.primary') || pop.querySelector('button,summary') : chosen || pop.querySelector('button,select,input');
+  if (first) first.focus({ preventScroll: true }); else if (options.card) { pop.tabIndex = -1; pop.focus({ preventScroll: true }); }   // (a card with nothing to press is read out itself)
   chosen?.scrollIntoView({ block: 'nearest' });       // the one in use is in sight when the menu opens
   return pop;
 }
@@ -177,6 +180,13 @@ function openPop(anchor, fill, options = {}) {
 // that begins with it. The line that has the keyboard is brought into sight by the browser itself.
 function popKeys(e) {
   if (!pop || e.ctrlKey || e.metaKey || e.altKey) return;
+  // In a card, Tab and Shift+Tab move as they do on a page; past its last control or before its first it closes, back to its button.
+  if (pop.classList.contains('nv-pop-card')) {
+    if (e.key !== 'Tab') return;
+    const stops = [...pop.querySelectorAll('button:not([disabled]),summary,a[href]')].filter(b => b.offsetParent !== null);
+    if (!stops.length || document.activeElement === stops[e.shiftKey ? 0 : stops.length - 1]) { e.preventDefault(); closePop(true); }
+    return;
+  }
   // As in any menu, Tab leaves it: the keyboard goes on from the button that opened it, to the next control or the one before.
   if (e.key === 'Tab') { popAnchor?.focus(); closePop(); return; }
   // A menu's own filter field (the model menu's) is one of its lines: Up and Down leave it; letters are typed into it.
@@ -226,12 +236,55 @@ function ask({ title, label, value = '', ok = 'Save', placeholder = '' }) {
     d.addEventListener('close', () => finish(null));
   });
 }
-function notify(text, actionLabel, action) {
-  const box = $('toast'); box.textContent = text;
-  if (actionLabel) { const b = el('button', { type: 'button' }, esc(actionLabel)); b.onclick = () => { box.classList.add('hidden'); action(); }; box.append(b); }
+// options.stay: it stays until clicked or dismissed. options.entry: a finished task's (see finished below); when another
+// message takes its place, it comes back afterwards. options.then: what follows once it has gone.
+let toastNow = null;
+function notify(text, actionLabel, action, options = {}) {
+  const box = $('toast');
+  if (toastNow?.entry && !options.entry && !box.classList.contains('hidden')) { finishWaiting.unshift(toastNow.entry); options = { ...options, then: finishNext }; }
+  toastNow = options; box.textContent = text;
+  const gone = () => { box.classList.add('hidden'); if (toastNow === options) { toastNow = null; options.then?.(); } };
+  if (actionLabel) { const b = el('button', { type: 'button' }, esc(actionLabel)); b.onclick = () => { gone(); action(); }; box.append(b); }
+  if (options.stay) { const x = el('button', { type: 'button', class: 'nv-toast-x', 'aria-label': 'Dismiss' }, icon('x')); x.onclick = gone; box.append(x); }
   box.classList.remove('hidden'); box.style.animation = 'none'; void box.offsetWidth; box.style.animation = '';
-  clearTimeout(toast.timer); toast.timer = setTimeout(() => box.classList.add('hidden'), actionLabel ? 9000 : 5200);
+  clearTimeout(toast.timer); window.removeEventListener('focus', notify.later);
+  if (options.stay) return;
+  notify.later = () => { clearTimeout(toast.timer); toast.timer = setTimeout(gone, actionLabel ? 9000 : 5200); };
+  if (document.hasFocus()) notify.later(); else window.addEventListener('focus', notify.later, { once: true });   // (raised while you were away: it waits for you)
 }
+
+/* ---------- when JARVIS finishes something: the toast and the sound (the rules: finishPlan in nova-audio.js) ---------- */
+const finishedSeen = new Set(), FINISH_WORDS = { done: 'Finished', failed: 'Could not finish', needs_approval: 'Needs your OK', paused: 'Paused' };
+const FINISH_RANK = { needs_approval: 0, failed: 1, paused: 2, done: 3 }, finishWaiting = [];
+// One at a time, the most urgent first; one that asks for the owner or failed stays until it is clicked or dismissed.
+function finishToast(entry) {
+  finishWaiting.push(entry); finishWaiting.sort((a, b) => FINISH_RANK[a.status] - FINISH_RANK[b.status]);
+  if (!(toastNow?.entry && !$('toast').classList.contains('hidden'))) finishNext();
+}
+function finishNext() {
+  const next = finishWaiting.shift(); if (!next) return;
+  notify(next.text, 'Open', next.open, { entry: next, stay: next.status === 'failed' || next.status === 'needs_approval', then: finishNext });
+}
+// A chat's name in a toast: on one line, at most 60 characters, cut between words.
+function shortName(text) {
+  const one = String(text).replace(/\s+/g, ' ').trim(); if (one.length <= 60) return one;
+  const cut = one.slice(0, 60), space = cut.lastIndexOf(' ');
+  return (space > 30 ? cut.slice(0, space) : cut).replace(/[\s,.;:\u2013-]+$/, '') + '…';
+}
+let lastChime = -1e9;
+function finished({ id = '', chat = '', title = '', status = 'done', seconds = 0, background = false, spoken = false } = {}) {
+  const A = window.NovaAudio; if (!A?.finishPlan) return;
+  const key = (id || chat) + '|' + status; if (finishedSeen.has(key)) return;
+  finishedSeen.add(key); if (finishedSeen.size > 300) finishedSeen.delete(finishedSeen.values().next().value);
+  const focused = document.visibilityState === 'visible' && document.hasFocus();
+  const name = title || (state?.chats || []).find(c => c.id === chat)?.title || 'another chat';
+  const plan = A.finishPlan({ status, seconds, focused, sameChat: !chat || chat === current, background, speaking: spoken || !!A.speaking?.(),
+    sound: state?.learning?.settings?.done_sound !== false, lastChime, now: Date.now() });
+  if (plan.chime) { lastChime = Date.now(); try { A.chime(plan.chime); } catch {} }
+  if (plan.toast && chat) finishToast({ status, text: (FINISH_WORDS[status] || 'Finished') + ': ' + shortName(name), open: () => openChat(chat).catch(error => toast(error.message)) });
+}
+// A sound can only start after the owner has clicked or typed in the window once (the browser's rule): get it ready then.
+for (const kind of ['pointerdown', 'keydown']) document.addEventListener(kind, () => window.NovaAudio?.unlock?.(), { once: true, capture: true });
 
 /* ---------- frame: sidebar, top bar, side panel ---------- */
 const layout = document.querySelector('.layout'), center = document.querySelector('.center'), sidebar = $('sidebar'), topbar = document.querySelector('.topbar');
@@ -369,8 +422,9 @@ if (window.ResizeObserver) new ResizeObserver(fitTop).observe(topLeft);
 const PANES = [], paneButtons = new Map(), TOOL_TABS = new Set(['files', 'terminal', 'browser']);
 function registerPane(def) { const at = PANES.findIndex(p => p.id === def.id); if (at >= 0) PANES[at] = { ...PANES[at], ...def }; else PANES.push(def); drawTabs(); drawTopButtons(); }
 function unregisterPane(id) { const at = PANES.findIndex(p => p.id === id); if (at >= 0) { PANES.splice(at, 1); drawTabs(); drawTopButtons(); } }
+const updateSlot = el('span', { class: 'nv-update-slot' });   // the Update button, when there is one (nova-voice.js)
 function drawTopButtons() {
-  topRight.replaceChildren();
+  topRight.replaceChildren(updateSlot);
   for (const p of PANES.filter(p => p.top)) {
     const b = el('button', { class: 'nv-icon', type: 'button', 'aria-label': p.label, data: { tip: p.tip, pane: p.id } }, icon(p.icon));
     if (p.key) b.dataset.key = p.key;
@@ -705,7 +759,7 @@ function messageHtml(m, i, c) {
     html += '<div class="nv-actions">' + act('copy', 'Copy this reply', 'copy', 'data-answer-action="copy" data-message-index="' + i + '"') + act('retry', 'Try again for a new reply', 'retry', 'data-nv-act="retry" data-i="' + i + '"') +
       act('speak', 'Read this reply aloud', 'speak', 'data-answer-action="speak" data-message-index="' + i + '"') + act('save', 'Save this reply as a file', 'down', 'data-answer-action="save" data-message-index="' + i + '"') +
       (m.agent && m.receipt && !m.fast ? '<button class="nv-icon ' + (rated === 'helpful' ? 'on' : '') + '" type="button" aria-label="Good reply" data-tip="Good reply. Helps JARVIS choose better next time." data-nv-rate="helpful" data-rid="' + esc(m.receipt) + '">' + icon('thumb') + '</button><button class="nv-icon nv-flip ' + (rated === 'needs_work' ? 'on' : '') + '" type="button" aria-label="Not helpful" data-tip="Not helpful. Helps JARVIS choose better next time." data-nv-rate="needs_work" data-rid="' + esc(m.receipt) + '">' + icon('thumb') + '</button>' : '') +
-      '<span class="nv-meta">' + (m.image_ids?.length ? '<span>' + m.image_ids.length + ' image' + (m.image_ids.length === 1 ? '' : 's') + '</span>' : '') + (m.status && m.status !== 'done' ? '<span class="status ' + esc(byYou(m) ? 'cancelled' : m.status) + '">' + esc(wordFor(m)) + '</span>' : '') +
+      '<span class="nv-meta">' + (m.image_ids?.length ? '<span>' + m.image_ids.length + ' image' + (m.image_ids.length === 1 ? '' : 's') + '</span>' : '') + (m.doc_ids?.length ? '<span>' + m.doc_ids.length + ' document' + (m.doc_ids.length === 1 ? '' : 's') + '</span>' : '') + (m.status && m.status !== 'done' ? '<span class="status ' + esc(byYou(m) ? 'cancelled' : m.status) + '">' + esc(wordFor(m)) + '</span>' : '') +
       (m.model && m.model !== 'none' && m.model !== 'compact' ? '<span data-tip="' + (m.switched?.length ? esc('Carried on here after ' + m.switched.join(' and ') + ' reached its limit') : 'The AI that wrote this reply') + '">' +
         esc(m.agent === 'chatgpt' ? 'ChatGPT' + (m.model && m.model !== 'default' ? ' ' + m.model : '') :
           (m.agent === 'codex' ? 'GPT ' : m.agent === 'claude' ? 'Claude ' : m.agent && m.agent !== 'jarvis' ? m.agent[0].toUpperCase() + m.agent.slice(1) + ' ' : '') + String(m.model).split('/').pop()) + (m.switched?.length ? ' ↺' : '') + '</span>' : '') +
@@ -978,13 +1032,16 @@ document.addEventListener('click', async e => {
 });
 
 /* ---------- several chats at once ---------- */
-const priorRenderState = renderState;
+const priorRenderState = renderState, runningSince = new Map();
 renderState = function (d) {
   const now = new Set((d.jobs || []).filter(j => LIVE.has(j.status) && j.chat).map(j => j.chat));
-  for (const id of runningChats) if (!now.has(id) && id !== current) {
-    const info = d.chats.find(c => c.id === id); if (!info) continue;
-    unread.add(id);
-    notify('JARVIS has a new reply in "' + (info.title || 'another chat').slice(0, 48) + '".', 'Open', () => openChat(id).catch(error => toast(error.message)));
+  for (const id of now) if (!runningSince.has(id)) runningSince.set(id, Date.now());
+  for (const id of runningChats) if (!now.has(id)) {
+    const info = d.chats.find(c => c.id === id), job = (d.jobs || []).find(j => j.chat === id), since = runningSince.get(id) || Date.now();
+    runningSince.delete(id); if (!info) continue;
+    if (id !== current) unread.add(id);
+    const status = { merged: 'done', needs_approval: 'needs_approval', paused: 'paused', failed: 'failed', cancelled: 'cancelled' }[job?.status] || 'done';
+    finished({ id: job?.id || id + '@' + since, chat: id, title: info.title, status, seconds: (Date.now() - since) / 1000 });
   }
   const changed = now.size !== runningChats.size || [...now].some(id => !runningChats.has(id));
   if ([...runningChats].some(id => !now.has(id))) runHooks('job');
@@ -1321,6 +1378,7 @@ function runBuiltin(name, words = '') {
   else if (name === 'ultracode') { if (workMode !== 'code') { setWorkMode('code', true); setUltra(true); } else setUltra(!ultra); }
   else if (name === 'new') newChat.click();
   else if (name === 'usage') runCommand('usage');
+  else if (name === 'update') window.Nova.updateNow?.();
   else if (name === 'mods') window.Nova.voiceSettings?.('mods');
   else if (name === 'research') { setResearch(true); message.focus(); }
   else if (name === 'model') {          // /model opens the model menu; /model opus (or chatgpt, gemini, auto) picks
@@ -1443,7 +1501,7 @@ form.onsubmit = async e => {
   try {
     if (window.preparePromptForSend) { const prepared = await window.preparePromptForSend(text); text = prepared.text; if (prepared.review) { setDraft(text); toast('JARVIS improved your message. Check it, then press Send again.'); return; } }
     if (!held.page && await window.Nova.pageForSend?.()) held.page = true;
-    const planning = window.Nova.permissionMode?.() === 'plan' && !(held.uploads || []).some(u => u.image_id);      // (the assistant plans; nothing is changed)
+    const planning = window.Nova.permissionMode?.() === 'plan' && !(held.uploads || []).some(u => u.image_id || u.doc_id);      // (the assistant plans; nothing is changed)
     if (window.Nova.assistantSend && (window.Nova.assistantUsable(held) || planning)) {
       // Fast path: one warm AI answers straight away. The chat is created by the same request.
       message.value = ''; grow(); window.clearJarvisAttachments?.();
@@ -1670,7 +1728,7 @@ document.addEventListener('keydown', e => {
 /* ---------- start ---------- */
 welcome = () => '<div class="welcome"></div>';
 setWorkMode(workMode, false);
-window.Nova = { command: (name, words) => runCommand(name, words || ''), modelLabel, localReply, taskModelsInto, taskModels, loadMods, mods: () => modsData, hook: runHooks, unregisterPane, setFull, isFull, icon, el, openPop, closePop, item, dialog, confirmBox, ask, notify, registerPane, openPane, closePanel, rich, setDraft, store, panel, liveUpdate, applyLight, micButton: micB, refreshMode: () => updateMode(), newChat: () => newChat.click(),
+window.Nova = { command: (name, words) => runCommand(name, words || ''), modelLabel, localReply, taskModelsInto, taskModels, loadMods, mods: () => modsData, hook: runHooks, unregisterPane, setFull, isFull, icon, el, openPop, closePop, item, dialog, confirmBox, ask, notify, finished, updateSlot, registerPane, openPane, closePanel, rich, setDraft, store, panel, liveUpdate, applyLight, micButton: micB, refreshMode: () => updateMode(), newChat: () => newChat.click(),
   setTheme: name => { store.set('nv-theme', name); applyTheme(); }, get pane() { return currentPane; } };
 applyTheme(); drawTabs(); drawTopButtons();
 body.classList.add('nova', 'nv-home'); body.classList.remove('workspace-open');

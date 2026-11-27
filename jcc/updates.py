@@ -371,17 +371,80 @@ def start_install(cfg, start: str = "background", popen=None) -> dict:
     return status(cfg)
 
 
-def background(cfg, stop=None, pause: float = 1800.0, first: float = 180.0) -> None:
-    """The service's own loop: check when due; with updates set to automatic, fetch a signed update straight away."""
+class _Stay(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None                                       # (the address it points to is the answer: it is not followed)
+
+
+def _head(url: str) -> str:
+    """Where a page sends its visitor on ("" when it does not, or cannot be reached)."""
+    request = urllib.request.Request(url, method="HEAD", headers={"User-Agent": AGENT})
+    try:
+        urllib.request.build_opener(_Stay).open(request, timeout=20).close()
+        return ""
+    except urllib.error.HTTPError as answer:
+        return answer.headers.get("Location", "") if answer.code in (301, 302, 303, 307, 308) else ""
+    except (OSError, ValueError):
+        return ""
+
+
+def peek(cfg) -> str:
+    """The newest release's version, from where GitHub's "latest release" link points ("" when it cannot say). One
+    plain request for a public page, with nothing about the owner in it, and not counted against GitHub's limits for
+    its API: so JARVIS can look every few minutes. It is only a hint: check() still reads the release itself, and an
+    update is installed only when its signature checks out."""
+    where = _head(f"https://github.com/{settings(cfg)['repo']}/releases/latest")
+    found = re.search(r"/releases/tag/v?(\d{1,4}\.\d{1,4}\.\d{1,6})$", where)
+    return found.group(1) if found else ""
+
+
+def news(cfg) -> bool:
+    """Is there something new to check properly: a version newer than both this copy and the newest one JARVIS already
+    knows of, or the known one still waiting for its signature? (A release is built and signed a few minutes after it
+    is published; without the second case JARVIS would notice the signature only a day later.)"""
+    seen = peek(cfg)
+    if not version_tuple(seen):
+        return False
+    data = read_status(cfg)
+    known = data.get("latest") or ""
+    if version_tuple(seen) <= version_tuple(current_version()):
+        return False
+    if not version_tuple(known) or version_tuple(seen) > version_tuple(known):
+        return True
+    return seen == known and bool(data.get("available")) and not data.get("signed")
+
+
+PEEK = 600.0              # how often the service looks for a new release (seconds): a new version is seen within ten minutes
+
+
+def background(cfg, stop=None, pause: float = 60.0, first: float = 60.0, changed=None, look=None, clock=time.time) -> None:
+    """The service's own loop. Every ten minutes it looks whether a new version has been published (peek: one small
+    request); when one has, or once a day anyway, it checks properly, and with updates set to automatic fetches a signed
+    update straight away. `changed()` is called when there is news for the window (it then shows the Update button at
+    once). Silent while updates are off or this copy is not one JARVIS updates."""
     wait = (stop.wait if stop is not None else time.sleep)
+    look = look or news
     if wait(first):
         return
+    last_peek = float("-inf")             # (so the first round looks)
     while True:
         try:
-            if due(cfg):
-                found = check(cfg)
-                if found.get("available") and found.get("signed") and settings(cfg)["mode"] == "auto" and not ready(cfg):
-                    download(cfg)
+            options = settings(cfg)
+            if options["mode"] != "off" and not managed():
+                now = clock()
+                fresh = False
+                if now - last_peek >= PEEK:        # (wall-clock time: after the PC wakes from sleep, it looks at once)
+                    last_peek = now
+                    fresh = look(cfg)
+                if fresh or due(cfg):
+                    known = read_status(cfg)
+                    before = (known.get("latest"), bool(known.get("available")), bool(known.get("signed")))
+                    found = check(cfg)
+                    if found.get("available") and found.get("signed") and options["mode"] == "auto" and not ready(cfg):
+                        download(cfg)
+                    after = (found.get("latest"), bool(found.get("available")), bool(found.get("signed")))
+                    if changed and (after != before or (ready(cfg) and found.get("available"))):
+                        changed()
         except Exception:  # noqa: BLE001 - it is tried again at the next round; the problem is in update-status.json
             pass
         if wait(pause):

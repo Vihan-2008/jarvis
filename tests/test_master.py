@@ -147,7 +147,7 @@ class DocumentTests(EngineTestCase):
     def test_text_and_docx_are_extracted_without_writing_files(self):
         self.assertEqual(documents.extract('notes.txt',self.encoded(b'Hello'))['text'],'Hello');buffer=io.BytesIO()
         with zipfile.ZipFile(buffer,'w') as archive:archive.writestr('word/document.xml','<doc><p>Hello document</p></doc>')
-        result=documents.extract('notes.docx',self.encoded(buffer.getvalue()));self.assertIn('Hello document',result['text']);self.assertTrue(result['notes']);self.assertFalse(self.jobs_root.exists())
+        result=documents.extract('notes.docx',self.encoded(buffer.getvalue()));self.assertIn('Hello document',result['text']);self.assertEqual(result['notes'],[]);self.assertFalse(self.jobs_root.exists())
 
     def test_binary_and_xml_entities_are_rejected(self):
         with self.assertRaises(ValueError):documents.extract('image.png',self.encoded(b'PNG'))

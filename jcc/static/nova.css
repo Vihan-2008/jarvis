@@ -123,6 +123,9 @@ dialog li{font-size:14px;line-height:1.7;color:var(--ink-2);margin:4px 0}dialog 
 @keyframes nv-fade{from{opacity:0}}
 .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:90;max-width:min(560px,90vw);padding:11px 16px;border-radius:12px;background:var(--ink);color:var(--bg);font-size:13.5px;font-weight:500;box-shadow:var(--shadow);animation:nv-toast var(--mid) var(--ease);display:flex;gap:12px;align-items:center}
 .toast button{border:0;background:none;color:inherit;font-weight:700;text-decoration:underline;padding:0}
+.toast .nv-toast-x{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;margin:-4px -8px -4px -6px;border-radius:6px;opacity:.7;text-decoration:none}
+.toast .nv-toast-x:hover,.toast .nv-toast-x:focus-visible{opacity:1}.toast .nv-toast-x svg{width:14px;height:14px}
+.assistant-check:has(input:disabled){opacity:.5}
 @keyframes nv-toast{from{opacity:0;transform:translate(-50%,12px)}}
 
 /* ---------- app frame ---------- */
@@ -374,6 +377,7 @@ body.nv-working #nv-stop{display:grid}
 #nv-stop svg{fill:currentColor;stroke:none;width:14px;height:14px}
 .attachment-chips{display:flex;flex-wrap:wrap;gap:6px;padding:0 6px}.attachment-chips:not(:empty){padding-bottom:6px}
 .attachment-chips button{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid var(--line-2);border-radius:99px;background:var(--surface-2);font-size:12.5px;color:var(--ink);animation:nv-rise .25s var(--ease)}
+.attachment-chips .reading{display:inline-flex;align-items:center;padding:5px 10px;border:1px dashed var(--line-2);border-radius:99px;font-size:12.5px;color:var(--ink-2)}
 .page-attach{display:inline-flex;align-items:center;margin:6px 8px 0;font-size:12.5px}
 #chat-turn-state{position:absolute;left:0;right:0;bottom:100%;text-align:center;font-size:12.5px;color:var(--ink-3);padding-bottom:6px;pointer-events:none}
 #chat-turn-state:empty{display:none}
@@ -517,7 +521,7 @@ button.activity-row:hover,button.activity-row.selected{border-color:var(--accent
 .learning-table,.insight-table,.ops-table{font-size:13px}
 .assistant-check{display:flex;gap:8px;align-items:center;margin:8px 0;font-size:13.5px;color:var(--ink)}
 .context-budget{font-size:13px;color:var(--ink-2)}
-.toast{top:14px;bottom:auto;animation-name:nv-toast-top}
+.toast{top:calc(var(--top-h) + 8px);bottom:auto;animation-name:nv-toast-top}   /* (below the top bar, never over it) */
 @keyframes nv-toast-top{from{opacity:0;transform:translate(-50%,-12px)}}
 #nv-page-chip{display:inline-flex;align-items:center;gap:6px;margin:0 6px 6px;padding:5px 10px;border:1px solid var(--line-2);border-radius:99px;background:var(--accent-soft);color:var(--ink);font-size:12.5px;animation:nv-rise .25s var(--ease)}
 #nv-page-chip svg.i{width:13px;height:13px}
@@ -1073,7 +1077,7 @@ body:not(.nv-coding) .nv-secure{display:none}
 .nv-rt-days{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
 .nv-rt-days>span{flex-basis:100%}
 .nv-rt-days label{flex-direction:row;align-items:center;gap:4px;font-size:13px;color:var(--ink-2)}
-.nv-update-notes pre{white-space:pre-wrap;max-height:220px;overflow:auto;font:inherit;font-size:12.5px;opacity:.85;margin:6px 0 0}
+.nv-update-notes .nv-update-notes-list{max-height:220px}
 .nv-update-said b{font-weight:600}
 
 /* ---------- The simple window: one-row message bar, compact activity lines, cards in the chat, commands that answer here ---------- */
@@ -1347,3 +1351,27 @@ body.nv-lite.nv-chat:not(.nv-mini) #nv-stage{transition:transform .45s var(--eas
 #nv-captions .state .nv-orbs{display:none;--orb:5px;--orb-r:6px;--orb-t:2px;width:18px;height:14px}
 #nv-captions[data-phase=thinking] .state .nv-orbs{display:inline-block}
 #nv-captions[data-phase=thinking] .state>i:first-child{display:none}
+
+/* The Update button in the top bar, and its card (nova-voice.js, "the Update button") */
+.nv-update-slot{display:contents}
+.nv-update-chip{display:inline-flex;align-items:center;gap:6px;height:28px;margin-right:6px;padding:0 12px 0 9px;border:0;border-radius:99px;background:var(--accent-soft);color:var(--ink);font-size:12.5px;font-weight:600;white-space:nowrap;cursor:pointer;transition:background var(--fast);animation:nv-chip-in .24s var(--ease)}
+.nv-update-chip svg.i{width:15px;height:15px;color:var(--accent)}
+.nv-update-chip:hover:not(:disabled){background:color-mix(in srgb,var(--accent) 24%,transparent)}
+.nv-update-chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.nv-update-chip:disabled{cursor:default;opacity:.8}
+.nv-update-chip.warn{background:color-mix(in srgb,var(--warn) 18%,transparent)}.nv-update-chip.warn svg.i{color:var(--warn)}
+@keyframes nv-chip-in{from{opacity:0;transform:scale(.96)}}
+@media (max-width:720px){.nv-update-chip span{display:none}.nv-update-chip{width:32px;height:32px;padding:0;justify-content:center}}
+@media (prefers-reduced-motion:reduce){.nv-update-chip{animation:none}}
+.nv-pop .nv-update-card{width:min(320px,86vw);padding:8px 10px 6px}
+.nv-pop-card:focus{outline:none}
+.nv-update-card h4{margin:2px 0 6px;font-size:14px;color:var(--ink)}
+.nv-update-card p{margin:0 0 8px;font-size:13px;line-height:1.45;color:var(--ink-2)}
+.nv-update-card p.small{font-size:12px}
+.nv-update-card details{margin:0 0 8px;font-size:12.5px}.nv-update-card summary{cursor:pointer;color:var(--ink)}
+.nv-update-notes-list{max-height:260px;overflow:auto;margin:6px 0 0;padding:8px 10px;border-radius:var(--r-sm);background:var(--surface-3);font-size:12.5px;line-height:1.5;color:var(--ink-2)}
+.nv-update-notes-list ul,.nv-update-notes-full ul{margin:0;padding-left:18px}.nv-update-notes-list li+li{margin-top:3px}
+.nv-update-notes-list p,.nv-update-notes-full p{margin:0 0 6px}.nv-update-card .nv-update-notes-list p{font-size:12.5px;color:var(--ink-2)}
+.nv-update-notes-full{max-height:50vh;overflow:auto;margin:0 0 4px;font-size:13.5px;line-height:1.55;color:var(--ink-2)}.nv-update-notes-full li+li{margin-top:5px}
+.nv-pop .nv-update-do button{width:auto;min-height:32px;padding:6px 12px;justify-content:center;white-space:nowrap;font-size:13px;font-weight:500;border-radius:var(--r-sm)}
+.nv-update-do{display:flex;gap:8px;justify-content:flex-end;margin-top:6px}

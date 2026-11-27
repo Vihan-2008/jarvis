@@ -44,7 +44,7 @@ class Engine:
     def process(self, text: str, rid: str | None = None, retry_tier2: bool = False,
                 project: str | None = None, agent: str | None = None,
                 chat_id: str | None = None, context: str = "", mode: str = "auto",
-                manual_model: str = "auto", effort: str = "auto", image_ids=None) -> receipts.Receipt:
+                manual_model: str = "auto", effort: str = "auto", image_ids=None, doc_ids=None) -> receipts.Receipt:
         """project: project key, "auto" (detect from text) or "none"; agent: name or "auto"."""
         text = redact(text.strip())
         rid = rid or receipts.new_id()
@@ -70,7 +70,7 @@ class Engine:
                 res = self.tier2.run(d.handler, text, d.arg, context=context)
             else:
                 out = self.jobs.launch(rid, d.handler or "job", d.arg or text, project, agent,
-                                       chat_id=chat_id, context=context, manual_model=manual_model, effort=effort,image_ids=image_ids)
+                                       chat_id=chat_id, context=context, manual_model=manual_model, effort=effort,image_ids=image_ids,doc_ids=doc_ids)
                 res = TierResult(out.message, out.status, out.agent or "none",
                                  0, out.outputs, "" if out.status != "failed" else out.message)
         except Exception as e:  # noqa: BLE001 - every request must still leave a receipt
@@ -143,7 +143,7 @@ class Engine:
             outcome = self.jobs.launch(rid, str(fm.get("kind", "job")), task,
                                        project=str(fm.get("project_key", "auto")), agent=prefer,
                                        chat_id=fm.get("chat_id") or None, context=context,
-                                       manual_model=str(fm.get("manual_model", "auto")), effort=str(fm.get("effort", "auto")),image_ids=fm.get("image_ids") or [])
+                                       manual_model=str(fm.get("manual_model", "auto")), effort=str(fm.get("effort", "auto")),image_ids=fm.get("image_ids") or [],doc_ids=fm.get("doc_ids") or [])
             receipts.update_status(self.vault, rid, outcome.status, append=outcome.message)
             if fm.get("chat_id"):
                 from jcc.chats import Chats

@@ -107,7 +107,7 @@ class JobLauncher:
 
     def launch(self, rid: str, kind: str, task: str, project: str | None = None,
                agent: str | None = None, chat_id: str | None = None, context: str = "",
-               manual_model: str = "auto", effort: str = "auto",image_ids=None) -> JobOutcome:
+               manual_model: str = "auto", effort: str = "auto",image_ids=None,doc_ids=None) -> JobOutcome:
         lock = InstanceLock(self.cfg.state_dir / "launch.lock")
         for _ in range(300):                      # another job is being scheduled at this moment: wait for it (up to a minute)
             if lock.acquire():
@@ -116,16 +116,19 @@ class JobLauncher:
         else:
             return JobOutcome("failed", "Another job is being scheduled. Please send again.", [])
         try:
-            return self._launch(rid, kind, task, project, agent, chat_id, context, manual_model, effort,image_ids)
+            return self._launch(rid, kind, task, project, agent, chat_id, context, manual_model, effort,image_ids,doc_ids)
         finally:
             lock.release()
 
     def _launch(self, rid: str, kind: str, task: str, project: str | None,
-                agent: str | None, chat_id: str | None, context: str, manual_model: str, effort: str,image_ids=None) -> JobOutcome:
+                agent: str | None, chat_id: str | None, context: str, manual_model: str, effort: str,image_ids=None,doc_ids=None) -> JobOutcome:
         cfg = self.cfg
         from jcc.image_inputs import validate
+        from jcc import doc_inputs
         image_ids=image_ids or []
         validate(cfg,image_ids)
+        doc_ids=doc_ids or []
+        doc_inputs.validate(cfg,doc_ids)
         supplied_context = context
         workspace.refresh(cfg)
         if project and project not in ("auto", "none") and project not in cfg.projects:
@@ -160,7 +163,7 @@ class JobLauncher:
             effort = cfg.raw.get("routing_choices", {}).get(p.level, {}).get("effort", "auto")
         base_fm = {"id": rid, "kind": kind, "task": task, "project": proj.name if proj else "",
                    "level": p.level, "agents_planned": p.agents, "project_key": reference_project,
-                   "image_ids":image_ids,"chat_id": chat_id or "", "context": redact(supplied_context[:18000]),
+                   "image_ids":image_ids,"doc_ids":doc_ids,"chat_id": chat_id or "", "context": redact(supplied_context[:18000]),
                    "manual_model": manual_model, "effort": effort, "reference_project": reference_project,
                    "preferred_agent": agent or "auto",
                    "receipt": f"[[{receipts.receipt_rel(rid).removesuffix('.md')}]]"}
@@ -215,7 +218,7 @@ class JobLauncher:
         spec = {"id": rid, "kind": kind, "task": redact(task),
                 "project": proj.key if proj else None, "prefer": agent,
                 "level": p.level, "vault": str(self.vault.root), "chat_id": chat_id,
-                "image_ids":image_ids,"context": redact(context), "reference_project": reference_project,
+                "image_ids":image_ids,"doc_ids":doc_ids,"context": redact(context), "reference_project": reference_project,
                 "manual_model": manual_model, "effort": effort,
                 "timeout_minutes": limits["timeout_minutes"], "max_attempts": limits["max_attempts"]}
         from jcc.delivery import criteria

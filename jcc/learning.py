@@ -8,7 +8,9 @@ from statistics import median
 from jcc.vault import atomic_write, read_json
 from jcc.lock import InstanceLock
 
-DEFAULTS = {"adaptive_routing": True, "review_before_merge": False, "desktop_alerts": True}
+DEFAULTS = {"adaptive_routing": True, "review_before_merge": False, "desktop_alerts": True,
+            "done_sound": True,             # (the sound when a task finishes: jcc/static/nova-audio.js, jcc/notices.py)
+            "notice_titles": False}         # (the chat's name in the Windows notification: off unless asked for, jcc/notices.py)
 
 
 def settings(cfg):
@@ -17,10 +19,12 @@ def settings(cfg):
 
 
 def configure(cfg, values):
-    if not isinstance(values, dict) or set(values) != set(DEFAULTS) or any(not isinstance(v, bool) for v in values.values()):
-        raise ValueError('Supply the three assistant preferences as on/off values.')
-    atomic_write(cfg.state_dir / 'assistant-settings.json', json.dumps(values))
-    return values
+    """Change some of these preferences (on/off each); the others stay as they are."""
+    if not isinstance(values, dict) or not values or not set(values) <= set(DEFAULTS) or any(not isinstance(v, bool) for v in values.values()):
+        raise ValueError('Supply assistant preferences as on/off values.')
+    merged = {**settings(cfg), **values}
+    atomic_write(cfg.state_dir / 'assistant-settings.json', json.dumps(merged))
+    return merged
 
 
 def family(task, kind='job'):

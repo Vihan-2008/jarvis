@@ -483,7 +483,7 @@ function loudness() {
 }
 
 /* ---------- soft sounds ---------- */
-const TONES = { listen: [[660, 0, 0.09], [880, 0.08, 0.12]], heard: [[880, 0, 0.07], [660, 0.07, 0.1]], notice: [[784, 0, 0.14], [1047, 0.14, 0.14], [1319, 0.28, 0.22]], error: [[330, 0, 0.16], [262, 0.14, 0.22]] };
+const TONES = { done: [[523, 0, 0.12], [784, 0.11, 0.26]], listen: [[660, 0, 0.09], [880, 0.08, 0.12]], heard: [[880, 0, 0.07], [660, 0.07, 0.1]], notice: [[784, 0, 0.14], [1047, 0.14, 0.14], [1319, 0.28, 0.22]], error: [[330, 0, 0.16], [262, 0.14, 0.22]] };
 function chime(name) {
   const notes = TONES[name]; if (!notes) return;
   const context = output(), start = context.currentTime + 0.02, volume = context.createGain(); volume.gain.value = 0.07; volume.connect(context.destination);
@@ -494,7 +494,21 @@ function chime(name) {
   }
 }
 
-window.NovaAudio = { RATE, micStart, micStop, hear, detector, join, pcm, encoded, hush, duck, hold, speaking, remaining, loudness, chime, unlock: output,
+/* ---------- when JARVIS finishes something ---------- */
+// What the window does when an answer or a task ends. (The Windows notification is the app's own: jcc/notices.py.)
+//   in front, this chat: the sound only for work that took a while (20 s or more), nothing else;
+//   in front, another chat: a toast with Open, and the sound after 20 s;
+//   behind other windows or minimised: the sound after 5 s, and for another chat a toast that waits until you are back;
+//   a background task always counts as long; a failure always does when you are not looking;
+//   never a sound while JARVIS is speaking, nor more than one every three seconds.
+function finishPlan({ status, seconds = 0, focused = true, sameChat = true, background = false, speaking = false, sound = true, lastChime = -1e9, now = 0 }) {
+  if (!['done', 'failed', 'needs_approval', 'paused'].includes(status)) return { chime: '', toast: false };
+  const long = background || Number(seconds) >= (focused ? 20 : 5) || (status === 'failed' && !focused);
+  const chime = sound && !speaking && long && now - lastChime >= 3000 ? (status === 'failed' ? 'error' : 'done') : '';
+  return { chime, toast: !sameChat };
+}
+
+window.NovaAudio = { RATE, micStart, micStop, hear, detector, join, pcm, encoded, hush, duck, hold, speaking, remaining, loudness, chime, finishPlan, unlock: output,
   get echoAll() { return echoAll; }, get held() { return held; },
   onQuiet: fn => { whenQuiet = fn; }, devices, use, plain, levels, overheard, nearOnly, get truly() { return !!trueStream; },
   get micLevel() { return micLevel; }, get micOn() { return !!micNode; }, get micName() { return micName; },

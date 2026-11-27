@@ -227,7 +227,9 @@ class Workbench:
             raise ValueError("Invalid attachment list.")
         blocks = []
         from jcc.image_inputs import validate
+        from jcc import doc_inputs
         validate(self.cfg,[u['image_id'] for u in uploads if u.get('image_id')])
+        doc_inputs.validate(self.cfg,[u['doc_id'] for u in uploads if u.get('doc_id')])
         for file in files[:4]:
             result = self.files(str(file.get("project", "")), str(file.get("path", "")))
             if "text" in result:
@@ -238,6 +240,10 @@ class Workbench:
                 blocks.append(f"Explicitly attached browser page {page['url']}:\n{page['text'][:10000]}")
         for upload in uploads[:3]:
             if upload.get('image_id'):blocks.append('Explicit image attachment: '+str(upload.get('name','image'))[:120]+'. Image token usage is additional to text estimates.')
+            if upload.get('doc_id'):
+                blocks.append('Attached document '+str(upload.get('name','document'))[:120]+': its pages and pictures are in the job folder (named below). '
+                              'The start of its text:\n'+redact(str(upload.get('text') or ''))[:6000])
+                continue
             if isinstance(upload, dict) and isinstance(upload.get("text"), str):
                 blocks.append(f"Attached text file {str(upload.get('name','file'))[:120]}:\n{redact(upload['text'])[:8000]}")
         return "\n\n".join(blocks)[:18000]
