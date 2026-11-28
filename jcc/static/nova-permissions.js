@@ -91,6 +91,7 @@ function cardHtml(r) {
     '<b class="nv-next-q">' + esc(r.question) + '</b>';
   if (r.detail) html += r.detail.length > 220 ? '<details class="nv-next-more"><summary>' + esc(r.detail.slice(0, 160)) + '…</summary><pre>' + esc(r.detail) + '</pre></details>' : '<p class="nv-next-detail">' + esc(r.detail) + '</p>';
   if (r.why) html += '<small class="nv-next-why">' + esc(r.why) + '</small>';
+  if (r.phone) html += '<small class="nv-next-why">' + (r.phone === 'here' ? 'Only this computer can approve this, not your phone.' : 'You can also answer this on your phone.') + '</small>';
   if (r.kind === 'review') html += '<div class="nv-next-changes" data-changes>Reading the changes…</div>';
   if (r.kind === 'job') html += '<input class="nv-next-words" placeholder="Add a few words, if you like" aria-label="Your answer">';
   const buttons = r.kind === 'review' ? B('data-no', 'Throw away') + B('data-yes disabled', 'Keep them', true)

@@ -770,6 +770,11 @@ carefulChip.onclick = () => {
   d.querySelector('.primary').onclick = () => d.close(); d.querySelector('[data-new]').onclick = () => { d.close(); N.newChat?.(); };
 };
 const carefulChats = new Set();
+// The Phone chat is shared with the owner's phone (jcc/phone.py): said at the top, with what is left out of it.
+const phoneChip = el('button', { class: 'nv-careful hidden', type: 'button', data: { tip: 'Shared with your phone. Private notes are left out of this chat.' } }, icon('phone') + '<span>Shared with your phone</span>');
+document.querySelector('.topbar')?.append(phoneChip);
+phoneChip.onclick = () => { const d = dialog('<h2>Shared with your phone</h2><p>This chat is the one your phone app shows. Private notes are left out of it. Paying, deleting, installing, trading and system commands can only be approved on this computer.</p><div class="actions"><button class="plain" data-manage>Manage phones</button><button class="primary">OK</button></div>'); d.querySelector('.primary').onclick = () => d.close(); d.querySelector('[data-manage]').onclick = () => { d.close(); N.phoneCommand?.(); }; };
+setInterval(() => { phoneChip.classList.toggle('hidden', !(current && chat?.id === current && chat?.phone === true)); }, 600);
 setInterval(() => { carefulChip.classList.toggle('hidden', !(current && (chat?.id === current && chat?.careful === true || carefulChats.has(current)))); }, 600);
 
 /* ---------- which AI is answering ----------
@@ -1031,7 +1036,8 @@ function handle(event) {
   } else if (k === 'confirm') askConfirm(event);
   else if (k === 'confirmed' && confirmOpen?.dataset.id === event.id) { confirmOpen.close(); confirmOpen = null; }
   else if (k === 'careful') carefulChats.add(event.chat);
-  else if (k === 'site' && !MINI) N.siteCard?.(event.change);   // a website change: its preview, with Publish and Discard (nova-sites.js)
+  else if (k === 'site' && !MINI) N.siteCard?.(event.change);
+  else if (k === 'phone_pair' && !MINI) N.phonePair?.(event);      // a phone typed the right code: the owner says yes here (nova-phone.js)   // a website change: its preview, with Publish and Discard (nova-sites.js)
   else if (k === 'wake') A.unlock();   // "Hey JARVIS" or the Talk shortcut, somewhere on the PC: pickUp() below goes and takes it
   else if (k === 'name') nameHeard(Number(event.at) || Date.now() / 1000);   // its name, heard during this conversation
   // "JARVIS, stop", "go to sleep" or "end session", heard by the helper that listens for the name (it hears them even while

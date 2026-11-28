@@ -622,6 +622,7 @@ pageChip.onclick = () => { webSkip = webSite; drawChip(); notify('This page will
 webOffer.addEventListener('click', async e => { const b = e.target.closest('[data-login]'); if (!b) return; try { await webCall({ action: 'login', decision: b.dataset.login }); webOffer.classList.add('hidden'); offerSig = ''; if (b.dataset.login === 'save') notify('Sign-in saved. Use Fill sign-in next time.'); } catch (error) { toast(error.message); } });
 webFill.onclick = () => webCall({ action: 'login', decision: 'fill' }).then(() => webView.focus()).catch(error => toast(error.message));
 new MutationObserver(drawChip).observe(web, { attributes: true, attributeFilter: ['class'] });
+N.openWeb = query => { openPane('browser'); return webOpen(query); };       // (the browser panel, Windows only: /trading opens a dashboard there)
 N.pageForSend = async () => { if (pageChip.classList.contains('hidden')) return false; try { const d = await webCall({ action: 'text', auto: true }); if (d.skipped) { notify(d.reason); return false; } return true; } catch { return false; } };
 const BUTTONS = ['left', 'middle', 'right'];
 webView.addEventListener('pointerdown', e => { webView.focus(); webView.setPointerCapture(e.pointerId); webSend({ t: 'mousePressed', ...webPoint(e), b: BUTTONS[e.button] || 'left', bs: e.buttons, c: e.detail || 1, m: mods(e) }); e.preventDefault(); });

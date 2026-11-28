@@ -1618,8 +1618,11 @@ class Assistant:
         options, helper = settings(self.cfg), active_assistant(self.cfg)
         from jcc import mods
         # One of the owner's own commands (/name): what it stands for is what is asked. The chat keeps what was typed.
-        asked, command = mods.expand(self.cfg, text) if not spoken else (text, "")
-        if not attached and not research and not command:
+        from jcc import phone
+        from_phone = phone.is_phone_chat(self.cfg, chat_id)      # the Phone chat: careful always; nothing done without the gate
+        # (the owner's own /commands and skills run only from the computer: a phone message is never expanded into one)
+        asked, command = mods.expand(self.cfg, text) if not spoken and not from_phone else (text, "")
+        if not attached and not research and not command and not from_phone:
             if chat_id and not spoken and re.fullmatch(r"/compact|compact (?:this|the) (?:chat|conversation)", text.lower()):
                 return self.compact(chat_id)
             # Heard among other voices, and not plainly said by someone nearer the microphone than they are: these may
@@ -1683,7 +1686,9 @@ class Assistant:
             if not self.turns:
                 (self.cfg.state_dir / "computer-stop").unlink(missing_ok=True)
             self.turns[chat_id] = turn
-        turn.seen = self.look() if options["pc_control"] else ""
+        turn.seen = self.look() if options["pc_control"] and not from_phone else ""
+        if from_phone:
+            self.mark(chat_id, exposed=True, private=True)
         if turn.seen:
             self.mark(chat_id, private=True)        # window titles are the owner's own data
         if attached:
@@ -2157,10 +2162,23 @@ class Assistant:
         marks = self.flags(chat_id)
         ctx = policy.Context(exposed=marks["exposed"], private=marks["private"], level=options["ask"], window=str(window)[:200],
                              control=str(control)[:120], vault=str(self.cfg.vault), app_dir=str(ROOT), state_dir=str(self.cfg.state_dir))
+        from jcc import phone
+        from_phone = phone.is_phone_chat(self.cfg, chat_id)
+        if from_phone:
+            ctx.exposed = True                    # the Phone chat never leaves careful mode
+            ctx.level = ctx.level if ctx.level in ("all", "plan") else "risky"     # careful: every question is asked
         decision = policy.decide(str(tool), args if isinstance(args, dict) else {}, ctx)
         if decision.verdict == policy.DENY:
             return {"ok": False, "reason": decision.reason}
-        if policy.needs_owner(decision, ctx) and not self.ask_owner(turn, decision.question, decision.detail, decision.kind):
+        rule = phone.restrict(str(tool), args, decision, self.cfg.vault, chat_id) if from_phone else None
+        if rule and rule[0] == "deny":
+            return {"ok": False, "reason": rule[1]}
+        phone_ok = rule is None
+        if rule and decision.verdict != policy.CONFIRM:
+            decision = policy.Decision(policy.CONFIRM, "risky", "Shall I " + str(tool).split("__")[-1].replace("_", " ") + "?",
+                                       redact(str(args))[:300], core=True)
+        careful = from_phone and decision.verdict == policy.CONFIRM          # (the Phone chat asks every question)
+        if (policy.needs_owner(decision, ctx) or rule or careful) and not self.ask_owner(turn, decision.question, decision.detail, decision.kind, phone_ok=phone_ok):
             return {"ok": False, "reason": "The user said no (or did not answer). Do not do it, and do not try another way."}
         self.mark(chat_id, *policy.marks(str(tool), args if isinstance(args, dict) else {}))
         return {"ok": True}
@@ -2170,15 +2188,16 @@ class Assistant:
             chat_id = self.session_chat.get(str(session_id))
             return self.turns.get(chat_id) if chat_id else None
 
-    def ask_owner(self, turn: Turn, question: str, detail: str = "", kind: str = "risky", timeout: float = 150.0) -> bool:
-        """Blocks until the owner answers in the window (or by voice). No answer counts as no."""
-        entry = {"id": _rand.token_hex(6), "question": redact(question)[:200], "detail": redact(detail)[:700], "kind": kind, "chat": turn.chat,
+    def ask_owner(self, turn: Turn, question: str, detail: str = "", kind: str = "risky", timeout: float = 150.0, phone_ok: bool = True) -> bool:
+        """Blocks until the owner answers in the window (or by voice, or, in the Phone chat, with a signed yes on a paired phone,
+        unless phone_ok is False: then only the window can say yes). No answer counts as no."""
+        entry = {"id": _rand.token_hex(6), "question": redact(question)[:200], "detail": redact(detail)[:700], "kind": kind, "chat": turn.chat, "phone_ok": phone_ok,
                  "turn": turn.id, "approved": None, "asked": time.time(), "event": threading.Event()}
         with self.lock:
             if turn.stopping or self.turns.get(turn.chat) is not turn:
                 return False
             self.pending[entry["id"]] = entry
-        self.emit("confirm", **{k: entry[k] for k in ("id", "question", "detail", "kind", "chat")})
+        self.emit("confirm", **{k: entry[k] for k in ("id", "question", "detail", "kind", "chat", "phone_ok")})
         entry["event"].wait(timeout)
         with self.lock:
             self.pending.pop(entry["id"], None)

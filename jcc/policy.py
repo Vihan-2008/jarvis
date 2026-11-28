@@ -39,7 +39,7 @@ ALLOW, CONFIRM, DENY = "allow", "confirm", "deny"
 # Tools that do not touch the computer itself; they stay available when PC control is switched off.
 WITHOUT_PC = frozenset({"set_timer", "set_reminder", "list_reminders", "cancel_reminder", "weather", "where_to_watch", "remember", "forget", "add_note",
                         "read_web_page", "make_image", "list_projects", "create_project", "build_with_coding_agents", "connector", "use_accounts",
-                        "use_outlook", "list_sites", "site_read", "site_change", "site_publish"})
+                        "use_outlook", "list_sites", "site_read", "site_change", "site_publish", "trading_status", "app_help"})
 
 def _on_mac() -> bool:
     from jcc import system
@@ -62,7 +62,7 @@ LEVELS = ("sending", "edits", "plan", "all", "bypass", "risky")
 QUIET_TOOLS = frozenset({"see_screen", "list_controls", "list_windows", "find_files", "read_file", "read_web_page", "weather", "list_reminders",
                          "list_projects", "wait", "find_videos", "read_clipboard", "scroll", "set_timer", "set_reminder", "cancel_reminder",
                          "set_volume", "set_brightness", "media", "focus_window", "move_window", "where_to_watch", "list_sites", "site_read",
-                         "site_change"})       # (site_change only makes a preview on this computer: nothing reaches the site)
+                         "site_change", "trading_status", "app_help"})       # (site_change only makes a preview on this computer: nothing reaches the site)
 # What may still be done in Plan mode besides those: looking things up, which changes nothing.
 PLAN_LOOKS = frozenset({"WebSearch", "WebFetch", "list_projects", "see_screen", "find_files", "read_file"})
 # Windows where Enter sends what was typed (chat apps and public posts). In a mail window only ctrl+enter sends.
@@ -297,6 +297,12 @@ def _decide(tool: str, args: dict, ctx: Context) -> Decision:
     if tool in ("list_sites", "site_read", "site_change"):
         # The owner's connected websites (jcc/sites.py): reading them, and making a change into a preview on this computer.
         return _allow()
+    if tool == "app_help":
+        # JARVIS's own guides and data map (jcc/app_help.py): read on this computer, nothing sent anywhere.
+        return _allow()
+    if tool == "trading_status":
+        # The owner's paper-trading app (jcc/trading.py): one GET of numbers and codes; nothing there can be changed from here.
+        return _allow()
     if tool == "site_publish":
         # Out in the world, in the owner's name: asked about like sending, after the owner has seen the preview.
         return _ask("send", f"Shall I publish this change to {str(args.get('site') or 'your website')[:80]}?", str(args.get("summary") or args.get("change", ""))[:300],
@@ -500,6 +506,8 @@ def marks(tool: str, args: dict) -> tuple[bool, bool]:
         return reads_content(str((args or {}).get("command", ""))), True
     if short == "list_projects":
         return False, True
+    if short == "trading_status":
+        return False, True         # (numbers and codes only, nothing written by others; but the owner's money is their business)
     if short in ("use_accounts", "use_outlook"):
         return True, True  # emails and invitations are other people's writing, and the owner's own business
     if short == "connector" or (tool.startswith("mcp__") and not tool.startswith("mcp__jarvis__")):

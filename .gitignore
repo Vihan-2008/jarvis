@@ -10,3 +10,6 @@ dist/
 .python
 .deployed.json
 .start.lnk
+
+# The owner's private trading app, linked beside JARVIS: never tracked, never published.
+/trading

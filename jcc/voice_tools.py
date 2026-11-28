@@ -109,6 +109,12 @@ TOOLS = [
            "visible": {"type": "boolean"}, "summary": {"type": "string", "description": "one line: what the change does"}}, ["site", "kind", "summary"]),
     _tool("site_publish", "Publish a change to the user's website that they have seen in its preview, only when they say to publish it.",
           {"change": {"type": "string", "description": "the change's id from site_change"}}, ["change"]),
+    _tool("trading_status", "How the user's paper-trading app is doing: profit and loss overall and per market (crypto, US stocks, "
+          "India), whether its services are running, whether the kill switch or a pause is on, its latest decisions, and the "
+          "user's monthly goal. Read only: nothing can be bought, sold or changed through JARVIS."),
+    _tool("app_help", "How to set up or use any part of JARVIS (a feature, plugin, skill, connection, AI key, the phone app), and where "
+          "the user's data goes when it leaves this computer: which company, what is sent, when, and how to switch it off. Answer such "
+          "questions from this, never from memory; if it has nothing, say so.", {"question": _S}, ["question"]),
     _tool("make_image", "Create a picture from a description and show it in the chat.", {"description": _S}, ["description"]),
     _tool("set_timer", "Start a countdown timer, e.g. duration '10 minutes'. JARVIS announces it when it ends.", {"duration": _S, "label": _S}, ["duration"]),
     _tool("set_reminder", "Remind the user of something later. when is like 'in 2 hours', 'at 5pm' or 'tomorrow at 9 am'.", {"text": _S, "when": _S}, ["text", "when"]),
@@ -167,7 +173,9 @@ BRIEF = {"find_files": "find_files(name): find files on this PC by part of their
          "site_read": "site_read(site, kind: post|page|product, item?): a connected website's latest posts, pages or products, or one in full",
          "site_change": "site_change(site, kind, summary, item?, title?, content?, price?, visible?): a new or changed post, page or product on a "
          "connected website, made into a preview on this computer for the user to publish (never live by itself)",
-         "site_publish": "site_publish(change): publish a previewed website change, only when the user says to"}
+         "site_publish": "site_publish(change): publish a previewed website change, only when the user says to",
+         "trading_status": "trading_status(): the user's paper-trading app: P&L per market, services, kill switch, goal (read only)",
+         "app_help": "app_help(question): how to set up or use any JARVIS feature, plugin, skill or connection, and where the user's data goes"}
 
 
 # Working inside other apps' windows: Windows UI Automation and synthetic input on Windows (jcc/winctl.py, jcc/uia.py), the
@@ -1335,6 +1343,20 @@ class Toolbox:
         if got.get("error"):
             raise Refused(got["error"])
         return "Published on " + str(got.get("site_name") or "the site") + (": " + got["url"] if got.get("url") else ".")
+
+    # -- the owner's paper-trading app (jcc/trading.py): looked at, never touched
+    def trading_status(self) -> str:
+        got = self._do("trading_status", {})
+        if got.get("error"):
+            raise Refused(str(got["error"]))
+        return str(got.get("text") or "") or "The trading app sent nothing back."
+
+    # -- help with JARVIS itself (jcc/app_help.py): the guides and the map of where data goes
+    def app_help(self, question: str) -> str:
+        got = self._do("app_help", {"question": " ".join(str(question or "").split())[:500]})
+        if got.get("error"):
+            raise Refused(str(got["error"]))
+        return str(got.get("text") or "") or "The guide has nothing on that."
 
     def send_email(self, to: str, subject: str, body: str, using: str = "") -> str:
         from jcc import mailer

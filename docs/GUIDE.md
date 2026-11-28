@@ -100,6 +100,38 @@ agents instead, as before.
 - **Pictures**: made with the free Pollinations service; the description is sent to it.
 - **Your own connectors**: put MCP servers in `%LOCALAPPDATA%\JarvisCommand\connectors.json`
   (`{"mcpServers": {...}}`). Their tools go through the same approval rules.
+- **Your paper-trading app** (`/trading`, `jcc/trading.py`): if you run a paper-trading app with
+  a JARVIS status feed on a server of your own (the open-source one is at
+  https://github.com/Vihan-2008/trading-ai: paper money only, and its README says how to run it
+  on your own computer or server), connect it with its dashboard address and a
+  read-only token made on that server (`trading-ai jarvis-token new`), never the dashboard's
+  password. The token is kept in the system's key store. JARVIS then shows, and says when you
+  ask ("how is my trading doing?"), the result overall and per market (crypto, US stocks,
+  India), whether its services are running, whether the kill switch or a pause is on, and the
+  latest decisions. It is read only by how it is built: one GET to one fixed address, over
+  https, never following a redirect, and only numbers, ids and codes are passed on to the
+  assistant. **Open dashboard** opens the app's own dashboard in the browser panel, where you
+  sign in yourself to change anything. **Set goal** keeps a monthly goal on this PC (what the
+  trading should pay for, with prices) and shows how the month is going against it; the goal
+  never changes how the app trades, and paper money pays for nothing. When the server shares its
+  real-money status, the panel's **Real money** section shows the same **Set up** checklist as the
+  trading dashboard's Real money page (install, start, choose what to copy, a sell code per
+  portfolio), ticking each step off by itself. The commands to type on the trading server are on
+  the dashboard's page, not in JARVIS: JARVIS never holds or runs them.
+- **Phone app** (`/phone`, `jcc/phone.py`): chat with JARVIS from your phone, from anywhere, on
+  mobile data too. It runs in two free accounts of your own, never the JARVIS project's: a relay in
+  your own Supabase project, where messages stay for up to 7 days, and the phone page on your own
+  Cloudflare account. Type `/phone`, paste a Supabase access token and a Cloudflare API token made
+  from the "Edit Cloudflare Workers" template, and JARVIS sets up both; a token that can do more
+  than that is flagged before it is kept. Then add a phone: open the page on it, add it to the home
+  screen, type the pairing code, and say yes on the computer. Each message is signed with a key
+  that never leaves that phone, and the computer checks the signature before acting. Phone
+  messages run in one careful "Phone" chat that asks before anything is done, never reads private
+  notes or other chats, and never looks at the screen, clicks, types or uses the clipboard;
+  commands, coding agents, spending and deleting are approved only at the computer. Optional
+  laptop-off answers: switch on one of your own AI keys and a smaller assistant answers while the
+  computer is off (that service then reads those messages). Notifications only say that there is
+  something new. **Remove everything** deletes what the relay holds, the page and every pairing.
 - **Light mode**: fewer particles, a frame cap, one AI session and no spare. It switches on by
   itself on PCs with about 8 GB of memory or no graphics card.
 

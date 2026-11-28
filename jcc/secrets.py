@@ -24,7 +24,9 @@ from jcc.redact import register_secret
 ENV_NAMES = {"gemini": "JCC_GEMINI_API_KEY", "groq": "JCC_GROQ_API_KEY", "bot": "JCC_BOT_PASSWORD",
              "supabase-sync": "JCC_SUPABASE_SYNC_KEY", "supabase-query": "JCC_SUPABASE_QUERY_KEY",
              "elevenlabs": "JCC_ELEVENLABS_API_KEY", "openai": "JCC_OPENAI_API_KEY",
-             "mail": "JCC_MAIL_PASSWORD", "composio": "JCC_COMPOSIO_API_KEY"}
+             "mail": "JCC_MAIL_PASSWORD", "composio": "JCC_COMPOSIO_API_KEY",
+             # the phone app (jcc/phone.py, jcc/phone_setup.py): this computer's secret for its relay, and a Workers-only Cloudflare token
+             "phone-device": "JCC_PHONE_DEVICE", "phone-cloudflare": "JCC_PHONE_CLOUDFLARE"}
 # Keys for other AI services the owner connects (jcc/providers.py).
 ENV_NAMES.update({"ai-" + name: "JCC_AI_" + name.upper() + "_KEY" for name in (
     "xai", "perplexity", "deepseek", "mistral", "openrouter", "together", "cerebras", "fireworks", "moonshot", "cohere", "custom")})

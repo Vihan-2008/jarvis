@@ -4,6 +4,7 @@
 'use strict';
 const body = document.body, root = document.documentElement;
 const P = {
+  phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
   side: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/>', plus: '<path d="M12 5v14M5 12h14"/>',
   chat: '<path d="M20.5 11.5a8 8 0 0 1-11.7 7.1L4 20l1.3-4.4A8 8 0 1 1 20.5 11.5z"/>',
   layers: '<path d="m12 3 9 5-9 5-9-5 9-5z"/><path d="m3 13 9 5 9-5"/>',
@@ -218,10 +219,10 @@ function dialog(html, cls = '') {
   const d = el('dialog', { class: 'nv-dialog ' + cls }, html);
   d.addEventListener('close', () => d.remove()); body.append(d); d.showModal(); return d;
 }
-function confirmBox({ title, text, ok = 'OK', danger = false }) {
+function confirmBox({ title, text, ok = 'OK', cancel = 'Cancel', danger = false }) {
   return new Promise(resolve => {
-    const d = dialog('<h2>' + esc(title) + '</h2><p>' + esc(text) + '</p><div class="actions"><button class="plain" value="no">Cancel</button><button class="primary" value="yes">' + esc(ok) + '</button></div>');
-    if (danger) d.querySelector('.primary').style.cssText = 'background:var(--bad);color:#fff';
+    const d = dialog('<h2>' + esc(title) + '</h2><p>' + esc(text) + '</p><div class="actions"><button class="plain" value="no">' + esc(cancel) + '</button><button class="primary" value="yes">' + esc(ok) + '</button></div>');
+    if (danger) d.querySelector('.primary').classList.add('nv-danger-btn');
     d.querySelectorAll('button').forEach(b => b.onclick = () => { resolve(b.value === 'yes'); d.close(); });
     d.addEventListener('cancel', () => resolve(false));
   });
@@ -1227,7 +1228,7 @@ function drawSlash() {
   list.querySelector('.on')?.scrollIntoView?.({ block: 'nearest' });
 }
 const AT_ONCE = new Set(['activity', 'efficiency', 'tasks', 'recall', 'shared', 'control', 'folder', 'chat', 'code', 'ultracode', 'new', 'usage', 'mods', 'help', 'compact', 'work', 'mode', 'status', 'projects', 'undo', 'stop', 'settings', 'files', 'terminal', 'browser',
-  'artifacts', 'agents', 'pair', 'court', 'security', 'routines', 'voice', 'connections', 'models', 'updates', 'setup', 'advisor', 'sites', 'connectors']);      // nothing follows these: chosen, they are done
+  'artifacts', 'agents', 'pair', 'court', 'security', 'routines', 'voice', 'connections', 'models', 'updates', 'setup', 'advisor', 'sites', 'connectors', 'trading', 'phone']);      // nothing follows these: chosen, they are done
 function takeSlash(c) {
   slash.classList.add('hidden');
   if (c.own && AT_ONCE.has(c.name)) { message.value = '/' + c.name; grow(); form.requestSubmit(); return; }
@@ -1338,6 +1339,8 @@ async function runCommand(name, words) {
     if (name === 'advisor') return void advisorCommand(String(words || '').trim().toLowerCase());
     if (name === 'sites') return void window.Nova.sitesCommand?.();
     if (name === 'connectors') return void window.Nova.connectorsCommand?.();
+    if (name === 'trading') return void window.Nova.tradingCommand?.(words);
+    if (name === 'phone') return void window.Nova.phoneCommand?.();
     if (name === 'folder') { const key = chat?.project || selectedProject; return void (key ? revealProject(key) : localReply('Open file location', '<p>Choose a project first: /projects.</p>')); }
     if (name === 'settings') return void window.Nova.voiceSettings?.(words || undefined);
     if (['voice', 'connections', 'models', 'updates'].includes(name)) return void window.Nova.voiceSettings?.(name === 'connections' ? 'connections' : name);
@@ -1371,7 +1374,7 @@ document.addEventListener('click', e => {
   else if (b.dataset.useProject) { setWorkMode('code', true); selectProject(b.dataset.useProject); projectChip(); b.closest('.nv-local')?.remove(); message.focus(); }
 });
 // JARVIS's own commands are done by the window. True: it was one of them, and it is done.
-const IN_CHAT = new Set(['setup', 'advisor', 'sites', 'connectors', 'activity', 'efficiency', 'tasks', 'recall', 'shared', 'control', 'folder', 'work', 'mode', 'permissions', 'status', 'projects', 'undo', 'stop', 'settings', 'voice', 'connections', 'models', 'updates', 'artifacts', 'files', 'terminal', 'browser', 'agents', 'pair', 'court', 'security', 'routines']);
+const IN_CHAT = new Set(['setup', 'advisor', 'sites', 'connectors', 'trading', 'phone', 'activity', 'efficiency', 'tasks', 'recall', 'shared', 'control', 'folder', 'work', 'mode', 'permissions', 'status', 'projects', 'undo', 'stop', 'settings', 'voice', 'connections', 'models', 'updates', 'artifacts', 'files', 'terminal', 'browser', 'agents', 'pair', 'court', 'security', 'routines']);
 function runBuiltin(name, words = '') {
   if (IN_CHAT.has(name)) { runCommand(name, words); return true; }
   if (name === 'chat' || name === 'code') setWorkMode(name, true);

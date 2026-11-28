@@ -60,6 +60,9 @@ Your notes are kept unless you choose to delete them.
   computer (a preview at `127.0.0.1`, beside what is on the site now) and goes online only when you press Publish.
   JARVIS reaches only the sites you connected. What each platform's API allows: WordPress posts and pages, Shopify
   products and pages, new Wix blog posts, and Squarespace products.
+- **Your paper-trading app.** `/trading` shows how a paper-trading app on your own server is doing, per market,
+  and says it aloud when you ask. Read only, with a token that can do nothing else; changes are made in the app's
+  own dashboard, which it opens for you. A monthly goal of your own is shown beside it.
 - **Security check.** Finds the usual holes in a project, has the ones you tick fixed in a copy, shows you the
   change, applies it, and can undo it.
 - **Routines.** Things done again and again at the times you choose, each run sent as if you had typed it.

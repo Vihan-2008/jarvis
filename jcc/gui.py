@@ -46,11 +46,11 @@ STATIC = Path(__file__).with_name("static") / "desktop.html"
 MAX_TEXT = 400_000              # (what is typed has no practical limit: a long paste, a whole spec)
 SCRIPTS = ("/workbench.js", "/assistant.js", "/horizon.js", "/horizon.css", "/delivery.js", "/reliability.js", "/operations.js", "/operations.css",
            "/everyday.js", "/everyday.css", "/nova.css", "/nova.js", "/nova-core.js", "/nova-rich.js", "/nova-panels.js", "/nova-voice.js",
-           "/nova-audio.js", "/nova-mic.js", "/nova-work.js", "/nova-security.js", "/nova-permissions.js", "/nova-routines.js", "/nova-kinds.js", "/nova-gallery.js", "/nova-start.js", "/nova-sites.js", "/nova-connectors.js", "/vendor/xterm.js", "/vendor/xterm.css", "/vendor/addon-fit.js")
+           "/nova-audio.js", "/nova-mic.js", "/nova-work.js", "/nova-security.js", "/nova-permissions.js", "/nova-routines.js", "/nova-kinds.js", "/nova-gallery.js", "/nova-start.js", "/nova-sites.js", "/nova-connectors.js", "/nova-trading.js", "/nova-phone.js", "/vendor/xterm.js", "/vendor/xterm.css", "/vendor/addon-fit.js")
 # Tools the JARVIS app itself carries out for the assistant, each only with a one-time permit from the gate.
 APP_TOOLS = frozenset({"open_app", "list_projects", "create_project", "build_with_coding_agents", "make_image", "set_timer", "set_reminder",
                        "list_reminders", "cancel_reminder", "remember", "forget", "add_note", "send_email", "use_accounts", "use_outlook",
-                       "list_sites", "site_read", "site_change", "site_publish"})
+                       "list_sites", "site_read", "site_change", "site_publish", "trading_status", "app_help"})
 # A page JARVIS shows (something a reply made, a file of a project, a pinned panel) runs in a sealed frame at an address of
 # its own: it cannot reach JARVIS, the conversation or the files on this PC. Sealed, it cannot reach the internet either: no
 # pictures or data from anywhere, code and styles only from the well-known libraries, no form sent off, no window opened.
@@ -121,6 +121,11 @@ class GuiState:
         self.web = WebView(cfg)
         from jcc.assistant import Assistant
         self.assistant = Assistant(cfg)
+        try:
+            from jcc import phone
+            phone.start(cfg, self.assistant)      # only when the phone app is set up and switched on
+        except Exception as problem:  # noqa: BLE001 - the app opens whether or not the phone side can start
+            self.add_log("Phone app: " + str(problem)[:120])
         from jcc.computer import Computer
         self.computer = Computer(cfg, self.engine_kw.get('transport'))
 
@@ -513,6 +518,16 @@ class GuiState:
                 helper.emit("site", change=done)
                 return {"site_name": done.get("site_name"), "url": (done.get("result") or {}).get("url", "")}
             except sites.SiteError as problem:
+                return {"error": str(problem)}
+        if tool == "app_help":         # the guides and the data map (jcc/app_help.py): read only
+            from jcc import app_help
+            return {"text": app_help.answer(cfg, str(args.get("question", "")))}
+        if tool == "trading_status":   # the owner's paper-trading app, looked at and never touched (jcc/trading.py)
+            from jcc import trading
+            try:
+                state = trading.fetch(cfg)
+                return {"text": trading.for_assistant(state, trading.progress(cfg, state))}
+            except trading.TradingError as problem:
                 return {"error": str(problem)}
         if tool == "open_app":
             name = " ".join(str(args.get("name", "")).lower().split())
@@ -1082,7 +1097,9 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
             elif url.path == "/api/chat":
                 try:
                     cid = (parse_qs(url.query).get("id") or [""])[0]
-                    self._json(HTTPStatus.OK, Chats(state.cfg).get(cid))
+                    from jcc import phone
+                    got = Chats(state.cfg).get(cid)
+                    self._json(HTTPStatus.OK, {**got, "phone": phone.is_phone_chat(state.cfg, cid)})   # (the window says it is shared with the phone)
                 except ValueError as e:
                     self._json(HTTPStatus.BAD_REQUEST, {"error": str(e)})
             elif url.path == "/api/sync/pairing":
@@ -1240,7 +1257,7 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                 system.open_path(Path(__file__).resolve().parents[1] / "browser-sync")
                 self._json(HTTPStatus.OK, {"opened": True})
                 return
-            if self.path not in ("/api/connectors", "/api/sites", "/api/uninstall", "/api/accounts", "/api/project/remove", "/api/reveal", "/api/updates", "/api/ask", "/api/mods", "/api/chats", "/api/chat/send", "/api/chat/update", "/api/projects", "/api/terminal", "/api/browser/open", "/api/routing", "/api/prompt-master", "/api/cloud", "/api/efficiency", "/api/job/control", '/api/assistant/settings','/api/feedback','/api/project/browse','/api/project/inspect','/api/project/connect','/api/job/review','/api/maintenance','/api/ui/activity','/api/context/inspect','/api/memory/resolve','/api/delivery/settings','/api/delivery/plan','/api/task-queue','/api/project/preferences','/api/dry-run','/api/evaluations','/api/handoff','/api/library','/api/provenance','/api/controls','/api/restorepoints','/api/diagnostics/export','/api/attachments/extract','/api/memory/search','/api/files/save','/api/pty','/api/web','/api/computer','/api/voice','/api/speech','/api/speech/tts','/api/mail','/api/assistants','/api/preview','/api/screenshot','/api/connections','/api/window','/api/providers','/api/usage','/api/skills','/api/pairs','/api/court','/api/agents','/api/artifacts','/api/security','/api/permissions','/api/routines'):
+            if self.path not in ("/api/connectors", "/api/sites", "/api/trading", "/api/phone", "/api/uninstall", "/api/accounts", "/api/project/remove", "/api/reveal", "/api/updates", "/api/ask", "/api/mods", "/api/chats", "/api/chat/send", "/api/chat/update", "/api/projects", "/api/terminal", "/api/browser/open", "/api/routing", "/api/prompt-master", "/api/cloud", "/api/efficiency", "/api/job/control", '/api/assistant/settings','/api/feedback','/api/project/browse','/api/project/inspect','/api/project/connect','/api/job/review','/api/maintenance','/api/ui/activity','/api/context/inspect','/api/memory/resolve','/api/delivery/settings','/api/delivery/plan','/api/task-queue','/api/project/preferences','/api/dry-run','/api/evaluations','/api/handoff','/api/library','/api/provenance','/api/controls','/api/restorepoints','/api/diagnostics/export','/api/attachments/extract','/api/memory/search','/api/files/save','/api/pty','/api/web','/api/computer','/api/voice','/api/speech','/api/speech/tts','/api/mail','/api/assistants','/api/preview','/api/screenshot','/api/connections','/api/window','/api/providers','/api/usage','/api/skills','/api/pairs','/api/court','/api/agents','/api/artifacts','/api/security','/api/permissions','/api/routines'):
                 self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
             if not self.headers.get("Content-Type", "").startswith("application/json"):
@@ -1526,6 +1543,12 @@ def make_handler(state: GuiState, port: int) -> type[BaseHTTPRequestHandler]:
                     self._json(HTTPStatus.OK, {**got, 'sites': sites.listing(state.cfg), 'pending': sites.pending(state.cfg),
                                                'platforms': {k: {'label': v['label'], 'key': v['key'], 'how': v['how'], 'needs': list(v['needs']), 'kinds': list(v['kinds'])}
                                                              for k, v in sites.PLATFORMS.items()}});return
+                if self.path == '/api/phone':                 # /phone: the phone app in the owner's own accounts (jcc/phone_setup.py)
+                    from jcc import phone_setup
+                    self._json(HTTPStatus.OK, phone_setup.window(state.cfg, state.assistant, body));return
+                if self.path == '/api/trading':               # /trading: the owner's paper-trading app, read only (jcc/trading.py)
+                    from jcc import trading
+                    self._json(HTTPStatus.OK, trading.window(state.cfg, body));return
                 if self.path == '/api/uninstall':             # Settings > Advanced > Uninstall JARVIS: what it would do, and doing it
                     from jcc import uninstall
                     if body.get('action') == 'start':

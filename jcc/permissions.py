@@ -102,8 +102,11 @@ def state(cfg, assistant, turns=()) -> dict:
     pending = []
     with assistant.lock:
         asked = sorted(assistant.pending.values(), key=lambda entry: entry["asked"])
+        from jcc import phone
         for entry in asked:
+            on_phone = phone.is_phone_chat(cfg, entry.get("chat"))
             pending.append({"kind": "assistant", "id": entry["id"], "question": entry["question"], "detail": entry["detail"], "chat": entry.get("chat") or "",
+                            "phone": ("" if not on_phone else "also" if entry.get("phone_ok", True) else "here"),
                             "why": {"send": "It reaches other people or cannot be undone.", "risky": "It changes something on this PC.",
                                     "careful": "This chat has read something from outside, so JARVIS is being careful.", "all": "You chose Manual: JARVIS asks before every change."}
                             .get(str(entry.get("kind")), "")})

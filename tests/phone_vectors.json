@@ -1,0 +1,42 @@
+{
+ "seed_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+ "public_key": "ebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=",
+ "cases": [
+  {
+   "kind": "request",
+   "text": "jarvis-phone-request\nsend\nphone0001aa\n1800000000000\n4ddcdf9677d8f619037f6ce7a8b37290af58d50787e67f6809541a0296bb74d0",
+   "sig": "Lhm/LrFfMSJyzHLgwXTUe8HlN+n0hjMEhbPzawXxFycZ1YsBcF2QfLWc9gpTZkM9cRKIwH+0NE1XT8p1Ut1gBw==",
+   "body_b64": "eyJtc2dfaWQiOiJhYmNkZWZnaDEyIiwidGV4dCI6ImjDqWxsbyJ9"
+  },
+  {
+   "kind": "message",
+   "text": "jarvis-phone-message\nphone0001aa\nmsg00000001\n1800000000000\n5c13a19dc7255a10c3b432c4e4191c619153f7fef80e0ea722fbcad9911d1f9d\n",
+   "sig": "3PiEx/2MwbrBBwdmj9IN+dnI9Jby0yhEkSmIVHfFMsOZQIHrZAZ0VrXHNKBVQvT0KEUGVq3Iz/fMXqs2a8MkBw=="
+  },
+  {
+   "kind": "message",
+   "text": "jarvis-phone-message\nphone0001aa\nmsg00000002\n1800000000001\n65bd563818ff9850238742f7d8061b7426eccdccf8468460f7c76757cc5aa8d5\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "sig": "VKwXZbilsDzVlU2ChIR5/cMUwvF7Gsusa2LxPbqP1LQ3gui5cAUax5rofb2YMlJ7PzqRsoJpyI16JTG8KGkyAQ==",
+   "message_text": "Café ✓ — नमस्ते"
+  },
+  {
+   "kind": "answer",
+   "text": "jarvis-phone-answer\nask0000001\nabababababababababababababababab\ncfd82b61606b41a698dbf44329f3b03acbc43e95ec12db8062cde9195d2da305\nyes",
+   "sig": "Pf7sv2pMApLoALGkj8Te7jR9AvxiwrJ8pPJJ2DjDF2p0Or3DMnt2Hrd9qicpkpPSWqt1aLIiagO0Bkm8ZjG2AA=="
+  },
+  {
+   "kind": "answer",
+   "text": "jarvis-phone-answer\nask0000002\ncdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\nb9671b0bbcff93dfd109952620e653358a1a79827237871441d95af50d193609\nno",
+   "sig": "Nws9JEKMxoWBLlqkZLTgWl4T8NUf3jWrFmVqNLlPuGGvH6xIiiXYaHJzbuOjREDlR3HW+EprnhdVxcWrsjpiDg=="
+  }
+ ],
+ "pair": {
+  "code": "k7qm-2xhd",
+  "normal": "K7QM2XHD",
+  "pair_id": "pairid00000001",
+  "public_key": "ebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=",
+  "name": "iPhone, Safari",
+  "key_hex": "9e1319305ee4b743845287819b0a70d2e5dfe39dd5a3db107a354348168eb843",
+  "tag": "4e75245714d212aeac1bf107ca97552bc318d10da435ef60d31c34abb35caf44"
+ }
+}
